@@ -58,11 +58,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact: agentic-cyber-cli-linux-x86_64.tar.gz
+            artifact: wraithrun-linux-x86_64.tar.gz
           - os: macos-latest
-            artifact: agentic-cyber-cli-macos-x86_64.tar.gz
+            artifact: wraithrun-macos-x86_64.tar.gz
           - os: windows-latest
-            artifact: agentic-cyber-cli-windows-x86_64.zip
+            artifact: wraithrun-windows-x86_64.zip
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,26 +74,26 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build release binary
-        run: cargo build -p agentic-cyber-cli --release
+        run: cargo build -p wraithrun --release
 
       - name: Package Linux artifact
         if: runner.os == 'Linux'
         run: |
-          cp target/release/agentic-cyber-cli agentic-cyber-cli
-          tar -czf ${{ matrix.artifact }} agentic-cyber-cli
+          cp target/release/wraithrun wraithrun
+          tar -czf ${{ matrix.artifact }} wraithrun
 
       - name: Package macOS artifact
         if: runner.os == 'macOS'
         run: |
-          cp target/release/agentic-cyber-cli agentic-cyber-cli
-          tar -czf ${{ matrix.artifact }} agentic-cyber-cli
+          cp target/release/wraithrun wraithrun
+          tar -czf ${{ matrix.artifact }} wraithrun
 
       - name: Package Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Copy-Item target/release/agentic-cyber-cli.exe agentic-cyber-cli.exe
-          Compress-Archive -Path agentic-cyber-cli.exe -DestinationPath ${{ matrix.artifact }}
+          Copy-Item target/release/wraithrun.exe wraithrun.exe
+          Compress-Archive -Path wraithrun.exe -DestinationPath ${{ matrix.artifact }}
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4

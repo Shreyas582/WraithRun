@@ -9,8 +9,8 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "agentic-cyber-runtime",
-    about = "Local-first agentic cyber operations runtime"
+    name = "wraithrun",
+    about = "Local-first cyber investigation runtime"
 )]
 struct Cli {
     #[arg(long)]

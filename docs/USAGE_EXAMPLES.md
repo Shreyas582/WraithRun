@@ -7,19 +7,19 @@ This page provides practical, copy-paste examples for running WraithRun yourself
 Windows binary:
 
 ```powershell
-.\agentic-cyber-cli.exe --task "Investigate unauthorized SSH keys"
+.\wraithrun.exe --task "Investigate unauthorized SSH keys"
 ```
 
 From source:
 
 ```powershell
-cargo run -p agentic-cyber-cli -- --task "Investigate unauthorized SSH keys"
+cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys"
 ```
 
 Linux/macOS binary:
 
 ```bash
-./agentic-cyber-cli --task "Investigate unauthorized SSH keys"
+./wraithrun --task "Investigate unauthorized SSH keys"
 ```
 
 ## Save Results to a File
@@ -27,13 +27,13 @@ Linux/macOS binary:
 PowerShell:
 
 ```powershell
-.\agentic-cyber-cli.exe --task "Check suspicious listener ports" | Out-File -Encoding utf8 report.json
+.\wraithrun.exe --task "Check suspicious listener ports" | Out-File -Encoding utf8 report.json
 ```
 
 Bash:
 
 ```bash
-./agentic-cyber-cli --task "Check suspicious listener ports" > report.json
+./wraithrun --task "Check suspicious listener ports" > report.json
 ```
 
 ## Pretty-Print or Parse JSON Output
@@ -67,7 +67,7 @@ cargo check -p inference_bridge --features vitis
 Run with live model:
 
 ```powershell
-cargo run -p agentic-cyber-cli --features inference_bridge/vitis -- --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
+cargo run -p wraithrun --features inference_bridge/vitis -- --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
 ```
 
 Optional Vitis config knobs:

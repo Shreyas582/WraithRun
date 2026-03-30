@@ -10,21 +10,21 @@ WraithRun is a Rust CLI for host-focused security triage. It runs an agent loop 
 
 1. Go to [Releases](https://github.com/Shreyas582/WraithRun/releases).
 2. Download the asset for your OS:
-    - `agentic-cyber-cli-windows-x86_64.zip`
-    - `agentic-cyber-cli-linux-x86_64.tar.gz`
-    - `agentic-cyber-cli-macos-x86_64.tar.gz`
+    - `wraithrun-windows-x86_64.zip`
+    - `wraithrun-linux-x86_64.tar.gz`
+    - `wraithrun-macos-x86_64.tar.gz`
 3. Extract and run a task (dry-run mode, no model required).
 
 Windows:
 
 ```powershell
-.\agentic-cyber-cli.exe --task "Investigate unauthorized SSH keys"
+.\wraithrun.exe --task "Investigate unauthorized SSH keys"
 ```
 
 Linux/macOS:
 
 ```bash
-./agentic-cyber-cli --task "Investigate unauthorized SSH keys"
+./wraithrun --task "Investigate unauthorized SSH keys"
 ```
 
 ### Option B: Run from source
@@ -34,7 +34,7 @@ Prerequisite: Rust stable toolchain.
 ```powershell
 git clone https://github.com/Shreyas582/WraithRun.git
 cd WraithRun
-cargo run -p agentic-cyber-cli -- --task "Investigate unauthorized SSH keys"
+cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys"
 ```
 
 Need copy-paste scenarios for common investigations? See [docs/USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md).
@@ -82,7 +82,7 @@ cargo check -p inference_bridge --features vitis
 Run live mode:
 
 ```powershell
-cargo run -p agentic-cyber-cli --features inference_bridge/vitis -- --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
+cargo run -p wraithrun --features inference_bridge/vitis -- --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
 ```
 
 Optional Vitis tuning flags:
@@ -96,7 +96,7 @@ Optional Vitis tuning flags:
 Run help:
 
 ```powershell
-cargo run -p agentic-cyber-cli -- --help
+cargo run -p wraithrun -- --help
 ```
 
 Common options:

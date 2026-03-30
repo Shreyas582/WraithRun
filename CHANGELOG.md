@@ -14,6 +14,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - README rewritten with user-first onboarding, binary usage, and practical CLI guidance.
 - CI/CD and release docs updated for annotated tag flow and latest workflow behavior.
+- CLI package and executable name changed from `agentic-cyber-cli` to `wraithrun`.
 
 ### Fixed
 
