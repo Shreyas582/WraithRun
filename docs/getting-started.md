@@ -101,3 +101,9 @@ Preview effective config:
 ```powershell
 cargo run -p wraithrun -- --print-effective-config --profile local-lab
 ```
+
+Generate starter config:
+
+```powershell
+cargo run -p wraithrun -- --init-config
+```

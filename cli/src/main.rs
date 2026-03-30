@@ -17,6 +17,7 @@ const DEFAULT_MODEL_PATH: &str = "./models/llm.onnx";
 const DEFAULT_MAX_STEPS: usize = 8;
 const DEFAULT_MAX_NEW_TOKENS: usize = 256;
 const DEFAULT_TEMPERATURE: f32 = 0.2;
+const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../../wraithrun.example.toml");
 
 #[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -39,7 +40,7 @@ enum LogMode {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["doctor", "list_profiles", "print_effective_config"])]
+    #[arg(long, required_unless_present_any = ["doctor", "list_profiles", "print_effective_config", "init_config"])]
     task: Option<String>,
 
     #[arg(long)]
@@ -50,6 +51,15 @@ struct Cli {
 
     #[arg(long)]
     print_effective_config: bool,
+
+    #[arg(long)]
+    init_config: bool,
+
+    #[arg(long, requires = "init_config")]
+    init_config_path: Option<PathBuf>,
+
+    #[arg(long, requires = "init_config")]
+    force: bool,
 
     #[arg(long)]
     config: Option<PathBuf>,
@@ -275,6 +285,12 @@ impl DoctorReport {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     ensure_exclusive_modes(&cli)?;
+
+    if cli.init_config {
+        let message = run_init_config(&cli)?;
+        println!("{message}");
+        return Ok(());
+    }
 
     if cli.list_profiles {
         let listing = run_list_profiles(&cli)?;
@@ -703,6 +719,9 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     if cli.print_effective_config {
         selected.push("--print-effective-config");
     }
+    if cli.init_config {
+        selected.push("--init-config");
+    }
 
     if selected.len() > 1 {
         bail!(
@@ -712,6 +731,40 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn run_init_config(cli: &Cli) -> Result<String> {
+    let target_path = resolve_init_config_path(cli);
+
+    if target_path.exists() && !cli.force {
+        bail!(
+            "Config file already exists at '{}'. Use --force to overwrite.",
+            target_path.display()
+        );
+    }
+
+    if let Some(parent) = target_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed creating directory {}", parent.display()))?;
+        }
+    }
+
+    fs::write(&target_path, DEFAULT_CONFIG_TEMPLATE.as_bytes())
+        .with_context(|| format!("Failed writing config file {}", target_path.display()))?;
+
+    Ok(format!(
+        "Wrote starter config to {}\nNext: run 'wraithrun --list-profiles --config {}' or 'wraithrun --print-effective-config --config {}'.",
+        target_path.display(),
+        target_path.display(),
+        target_path.display()
+    ))
+}
+
+fn resolve_init_config_path(cli: &Cli) -> PathBuf {
+    cli.init_config_path
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_FILE))
 }
 
 fn run_list_profiles(cli: &Cli) -> Result<String> {
@@ -1268,6 +1321,8 @@ fn init_tracing(log_mode: LogMode) {
 mod tests {
     use std::collections::HashMap;
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{env, fs};
 
     use serde_json::json;
 
@@ -1275,7 +1330,8 @@ mod tests {
 
     use super::{
         merge_sources, render_doctor_report, render_effective_config_json, render_profile_list,
-        render_report, Cli, DoctorReport, DoctorStatus, FileConfig, OutputFormat, SettingsFragment,
+        render_report, resolve_init_config_path, run_init_config, Cli, DoctorReport, DoctorStatus,
+        FileConfig, OutputFormat, SettingsFragment,
     };
 
     fn base_cli() -> Cli {
@@ -1284,6 +1340,9 @@ mod tests {
             doctor: false,
             list_profiles: false,
             print_effective_config: false,
+            init_config: false,
+            init_config_path: None,
+            force: false,
             config: None,
             profile: None,
             model: None,
@@ -1479,5 +1538,60 @@ mod tests {
         assert!(rendered.contains("\"mode\": \"dry-run\""));
         assert!(rendered.contains("\"max_steps\": 8"));
         assert!(rendered.contains("\"model\""));
+    }
+
+    #[test]
+    fn resolves_init_config_path() {
+        let mut cli = base_cli();
+        cli.init_config = true;
+        cli.init_config_path = Some(Path::new("./custom.toml").to_path_buf());
+
+        let path = resolve_init_config_path(&cli);
+        assert!(path.ends_with("custom.toml"));
+    }
+
+    #[test]
+    fn init_config_writes_file() {
+        let mut cli = base_cli();
+        cli.init_config = true;
+        cli.task = None;
+        let path = unique_temp_file("wraithrun-init-write");
+        cli.init_config_path = Some(path.clone());
+
+        let result = run_init_config(&cli).expect("init-config should write file");
+
+        let content = fs::read_to_string(&path).expect("written file should be readable");
+        assert!(result.contains("Wrote starter config"));
+        assert!(content.contains("[profiles.local-lab]"));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn init_config_requires_force_to_overwrite() {
+        let mut cli = base_cli();
+        cli.init_config = true;
+        cli.task = None;
+        let path = unique_temp_file("wraithrun-init-overwrite");
+        fs::write(&path, "model = 'old'\n").expect("pre-seed should succeed");
+        cli.init_config_path = Some(path.clone());
+
+        let error = run_init_config(&cli).expect_err("overwrite without force should fail");
+        assert!(error.to_string().contains("Use --force to overwrite"));
+
+        cli.force = true;
+        run_init_config(&cli).expect("overwrite with force should succeed");
+        let content = fs::read_to_string(&path).expect("overwritten file should be readable");
+        assert!(content.contains("[profiles.production-triage]"));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    fn unique_temp_file(prefix: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be valid")
+            .as_nanos();
+        env::temp_dir().join(format!("{prefix}-{}-{stamp}.toml", std::process::id()))
     }
 }

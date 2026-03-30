@@ -152,6 +152,26 @@ Preview final merged runtime settings:
 
 Inspect commands are mutually exclusive with `--doctor`.
 
+## Initialize a Config File
+
+Create `./wraithrun.toml`:
+
+```powershell
+.\wraithrun.exe --init-config
+```
+
+Create config in a custom folder:
+
+```powershell
+.\wraithrun.exe --init-config --init-config-path .\configs\team-wraithrun.toml
+```
+
+Overwrite an existing config file:
+
+```powershell
+.\wraithrun.exe --init-config --init-config-path .\configs\team-wraithrun.toml --force
+```
+
 ## Pretty-Print or Parse JSON Output
 
 PowerShell:

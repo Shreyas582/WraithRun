@@ -116,6 +116,9 @@ Common options:
 - `--doctor` run runtime health checks and configuration diagnostics.
 - `--list-profiles` list built-in and config-defined profiles.
 - `--print-effective-config` render the resolved runtime settings as JSON and exit.
+- `--init-config` write a starter TOML config file and exit.
+- `--init-config-path <PATH>` output path used by `--init-config` (default `./wraithrun.toml`).
+- `--force` overwrite an existing file when used with `--init-config`.
 - `--config <CONFIG>` load settings from a TOML file (default auto-load: `./wraithrun.toml` when present).
 - `--profile <PROFILE>` apply a named profile from built-ins or config file.
 - `--live` enables model inference mode (default is dry-run).
@@ -156,6 +159,18 @@ Preview resolved runtime config:
 
 ```powershell
 cargo run -p wraithrun -- --print-effective-config --profile local-lab
+```
+
+Initialize a local config file:
+
+```powershell
+cargo run -p wraithrun -- --init-config
+```
+
+Initialize at a custom path (overwrite if needed):
+
+```powershell
+cargo run -p wraithrun -- --init-config --init-config-path .\configs\team-wraithrun.toml --force
 ```
 
 ## Configuration Files and Profiles

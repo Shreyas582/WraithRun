@@ -18,6 +18,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Doctor diagnostics mode via `--doctor` to validate config/profile/env/runtime readiness.
 - Profile discovery mode via `--list-profiles`.
 - Effective runtime preview mode via `--print-effective-config`.
+- Config bootstrap mode via `--init-config` with `--init-config-path` and `--force` support.
 
 ### Changed
 

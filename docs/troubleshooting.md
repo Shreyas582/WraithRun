@@ -14,6 +14,18 @@ wraithrun --doctor
 
 Doctor validates config parsing, profile resolution, environment variable parsing, and effective runtime settings.
 
+## Need a starter config quickly
+
+Symptom:
+
+- You want to start using profiles/configs but do not have a local TOML file.
+
+Fix:
+
+```powershell
+wraithrun --init-config
+```
+
 ## Vitis inference is disabled
 
 Symptom:

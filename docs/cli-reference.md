@@ -11,6 +11,7 @@ wraithrun [OPTIONS] --task <TASK>
 wraithrun --doctor [OPTIONS]
 wraithrun --list-profiles [OPTIONS]
 wraithrun --print-effective-config [OPTIONS]
+wraithrun --init-config [--init-config-path <PATH>] [--force]
 ```
 
 ## Options
@@ -19,6 +20,9 @@ wraithrun --print-effective-config [OPTIONS]
 - `--doctor`: run configuration/runtime diagnostics and exit.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
+- `--init-config`: write a starter TOML config file and exit.
+- `--init-config-path <INIT_CONFIG_PATH>`: output path for `--init-config`. Default: `./wraithrun.toml`.
+- `--force`: allow overwrite of an existing file when `--init-config` is used.
 - `--config <CONFIG>`: explicit TOML config file path.
 - `--profile <PROFILE>`: named profile from built-ins or config file.
 - `--model <MODEL>`: model path for live mode. Default fallback: `./models/llm.onnx`.
@@ -74,7 +78,9 @@ Behavior:
 
 `--print-effective-config` output includes the final merged runtime settings after applying precedence rules.
 
-These modes are mutually exclusive with `--doctor`.
+`--init-config` output includes the target path and suggested follow-up commands.
+
+These modes are mutually exclusive with each other and with `--doctor`.
 
 ## Built-In Profiles
 
@@ -124,6 +130,18 @@ Print effective config:
 
 ```powershell
 wraithrun --print-effective-config --profile production-triage --config .\wraithrun.example.toml
+```
+
+Initialize config at default path:
+
+```powershell
+wraithrun --init-config
+```
+
+Initialize config at custom path and overwrite existing file:
+
+```powershell
+wraithrun --init-config --init-config-path .\configs\team.toml --force
 ```
 
 Live mode:
