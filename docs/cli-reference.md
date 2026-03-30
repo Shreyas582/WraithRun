@@ -175,6 +175,12 @@ When `--introspection-format json` is used, the output shape is stable per mode.
 - `built-in+config`
 - `missing`
 
+Schema compatibility policy:
+
+- Patch releases (`0.x.Z`) keep existing JSON keys and meanings stable.
+- Minor releases (`0.Y.0`) may add new JSON fields, but existing documented fields are not removed or renamed without an explicit changelog note.
+- Automation should ignore unknown extra fields to remain forward-compatible.
+
 ## Task Templates
 
 Built-in template values for `--task-template`:

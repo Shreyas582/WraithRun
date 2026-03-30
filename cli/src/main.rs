@@ -638,11 +638,9 @@ fn load_task_from_file(path: &Path) -> Result<String> {
         bail!("Task file not found: {}", path.display());
     }
 
-    let mut task_text = String::new();
-    let mut file = fs::File::open(path)
-        .with_context(|| format!("Failed reading task file {}", path.display()))?;
-    file.read_to_string(&mut task_text)
-        .with_context(|| format!("Failed reading task file {}", path.display()))?;
+    let task_bytes =
+        fs::read(path).with_context(|| format!("Failed reading task file {}", path.display()))?;
+    let task_text = decode_task_text(&task_bytes, path)?;
 
     let trimmed = task_text.trim();
     if trimmed.is_empty() {
@@ -650,6 +648,58 @@ fn load_task_from_file(path: &Path) -> Result<String> {
     }
 
     Ok(trimmed.to_string())
+}
+
+fn decode_task_text(bytes: &[u8], path: &Path) -> Result<String> {
+    if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8(rest.to_vec())
+            .with_context(|| format!("Task file '{}' is not valid UTF-8", path.display()));
+    }
+
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return decode_utf16_text(rest, true, path);
+    }
+
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return decode_utf16_text(rest, false, path);
+    }
+
+    String::from_utf8(bytes.to_vec())
+        .with_context(|| format!("Task file '{}' is not valid UTF-8", path.display()))
+}
+
+fn decode_utf16_text(bytes: &[u8], little_endian: bool, path: &Path) -> Result<String> {
+    if bytes.len() % 2 != 0 {
+        bail!(
+            "Task file '{}' has invalid UTF-16 byte length",
+            path.display()
+        );
+    }
+
+    let mut units = Vec::with_capacity(bytes.len() / 2);
+    for chunk in bytes.chunks_exact(2) {
+        let unit = if little_endian {
+            u16::from_le_bytes([chunk[0], chunk[1]])
+        } else {
+            u16::from_be_bytes([chunk[0], chunk[1]])
+        };
+        units.push(unit);
+    }
+
+    let mut text = String::new();
+    for decoded in char::decode_utf16(units.into_iter()) {
+        match decoded {
+            Ok(ch) => text.push(ch),
+            Err(_) => {
+                bail!(
+                    "Task file '{}' contains invalid UTF-16 data",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    Ok(text)
 }
 
 fn load_task_from_stdin() -> Result<String> {
@@ -2353,6 +2403,25 @@ mod tests {
         cli.task_file = Some(path.clone());
 
         let task = resolve_task_for_run(&cli).expect("task file should resolve");
+        assert_eq!(task, "Investigate unauthorized SSH keys");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn resolves_task_from_utf16le_bom_file() {
+        let mut cli = base_cli();
+        cli.task = None;
+        let path = unique_temp_file("wraithrun-task-file-utf16");
+
+        let mut bytes = vec![0xFF, 0xFE];
+        for unit in "Investigate unauthorized SSH keys".encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        fs::write(&path, bytes).expect("utf16 task file fixture should be created");
+
+        cli.task_file = Some(path.clone());
+        let task = resolve_task_for_run(&cli).expect("utf16 task file should resolve");
         assert_eq!(task, "Investigate unauthorized SSH keys");
 
         let _ = fs::remove_file(&path);

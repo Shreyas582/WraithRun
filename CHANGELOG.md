@@ -10,6 +10,8 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - CLI integration tests for stdin-based task input (`--task-stdin` and `--task-file -`).
 - Introspection JSON schema reference in CLI documentation for automation users.
+- Dedicated CI job to run stdin integration tests on Linux and Windows.
+- Release workflow checksum manifest generation (`SHA256SUMS`) for published artifacts.
 
 ### Changed
 
@@ -17,7 +19,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Fixed
 
-- (none yet)
+- UTF-16 BOM encoded task files are now accepted by `--task-file`.
 
 ## 0.3.0 - 2026-03-30
 

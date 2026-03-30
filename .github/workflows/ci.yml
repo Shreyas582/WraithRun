@@ -49,6 +49,31 @@ jobs:
       - name: Validate Vitis feature path
         run: cargo check -p inference_bridge --features vitis
 
+  stdin-integration:
+    name: CLI stdin integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run stdin integration tests
+        run: cargo test -p wraithrun --test stdin_integration
+
   cross-platform:
     name: Cross-platform compile (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
