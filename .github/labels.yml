@@ -1,0 +1,55 @@
+- name: feature
+  description: New user-facing capability or enhancement
+  color: "1D76DB"
+
+- name: fix
+  description: Bug fix for existing behavior
+  color: "D73A4A"
+
+- name: docs
+  description: Documentation-only change
+  color: "0E8A16"
+
+- name: test
+  description: Test-only changes or quality improvements
+  color: "5319E7"
+
+- name: chore
+  description: Maintenance with no behavior change
+  color: "6A737D"
+
+- name: breaking
+  description: Backward-incompatible change
+  color: "B60205"
+
+- name: ci
+  description: Continuous integration or delivery changes
+  color: "FBCA04"
+
+- name: dependencies
+  description: Dependency updates
+  color: "0366D6"
+
+- name: release
+  description: Release planning or publication tasks
+  color: "C2E0C6"
+
+- name: security
+  description: Security-related hardening or fixes
+  color: "E99695"
+
+- name: priority:p0
+  description: Must-fix blocker before release
+  color: "B60205"
+
+- name: priority:p1
+  description: High-priority issue for current milestone
+  color: "D93F0B"
+
+- name: priority:p2
+  description: Normal-priority issue
+  color: "FBCA04"
+
+- name: milestone:v0.2.0
+  description: Planned scope for v0.2.0
+  color: "5319E7"
