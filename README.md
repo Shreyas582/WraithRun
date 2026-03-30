@@ -119,6 +119,20 @@ Common options:
 - `--max-steps <N>` max agent turns (default `8`).
 - `--max-new-tokens <N>` generation cap per response (default `256`).
 - `--temperature <F>` generation temperature (default `0.2`).
+- `--format <json|summary|markdown>` output format (default `json`).
+- `--output-file <PATH>` write rendered report to file and create directories if needed.
+- `--quiet` suppress runtime logs.
+- `--verbose` enable debug-level runtime logs.
+
+Example output controls:
+
+```powershell
+cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize risk" --format summary
+```
+
+```powershell
+cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize risk" --output-file .\launch-assets\network-report.json
+```
 
 ## Built-in Tools
 

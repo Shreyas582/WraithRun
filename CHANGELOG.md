@@ -8,7 +8,17 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- No user-facing changes recorded yet.
+- CLI output format controls: `--format json|summary|markdown`.
+- CLI export control: `--output-file` with automatic parent directory creation.
+
+### Changed
+
+- Default runtime logging now avoids polluting standard output, making report piping safer.
+- Dry-run task routing now maps hash, network, log, and privilege prompts to expected tools more reliably.
+
+### Fixed
+
+- Incorrect tool selection in dry-run mode for hash-focused tasks.
 
 ## 0.2.2 - 2026-03-30
 

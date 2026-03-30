@@ -27,13 +27,39 @@ Linux/macOS binary:
 PowerShell:
 
 ```powershell
-.\wraithrun.exe --task "Check suspicious listener ports" | Out-File -Encoding utf8 report.json
+.\wraithrun.exe --task "Check suspicious listener ports" --output-file .\launch-assets\network-report.json
 ```
 
 Bash:
 
 ```bash
-./wraithrun --task "Check suspicious listener ports" > report.json
+./wraithrun --task "Check suspicious listener ports" --output-file ./launch-assets/network-report.json
+```
+
+## Alternative Output Formats
+
+Summary format:
+
+```powershell
+.\wraithrun.exe --task "Check suspicious listener ports" --format summary
+```
+
+Markdown format:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --format markdown
+```
+
+Quiet mode (suppress runtime logs):
+
+```powershell
+.\wraithrun.exe --task "Check suspicious listener ports" --quiet
+```
+
+Verbose mode (debug logs):
+
+```powershell
+.\wraithrun.exe --task "Check suspicious listener ports" --verbose
 ```
 
 ## Pretty-Print or Parse JSON Output
@@ -41,19 +67,19 @@ Bash:
 PowerShell:
 
 ```powershell
-Get-Content .\report.json | ConvertFrom-Json | ConvertTo-Json -Depth 20
+Get-Content .\launch-assets\network-report.json | ConvertFrom-Json | ConvertTo-Json -Depth 20
 ```
 
 Bash with jq:
 
 ```bash
-cat report.json | jq .
+cat ./launch-assets/network-report.json | jq .
 ```
 
 Extract only the final answer (jq):
 
 ```bash
-cat report.json | jq -r .final_answer
+cat ./launch-assets/network-report.json | jq -r .final_answer
 ```
 
 ## Live ONNX/Vitis Inference
