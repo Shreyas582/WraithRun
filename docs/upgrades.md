@@ -1,5 +1,30 @@
 # Upgrade Notes
 
+## v0.4.0
+
+### Breaking/visible changes
+
+- Added `--tool-filter <QUERY>` for filtered tool discovery in `--list-tools` mode.
+
+### Migration examples
+
+Filter tool list by keyword:
+
+```powershell
+.\wraithrun.exe --list-tools --tool-filter hash
+```
+
+Filter tool list as JSON:
+
+```powershell
+.\wraithrun.exe --list-tools --tool-filter network --introspection-format json
+```
+
+### Recommended checks after upgrade
+
+- Validate tooling that consumes `--list-tools` handles filtered result sets.
+- Validate automation handles no-match failures when a filter is too restrictive.
+
 ## v0.3.3
 
 ### Breaking/visible changes

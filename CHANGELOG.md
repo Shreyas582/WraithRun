@@ -8,7 +8,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- Tool discovery filtering via `--tool-filter <QUERY>` for `--list-tools` output.
+- (none yet)
 
 ### Changed
 
@@ -17,6 +17,20 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 ### Fixed
 
 - (none yet)
+
+## 0.4.0 - 2026-03-30
+
+### Added
+
+- Tool discovery filtering via `--tool-filter <QUERY>` for `--list-tools` output.
+
+### Changed
+
+- (none)
+
+### Fixed
+
+- (none)
 
 ## 0.3.3 - 2026-03-30
 
