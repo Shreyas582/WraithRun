@@ -63,3 +63,23 @@ WraithRun prints a JSON report with:
 - task: your original request.
 - turns: intermediate reasoning and tool observations.
 - final_answer: final response text.
+
+## Configuration and Profiles
+
+WraithRun supports config-driven runs through TOML files and named profiles.
+
+- Auto-loads `./wraithrun.toml` when present.
+- Explicit file path via `--config` or `WRAITHRUN_CONFIG`.
+- Profile selection via `--profile` or `WRAITHRUN_PROFILE`.
+
+Built-in profile names:
+
+- `local-lab`
+- `production-triage`
+- `live-model`
+
+Example:
+
+```powershell
+cargo run -p wraithrun -- --task "Check suspicious listener ports" --config .\wraithrun.example.toml --profile production-triage
+```

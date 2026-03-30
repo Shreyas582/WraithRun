@@ -113,8 +113,11 @@ cargo run -p wraithrun -- --help
 Common options:
 
 - `--task <TASK>` required.
+- `--config <CONFIG>` load settings from a TOML file (default auto-load: `./wraithrun.toml` when present).
+- `--profile <PROFILE>` apply a named profile from built-ins or config file.
 - `--live` enables model inference mode (default is dry-run).
-- `--model <MODEL>` model path (default `./models/llm.onnx`).
+- `--dry-run` forces dry-run mode (overrides profile/config live mode).
+- `--model <MODEL>` model path (default `./models/llm.onnx`, unless overridden by config/env).
 - `--tokenizer <TOKENIZER>` tokenizer path for live mode.
 - `--max-steps <N>` max agent turns (default `8`).
 - `--max-new-tokens <N>` generation cap per response (default `256`).
@@ -133,6 +136,48 @@ cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize 
 ```powershell
 cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize risk" --output-file .\launch-assets\network-report.json
 ```
+
+## Configuration Files and Profiles
+
+WraithRun supports reusable runtime configuration through TOML files and named profiles.
+
+Resolution order (highest to lowest):
+
+1. CLI flags
+2. Environment variables
+3. Config file (base settings plus selected profile)
+4. Built-in defaults
+
+Default config auto-load behavior:
+
+- If `./wraithrun.toml` exists, it is loaded automatically.
+- Use `--config <path>` to load a specific file.
+- Or set `WRAITHRUN_CONFIG` to point to a config file path.
+
+Built-in profiles:
+
+- `local-lab`: short dry-run loops with summary output.
+- `production-triage`: longer dry-run loops with markdown output.
+- `live-model`: live inference enabled with higher token budget.
+
+Examples:
+
+```powershell
+cargo run -p wraithrun -- --task "Check suspicious listener ports" --profile local-lab
+```
+
+```powershell
+cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --config .\wraithrun.example.toml --profile production-triage
+```
+
+```powershell
+$env:WRAITHRUN_FORMAT = "summary"
+cargo run -p wraithrun -- --task "Check suspicious listener ports" --config .\wraithrun.example.toml --profile production-triage --format json
+```
+
+Reference config template:
+
+- `wraithrun.example.toml`
 
 ## Built-in Tools
 

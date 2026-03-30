@@ -62,6 +62,64 @@ Verbose mode (debug logs):
 .\wraithrun.exe --task "Check suspicious listener ports" --verbose
 ```
 
+## Use Profiles (Built-In)
+
+Local lab profile:
+
+```powershell
+.\wraithrun.exe --task "Check suspicious listener ports" --profile local-lab
+```
+
+Production triage profile:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --profile production-triage
+```
+
+Live model profile:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --profile live-model
+```
+
+## Use a Config File
+
+Use repository template directly:
+
+```powershell
+.\wraithrun.exe --task "Check suspicious listener ports" --config .\wraithrun.example.toml --profile production-triage
+```
+
+Auto-load local config (`./wraithrun.toml` if present):
+
+```powershell
+.\wraithrun.exe --task "Check suspicious listener ports" --profile local-lab
+```
+
+Select config with env var:
+
+```powershell
+$env:WRAITHRUN_CONFIG = ".\wraithrun.example.toml"
+.\wraithrun.exe --task "Check suspicious listener ports" --profile production-triage
+```
+
+## Resolution Order Example
+
+This command chain demonstrates `CLI > env > config > defaults`.
+
+```powershell
+$env:WRAITHRUN_FORMAT = "summary"
+.\wraithrun.exe --task "Check suspicious listener ports" --config .\wraithrun.example.toml --profile production-triage --format json
+```
+
+Expected result format: `json` (CLI wins over env and config).
+
+To force dry-run over a live profile/config:
+
+```powershell
+.\wraithrun.exe --task "Check suspicious listener ports" --profile live-model --dry-run
+```
+
 ## Pretty-Print or Parse JSON Output
 
 PowerShell:

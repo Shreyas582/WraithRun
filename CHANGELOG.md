@@ -10,11 +10,17 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - CLI output format controls: `--format json|summary|markdown`.
 - CLI export control: `--output-file` with automatic parent directory creation.
+- CLI configuration controls: `--config`, `--profile`, and `--dry-run`.
+- TOML configuration support with optional auto-load from `./wraithrun.toml`.
+- Built-in execution profiles: `local-lab`, `production-triage`, and `live-model`.
+- Environment-variable overrides for runtime settings (model, generation, output, logging, and Vitis knobs).
+- Repository config template: `wraithrun.example.toml`.
 
 ### Changed
 
 - Default runtime logging now avoids polluting standard output, making report piping safer.
 - Dry-run task routing now maps hash, network, log, and privilege prompts to expected tools more reliably.
+- Runtime settings now resolve deterministically with precedence: CLI > env > config > defaults.
 
 ### Fixed
 

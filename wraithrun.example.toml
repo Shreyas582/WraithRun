@@ -1,0 +1,40 @@
+# WraithRun configuration example.
+#
+# Resolution order is:
+# 1) CLI flags
+# 2) Environment variables
+# 3) Config file (base + selected profile)
+# 4) Built-in defaults
+#
+# To activate this file, copy it to ./wraithrun.toml or pass:
+#   wraithrun --config ./wraithrun.example.toml --task "..."
+
+model = "./models/llm.onnx"
+max_steps = 8
+max_new_tokens = 256
+temperature = 0.2
+format = "json"
+log = "normal"
+
+[profiles.local-lab]
+max_steps = 6
+max_new_tokens = 192
+temperature = 0.1
+format = "summary"
+live = false
+
+[profiles.production-triage]
+max_steps = 12
+max_new_tokens = 320
+temperature = 0.15
+format = "markdown"
+live = false
+
+[profiles.live-model]
+live = true
+format = "json"
+# model = "C:/models/llm.onnx"
+# tokenizer = "C:/models/tokenizer.json"
+# vitis_config = "C:/models/vitis.json"
+# vitis_cache_dir = "C:/models/cache"
+# vitis_cache_key = "npu-profile"
