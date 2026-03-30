@@ -22,6 +22,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Config bootstrap mode via `--init-config` with `--init-config-path` and `--force` support.
 - Built-in investigation task templates via `--task-template` and discovery mode `--list-task-templates`.
 - Template parameter support via `--template-target` and `--template-lines` for path/line-sensitive templates.
+- Task prompt file input via `--task-file` for reusable long-form investigations.
 
 ### Changed
 

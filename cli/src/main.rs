@@ -54,8 +54,11 @@ enum TaskTemplate {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["task_template", "doctor", "list_profiles", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
+    #[arg(long, required_unless_present_any = ["task_file", "task_template", "doctor", "list_profiles", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
     task: Option<String>,
+
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_template"])]
+    task_file: Option<PathBuf>,
 
     #[arg(long, value_enum, conflicts_with = "task")]
     task_template: Option<TaskTemplate>,
@@ -445,6 +448,8 @@ fn resolve_effective_config_explanation(cli: &Cli) -> Result<EffectiveConfigExpl
 
     let task_source = if cli.task.is_some() {
         "cli --task".to_string()
+    } else if cli.task_file.is_some() {
+        "cli --task-file".to_string()
     } else if let Some(template) = cli.task_template {
         format!("cli --task-template ({})", task_template_name(template))
     } else {
@@ -497,12 +502,16 @@ fn resolve_task_for_run(cli: &Cli) -> Result<String> {
         return Ok(trimmed.to_string());
     }
 
+    if let Some(task_file) = &cli.task_file {
+        return load_task_from_file(task_file);
+    }
+
     if let Some(template) = cli.task_template {
         return resolve_task_from_template(cli, template);
     }
 
     bail!(
-        "Either --task or --task-template is required unless one of --doctor, --list-task-templates, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
+        "Either --task, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
     )
 }
 
@@ -510,10 +519,28 @@ fn resolve_task_for_mode(cli: &Cli, fallback: &str) -> Result<String> {
     if let Some(task) = &cli.task {
         return Ok(task.trim().to_string());
     }
+    if let Some(task_file) = &cli.task_file {
+        return load_task_from_file(task_file);
+    }
     if let Some(template) = cli.task_template {
         return resolve_task_from_template(cli, template);
     }
     Ok(fallback.to_string())
+}
+
+fn load_task_from_file(path: &Path) -> Result<String> {
+    if !path.is_file() {
+        bail!("Task file not found: {}", path.display());
+    }
+
+    let task_text = fs::read_to_string(path)
+        .with_context(|| format!("Failed reading task file {}", path.display()))?;
+    let trimmed = task_text.trim();
+    if trimmed.is_empty() {
+        bail!("Task file '{}' is empty", path.display());
+    }
+
+    Ok(trimmed.to_string())
 }
 
 fn task_template_name(template: TaskTemplate) -> &'static str {
@@ -1789,6 +1816,7 @@ mod tests {
     fn base_cli() -> Cli {
         Cli {
             task: Some("Check suspicious listener ports and summarize risk".to_string()),
+            task_file: None,
             task_template: None,
             template_target: None,
             template_lines: None,
@@ -2036,6 +2064,35 @@ mod tests {
 
         let task = resolve_task_for_run(&cli).expect("template task should resolve");
         assert!(task.contains("listener ports"));
+    }
+
+    #[test]
+    fn resolves_task_from_file() {
+        let mut cli = base_cli();
+        cli.task = None;
+        let path = unique_temp_file("wraithrun-task-file");
+        fs::write(&path, "  Investigate unauthorized SSH keys\n")
+            .expect("task file fixture should be created");
+        cli.task_file = Some(path.clone());
+
+        let task = resolve_task_for_run(&cli).expect("task file should resolve");
+        assert_eq!(task, "Investigate unauthorized SSH keys");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rejects_empty_task_file() {
+        let mut cli = base_cli();
+        cli.task = None;
+        let path = unique_temp_file("wraithrun-empty-task-file");
+        fs::write(&path, "\n   \n").expect("empty task file fixture should be created");
+        cli.task_file = Some(path.clone());
+
+        let err = resolve_task_for_run(&cli).expect_err("empty task file should fail");
+        assert!(err.to_string().contains("is empty"));
+
+        let _ = fs::remove_file(&path);
     }
 
     #[test]

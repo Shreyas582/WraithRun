@@ -112,7 +112,8 @@ cargo run -p wraithrun -- --help
 
 Common options:
 
-- `--task <TASK>` investigation prompt (required unless `--task-template` or a mode command is used).
+- `--task <TASK>` investigation prompt (required unless `--task-file`, `--task-template`, or a mode command is used).
+- `--task-file <PATH>` read investigation prompt text from a local file.
 - `--task-template <NAME>` use a built-in investigation prompt template.
 - `--template-target <PATH>` optional target path for supported templates (`hash-integrity`, `syslog-summary`).
 - `--template-lines <N>` optional line count for `syslog-summary` template (default `200`).
@@ -146,6 +147,12 @@ cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize 
 
 ```powershell
 cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize risk" --output-file .\launch-assets\network-report.json
+```
+
+Run a task from a prompt file:
+
+```powershell
+cargo run -p wraithrun -- --task-file .\launch-assets\incident-task.txt --format summary
 ```
 
 List built-in task templates:

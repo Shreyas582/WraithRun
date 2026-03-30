@@ -16,6 +16,12 @@ From source:
 cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys"
 ```
 
+From a task file:
+
+```powershell
+.\wraithrun.exe --task-file .\launch-assets\incident-task.txt --format summary
+```
+
 Linux/macOS binary:
 
 ```bash

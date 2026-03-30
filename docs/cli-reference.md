@@ -8,6 +8,7 @@ Basic usage:
 
 ```text
 wraithrun [OPTIONS] --task <TASK>
+wraithrun [OPTIONS] --task-file <PATH>
 wraithrun [OPTIONS] --task-template <TASK_TEMPLATE>
 wraithrun --doctor [OPTIONS]
 wraithrun --list-task-templates
@@ -20,6 +21,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 ## Options
 
 - `--task <TASK>`: investigation prompt.
+- `--task-file <PATH>`: read investigation prompt text from a local file.
 - `--task-template <TASK_TEMPLATE>`: built-in investigation prompt template.
 - `--template-target <TEMPLATE_TARGET>`: optional target path for supported task templates.
 - `--template-lines <TEMPLATE_LINES>`: optional line count for `syslog-summary` template.
@@ -126,6 +128,12 @@ Dry-run mode:
 
 ```powershell
 wraithrun --task "Check suspicious listener ports"
+```
+
+Task from file:
+
+```powershell
+wraithrun --task-file .\launch-assets\incident-task.txt --format summary
 ```
 
 Template-driven dry-run mode:

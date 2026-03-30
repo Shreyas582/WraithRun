@@ -42,6 +42,12 @@ Template-based run:
 cargo run -p wraithrun -- --task-template listener-risk
 ```
 
+Task file run:
+
+```powershell
+cargo run -p wraithrun -- --task-file .\launch-assets\incident-task.txt --format summary
+```
+
 Template-based run with target overrides:
 
 ```powershell
