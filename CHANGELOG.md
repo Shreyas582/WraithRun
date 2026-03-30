@@ -8,11 +8,12 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- CLI integration tests for stdin-based task input (`--task-stdin` and `--task-file -`).
+- Introspection JSON schema reference in CLI documentation for automation users.
 
 ### Changed
 
-- (none yet)
+- Git ignore rules now exclude generated runtime artifacts under `launch-assets`.
 
 ### Fixed
 

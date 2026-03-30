@@ -109,6 +109,72 @@ Behavior:
 
 These modes are mutually exclusive with each other and with `--doctor`.
 
+### Introspection JSON Schema
+
+When `--introspection-format json` is used, the output shape is stable per mode.
+
+`--doctor --introspection-format json`:
+
+```json
+{
+	"summary": {
+		"pass": 0,
+		"warn": 0,
+		"fail": 0
+	},
+	"checks": [
+		{
+			"status": "pass",
+			"name": "config-file",
+			"detail": "Loaded config: ./wraithrun.toml"
+		}
+	]
+}
+```
+
+`--list-task-templates --introspection-format json`:
+
+```json
+{
+	"templates": [
+		{
+			"name": "syslog-summary",
+			"prompt": "Read and summarize last 200 lines from C:/Logs/agent.log",
+			"supports_template_target": true,
+			"supports_template_lines": true,
+			"default_target": "C:/Logs/agent.log",
+			"default_lines": 200
+		}
+	]
+}
+```
+
+`--list-profiles --introspection-format json`:
+
+```json
+{
+	"built_in_profiles": [
+		{
+			"name": "local-lab",
+			"description": "dry-run, compact step/token budget, summary output"
+		}
+	],
+	"config_path": "./wraithrun.toml",
+	"config_profiles": ["team-default"],
+	"selected_profile": {
+		"name": "local-lab",
+		"source": "built-in"
+	}
+}
+```
+
+`selected_profile.source` values:
+
+- `built-in`
+- `config`
+- `built-in+config`
+- `missing`
+
 ## Task Templates
 
 Built-in template values for `--task-template`:
