@@ -221,7 +221,10 @@ fn tools_json_contract_contains_expected_fields() {
         })
         .expect("hash_binary tool should exist");
 
-        assert!(hash_binary.get("description").and_then(Value::as_str).is_some());
+    assert!(hash_binary
+        .get("description")
+        .and_then(Value::as_str)
+        .is_some());
     assert!(
         hash_binary
             .get("args_schema")
