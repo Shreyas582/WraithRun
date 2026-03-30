@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use core_engine::agent::Agent;
 use core_engine::RunReport;
-use cyber_tools::ToolRegistry;
+use cyber_tools::{ToolRegistry, ToolSpec};
 use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -63,7 +63,7 @@ enum TaskTemplate {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
+    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
     task: Option<String>,
 
     #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_stdin", "task_template"])]
@@ -86,6 +86,9 @@ struct Cli {
 
     #[arg(long)]
     list_task_templates: bool,
+
+    #[arg(long)]
+    list_tools: bool,
 
     #[arg(long)]
     list_profiles: bool,
@@ -255,6 +258,11 @@ struct TaskTemplateDescriptor {
 #[derive(Debug, Serialize)]
 struct TaskTemplateListView {
     templates: Vec<TaskTemplateDescriptor>,
+}
+
+#[derive(Debug, Serialize)]
+struct ToolListView {
+    tools: Vec<ToolSpec>,
 }
 
 #[derive(Debug, Serialize)]
@@ -456,6 +464,12 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if cli.list_tools {
+        let rendered = run_list_tools(cli.introspection_format)?;
+        println!("{rendered}");
+        return Ok(());
+    }
+
     if cli.init_config {
         let message = run_init_config(&cli)?;
         println!("{message}");
@@ -609,7 +623,7 @@ fn resolve_task_for_run(cli: &Cli) -> Result<String> {
     }
 
     bail!(
-        "Either --task, --task-stdin, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
+        "Either --task, --task-stdin, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-tools, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
     )
 }
 
@@ -794,6 +808,33 @@ fn render_task_template_list_json() -> Result<String> {
         templates: task_template_descriptors(),
     };
     serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
+}
+
+fn run_list_tools(format: IntrospectionFormat) -> Result<String> {
+    let registry = ToolRegistry::with_default_tools();
+    let tools = registry.tool_specs();
+
+    match format {
+        IntrospectionFormat::Text => Ok(render_tool_list(&tools)),
+        IntrospectionFormat::Json => render_tool_list_json(tools),
+    }
+}
+
+fn render_tool_list_json(tools: Vec<ToolSpec>) -> Result<String> {
+    let view = ToolListView { tools };
+    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
+}
+
+fn render_tool_list(tools: &[ToolSpec]) -> String {
+    let mut output = String::new();
+
+    let _ = writeln!(output, "WraithRun Tools");
+    for tool in tools {
+        let _ = writeln!(output, "- {}: {}", tool.name, tool.description);
+        let _ = writeln!(output, "  args_schema: {}", compact_json(&tool.args_schema));
+    }
+
+    output.trim_end().to_string()
 }
 
 fn resolve_task_from_template(cli: &Cli, template: TaskTemplate) -> Result<String> {
@@ -1400,6 +1441,9 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     if cli.list_task_templates {
         selected.push("--list-task-templates");
     }
+    if cli.list_tools {
+        selected.push("--list-tools");
+    }
     if cli.list_profiles {
         selected.push("--list-profiles");
     }
@@ -1425,10 +1469,10 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
 
 fn ensure_introspection_format_usage(cli: &Cli) -> Result<()> {
     if cli.introspection_format == IntrospectionFormat::Json
-        && !(cli.doctor || cli.list_task_templates || cli.list_profiles)
+        && !(cli.doctor || cli.list_task_templates || cli.list_tools || cli.list_profiles)
     {
         bail!(
-            "--introspection-format only applies to --doctor, --list-task-templates, or --list-profiles"
+            "--introspection-format only applies to --doctor, --list-task-templates, --list-tools, or --list-profiles"
         );
     }
 
@@ -2099,10 +2143,11 @@ mod tests {
         ensure_introspection_format_usage, merge_sources, render_doctor_report,
         render_doctor_report_json, render_effective_config_explanation_json,
         render_effective_config_json, render_profile_list, render_profile_list_json, render_report,
-        render_task_template_list, render_task_template_list_json,
-        resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
-        resolve_task_for_run, run_init_config, Cli, DoctorReport, DoctorStatus, FileConfig,
-        IntrospectionFormat, OutputFormat, SettingsFragment, TaskTemplate,
+        render_task_template_list, render_task_template_list_json, render_tool_list,
+        render_tool_list_json, resolve_effective_config_explanation, resolve_init_config_path,
+        resolve_task_for_mode, resolve_task_for_run, run_init_config, Cli, DoctorReport,
+        DoctorStatus, FileConfig, IntrospectionFormat, OutputFormat, SettingsFragment,
+        TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -2115,6 +2160,7 @@ mod tests {
             template_lines: None,
             doctor: false,
             list_task_templates: false,
+            list_tools: false,
             list_profiles: false,
             introspection_format: IntrospectionFormat::Text,
             print_effective_config: false,
@@ -2544,6 +2590,24 @@ mod tests {
     }
 
     #[test]
+    fn renders_tool_list() {
+        let tools = ToolRegistry::with_default_tools().tool_specs();
+        let rendered = render_tool_list(&tools);
+        assert!(rendered.contains("WraithRun Tools"));
+        assert!(rendered.contains("hash_binary"));
+        assert!(rendered.contains("scan_network"));
+    }
+
+    #[test]
+    fn renders_tool_list_json() {
+        let tools = ToolRegistry::with_default_tools().tool_specs();
+        let rendered = render_tool_list_json(tools).expect("tool list json rendering should work");
+        assert!(rendered.contains("\"tools\""));
+        assert!(rendered.contains("\"check_privilege_escalation_vectors\""));
+        assert!(rendered.contains("\"args_schema\""));
+    }
+
+    #[test]
     fn rejects_json_introspection_format_without_mode() {
         let mut cli = base_cli();
         cli.introspection_format = IntrospectionFormat::Json;
@@ -2563,6 +2627,16 @@ mod tests {
 
         ensure_introspection_format_usage(&cli)
             .expect("json introspection should be allowed for list-profiles");
+    }
+
+    #[test]
+    fn allows_json_introspection_format_for_list_tools_mode() {
+        let mut cli = base_cli();
+        cli.list_tools = true;
+        cli.introspection_format = IntrospectionFormat::Json;
+
+        ensure_introspection_format_usage(&cli)
+            .expect("json introspection should be allowed for list-tools");
     }
 
     #[test]

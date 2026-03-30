@@ -29,7 +29,8 @@ Examples:
 
 ## Cadence
 
-- Patch releases: as needed for critical fixes.
+- Patch releases: target at least one release every 14 days when `Unreleased` contains user-visible changes.
+- Patch releases: cut immediately for critical fixes.
 - Minor releases: approximately every 2 to 6 weeks, depending on feature readiness.
 
 ## Release Checklist

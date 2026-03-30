@@ -193,3 +193,46 @@ fn profiles_json_contract_contains_expected_fields() {
         "selected_profile key should always be present"
     );
 }
+
+#[test]
+fn tools_json_contract_contains_expected_fields() {
+    let output = run_capture(&["--list-tools", "--introspection-format", "json"]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let tools = json
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("tools should be an array");
+    assert!(!tools.is_empty(), "tools should not be empty");
+
+    let hash_binary = tools
+        .iter()
+        .find(|tool| {
+            tool.get("name")
+                .and_then(Value::as_str)
+                .map(|name| name == "hash_binary")
+                .unwrap_or(false)
+        })
+        .expect("hash_binary tool should exist");
+
+    assert_eq!(
+        hash_binary
+            .get("description")
+            .and_then(Value::as_str)
+            .is_some(),
+        true
+    );
+    assert!(
+        hash_binary
+            .get("args_schema")
+            .and_then(Value::as_object)
+            .is_some(),
+        "args_schema should be an object"
+    );
+}

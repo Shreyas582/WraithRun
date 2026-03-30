@@ -308,10 +308,18 @@ impl ToolRegistry {
         Ok(())
     }
 
-    pub fn manifest_json_pretty(&self) -> String {
+    fn sorted_specs(&self) -> Vec<ToolSpec> {
         let mut specs: Vec<ToolSpec> = self.tools.values().map(|t| t.spec()).collect();
         specs.sort_by(|a, b| a.name.cmp(&b.name));
-        serde_json::to_string_pretty(&specs).unwrap_or_else(|_| "[]".to_string())
+        specs
+    }
+
+    pub fn tool_specs(&self) -> Vec<ToolSpec> {
+        self.sorted_specs()
+    }
+
+    pub fn manifest_json_pretty(&self) -> String {
+        serde_json::to_string_pretty(&self.sorted_specs()).unwrap_or_else(|_| "[]".to_string())
     }
 
     pub async fn execute(&self, tool_name: &str, args: Value) -> Result<Value, ToolError> {

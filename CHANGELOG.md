@@ -8,11 +8,11 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- CLI tool catalog mode via `--list-tools` with text/JSON introspection output.
 
 ### Changed
 
-- (none yet)
+- Release runbook now sets a 14-day patch cadence target whenever `Unreleased` has user-visible changes.
 
 ### Fixed
 

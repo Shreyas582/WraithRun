@@ -13,6 +13,7 @@ wraithrun [OPTIONS] --task-file <PATH>
 wraithrun [OPTIONS] --task-template <TASK_TEMPLATE>
 wraithrun --doctor [OPTIONS]
 wraithrun --list-task-templates
+wraithrun --list-tools [OPTIONS]
 wraithrun --list-profiles [OPTIONS]
 wraithrun --print-effective-config [OPTIONS]
 wraithrun --explain-effective-config [OPTIONS]
@@ -29,6 +30,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--template-lines <TEMPLATE_LINES>`: optional line count for `syslog-summary` template.
 - `--doctor`: run configuration/runtime diagnostics and exit.
 - `--list-task-templates`: list built-in investigation templates and exit.
+- `--list-tools`: list built-in local investigation tools and exit.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
 - `--introspection-format <INTROSPECTION_FORMAT>`: format for introspection modes. Values: `text`, `json`. Default: `text`.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
@@ -86,9 +88,12 @@ Behavior:
 
 - `--doctor`
 - `--list-task-templates`
+- `--list-tools`
 - `--list-profiles`
 
 `--list-task-templates` output includes built-in task template names and their prompt text.
+
+`--list-tools` output includes tool names, descriptions, and JSON argument schemas.
 
 `--list-profiles` output includes:
 
@@ -165,6 +170,28 @@ When `--introspection-format json` is used, the output shape is stable per mode.
 		"name": "local-lab",
 		"source": "built-in"
 	}
+}
+```
+
+`--list-tools --introspection-format json`:
+
+```json
+{
+	"tools": [
+		{
+			"name": "hash_binary",
+			"description": "Computes SHA-256 hash of a file for local integrity triage.",
+			"args_schema": {
+				"type": "object",
+				"properties": {
+					"path": {
+						"type": "string"
+					}
+				},
+				"required": ["path"]
+			}
+		}
+	]
 }
 ```
 
@@ -245,6 +272,18 @@ List task templates:
 
 ```powershell
 wraithrun --list-task-templates
+```
+
+List tools:
+
+```powershell
+wraithrun --list-tools
+```
+
+List tools as JSON:
+
+```powershell
+wraithrun --list-tools --introspection-format json
 ```
 
 Use built-in profile:
