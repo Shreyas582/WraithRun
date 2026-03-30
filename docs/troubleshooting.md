@@ -1,5 +1,19 @@
 # Troubleshooting
 
+## Run doctor first
+
+Symptom:
+
+- Runtime setup is unclear or mixed config/env/profile values are hard to debug.
+
+Fix:
+
+```powershell
+wraithrun --doctor
+```
+
+Doctor validates config parsing, profile resolution, environment variable parsing, and effective runtime settings.
+
 ## Vitis inference is disabled
 
 Symptom:

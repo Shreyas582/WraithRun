@@ -36,11 +36,14 @@ enum LogMode {
     Verbose,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
+    #[arg(long, required_unless_present = "doctor")]
+    task: Option<String>,
+
     #[arg(long)]
-    task: String,
+    doctor: bool,
 
     #[arg(long)]
     config: Option<PathBuf>,
@@ -199,10 +202,65 @@ enum ConfigPathSelection {
     Required(PathBuf),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DoctorStatus {
+    Pass,
+    Warn,
+    Fail,
+}
+
+impl DoctorStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Pass => "PASS",
+            Self::Warn => "WARN",
+            Self::Fail => "FAIL",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DoctorCheck {
+    status: DoctorStatus,
+    name: &'static str,
+    detail: String,
+}
+
+#[derive(Debug, Default)]
+struct DoctorReport {
+    checks: Vec<DoctorCheck>,
+}
+
+impl DoctorReport {
+    fn push(&mut self, status: DoctorStatus, name: &'static str, detail: impl Into<String>) {
+        self.checks.push(DoctorCheck {
+            status,
+            name,
+            detail: detail.into(),
+        });
+    }
+
+    fn has_failures(&self) -> bool {
+        self.checks
+            .iter()
+            .any(|check| check.status == DoctorStatus::Fail)
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let runtime = resolve_runtime_config(cli)?;
+
+    if cli.doctor {
+        let report = run_doctor(&cli);
+        println!("{}", render_doctor_report(&report));
+        if report.has_failures() {
+            bail!("doctor checks reported failures");
+        }
+        return Ok(());
+    }
+
+    let runtime = resolve_runtime_config(&cli)?;
     init_tracing(runtime.log_mode);
 
     let vitis_config = build_vitis_config(&runtime);
@@ -230,13 +288,23 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn resolve_runtime_config(cli: Cli) -> Result<RuntimeConfig> {
-    let profile = resolve_profile_name(&cli)?;
-    let (file_config, file_config_path) = load_config_for_cli(&cli)?;
+fn resolve_runtime_config(cli: &Cli) -> Result<RuntimeConfig> {
+    let task = cli
+        .task
+        .clone()
+        .ok_or_else(|| anyhow!("--task is required unless --doctor is set"))?;
+
+    resolve_runtime_config_with_task(cli, task)
+}
+
+fn resolve_runtime_config_with_task(cli: &Cli, task: String) -> Result<RuntimeConfig> {
+    let profile = resolve_profile_name(cli)?;
+    let (file_config, file_config_path) = load_config_for_cli(cli)?;
     let env_overrides = env_settings_fragment()?;
 
     merge_sources(
-        &cli,
+        cli,
+        task,
         profile,
         file_config.as_ref(),
         file_config_path.as_deref(),
@@ -246,12 +314,13 @@ fn resolve_runtime_config(cli: Cli) -> Result<RuntimeConfig> {
 
 fn merge_sources(
     cli: &Cli,
+    task: String,
     profile: Option<String>,
     file_config: Option<&FileConfig>,
     file_config_path: Option<&Path>,
     env_overrides: &SettingsFragment,
 ) -> Result<RuntimeConfig> {
-    let mut resolved = RuntimeConfig::new(cli.task.clone());
+    let mut resolved = RuntimeConfig::new(task);
 
     let built_in_profile = profile.as_deref().and_then(builtin_profile);
     if let Some(fragment) = built_in_profile.as_ref() {
@@ -578,6 +647,282 @@ fn parse_log_mode(raw: &str, source: &str) -> Result<LogMode> {
     }
 }
 
+fn run_doctor(cli: &Cli) -> DoctorReport {
+    let mut report = DoctorReport::default();
+
+    let profile = match resolve_profile_name(cli) {
+        Ok(profile) => {
+            if let Some(profile_name) = profile.as_deref() {
+                report.push(
+                    DoctorStatus::Pass,
+                    "profile-selection",
+                    format!("Selected profile: {profile_name}"),
+                );
+            } else {
+                report.push(
+                    DoctorStatus::Warn,
+                    "profile-selection",
+                    "No profile selected; defaults/config/env/CLI values will be used.",
+                );
+            }
+            profile
+        }
+        Err(err) => {
+            report.push(
+                DoctorStatus::Fail,
+                "profile-selection",
+                format!("Unable to resolve profile: {err}"),
+            );
+            None
+        }
+    };
+
+    let selection = match select_config_path(cli) {
+        Ok(selection) => Some(selection),
+        Err(err) => {
+            report.push(
+                DoctorStatus::Fail,
+                "config-selection",
+                format!("Unable to resolve config path: {err}"),
+            );
+            None
+        }
+    };
+
+    let mut file_config: Option<FileConfig> = None;
+    let mut file_config_path: Option<PathBuf> = None;
+
+    if let Some(selection) = selection {
+        match selection {
+            ConfigPathSelection::None => {
+                report.push(
+                    DoctorStatus::Warn,
+                    "config-file",
+                    "No config file detected (checked --config, WRAITHRUN_CONFIG, and ./wraithrun.toml).",
+                );
+            }
+            ConfigPathSelection::Optional(path) | ConfigPathSelection::Required(path) => {
+                file_config_path = Some(path.clone());
+                match load_config_file(&path) {
+                    Ok(config) => {
+                        report.push(
+                            DoctorStatus::Pass,
+                            "config-file",
+                            format!("Loaded config: {}", path.display()),
+                        );
+                        file_config = Some(config);
+                    }
+                    Err(err) => {
+                        report.push(
+                            DoctorStatus::Fail,
+                            "config-file",
+                            format!("Failed to load config '{}': {err}", path.display()),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(profile_name) = profile.as_deref() {
+        let is_builtin = builtin_profile(profile_name).is_some();
+        let is_in_file = file_config
+            .as_ref()
+            .and_then(|cfg| lookup_profile(&cfg.profiles, profile_name))
+            .is_some();
+
+        if is_builtin && is_in_file {
+            report.push(
+                DoctorStatus::Pass,
+                "profile-availability",
+                format!(
+                    "Profile '{profile_name}' found in built-ins and config file; config profile overrides overlapping keys."
+                ),
+            );
+        } else if is_builtin {
+            report.push(
+                DoctorStatus::Pass,
+                "profile-availability",
+                format!("Profile '{profile_name}' found in built-in profiles."),
+            );
+        } else if is_in_file {
+            report.push(
+                DoctorStatus::Pass,
+                "profile-availability",
+                format!("Profile '{profile_name}' found in config profiles."),
+            );
+        } else {
+            report.push(
+                DoctorStatus::Fail,
+                "profile-availability",
+                format!(
+                    "Profile '{profile_name}' is not available in built-in profiles ({}) or loaded config profiles.",
+                    KNOWN_PROFILE_NAMES.join(", ")
+                ),
+            );
+        }
+    }
+
+    let env_overrides = match env_settings_fragment() {
+        Ok(overrides) => {
+            report.push(
+                DoctorStatus::Pass,
+                "environment-overrides",
+                "Environment overrides parsed successfully.",
+            );
+            Some(overrides)
+        }
+        Err(err) => {
+            report.push(
+                DoctorStatus::Fail,
+                "environment-overrides",
+                format!("Invalid environment variable value: {err}"),
+            );
+            None
+        }
+    };
+
+    if let Some(env_overrides) = env_overrides.as_ref() {
+        let doctor_task = cli
+            .task
+            .clone()
+            .unwrap_or_else(|| "doctor-self-check".to_string());
+        match merge_sources(
+            cli,
+            doctor_task,
+            profile,
+            file_config.as_ref(),
+            file_config_path.as_deref(),
+            env_overrides,
+        ) {
+            Ok(runtime) => {
+                let mode = if runtime.live { "live" } else { "dry-run" };
+                report.push(
+                    DoctorStatus::Pass,
+                    "effective-runtime",
+                    format!(
+                        "Resolved mode={mode}, model='{}', max_steps={}, max_new_tokens={}, format={:?}.",
+                        runtime.model.display(),
+                        runtime.max_steps,
+                        runtime.max_new_tokens,
+                        runtime.format
+                    ),
+                );
+
+                if runtime.live {
+                    if runtime.model.is_file() {
+                        report.push(
+                            DoctorStatus::Pass,
+                            "live-model-path",
+                            format!("Model file found: {}", runtime.model.display()),
+                        );
+                    } else {
+                        report.push(
+                            DoctorStatus::Warn,
+                            "live-model-path",
+                            format!(
+                                "Live mode is enabled but model file was not found at {}.",
+                                runtime.model.display()
+                            ),
+                        );
+                    }
+
+                    match runtime.tokenizer {
+                        Some(tokenizer) if tokenizer.is_file() => {
+                            report.push(
+                                DoctorStatus::Pass,
+                                "live-tokenizer-path",
+                                format!("Tokenizer file found: {}", tokenizer.display()),
+                            );
+                        }
+                        Some(tokenizer) => {
+                            report.push(
+                                DoctorStatus::Warn,
+                                "live-tokenizer-path",
+                                format!("Tokenizer file not found: {}", tokenizer.display()),
+                            );
+                        }
+                        None => {
+                            report.push(
+                                DoctorStatus::Warn,
+                                "live-tokenizer-path",
+                                "No tokenizer path resolved for live mode. The runtime will only work if tokenizer discovery succeeds.",
+                            );
+                        }
+                    }
+                }
+
+                if let Some(vitis_config) = runtime.vitis_config {
+                    let path = PathBuf::from(&vitis_config);
+                    if path.is_file() {
+                        report.push(
+                            DoctorStatus::Pass,
+                            "vitis-config",
+                            format!("Vitis config file found: {}", path.display()),
+                        );
+                    } else {
+                        report.push(
+                            DoctorStatus::Warn,
+                            "vitis-config",
+                            format!(
+                                "Vitis config is set but file was not found: {}",
+                                path.display()
+                            ),
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                report.push(
+                    DoctorStatus::Fail,
+                    "effective-runtime",
+                    format!("Unable to resolve effective runtime settings: {err}"),
+                );
+            }
+        }
+    }
+
+    report
+}
+
+fn render_doctor_report(report: &DoctorReport) -> String {
+    let mut output = String::new();
+
+    let pass_count = report
+        .checks
+        .iter()
+        .filter(|check| check.status == DoctorStatus::Pass)
+        .count();
+    let warn_count = report
+        .checks
+        .iter()
+        .filter(|check| check.status == DoctorStatus::Warn)
+        .count();
+    let fail_count = report
+        .checks
+        .iter()
+        .filter(|check| check.status == DoctorStatus::Fail)
+        .count();
+
+    let _ = writeln!(output, "WraithRun Doctor");
+    let _ = writeln!(
+        output,
+        "Summary: {pass_count} pass, {warn_count} warn, {fail_count} fail"
+    );
+
+    for check in &report.checks {
+        let _ = writeln!(
+            output,
+            "[{}] {}: {}",
+            check.status.label(),
+            check.name,
+            check.detail
+        );
+    }
+
+    output.trim_end().to_string()
+}
+
 fn render_report(report: &RunReport, format: OutputFormat) -> Result<String> {
     match format {
         OutputFormat::Json => Ok(serde_json::to_string_pretty(report)?),
@@ -746,11 +1091,15 @@ mod tests {
 
     use core_engine::{AgentTurn, RunReport, ToolCall};
 
-    use super::{merge_sources, render_report, Cli, FileConfig, OutputFormat, SettingsFragment};
+    use super::{
+        merge_sources, render_doctor_report, render_report, Cli, DoctorReport, DoctorStatus,
+        FileConfig, OutputFormat, SettingsFragment,
+    };
 
     fn base_cli() -> Cli {
         Cli {
-            task: "Check suspicious listener ports and summarize risk".to_string(),
+            task: Some("Check suspicious listener ports and summarize risk".to_string()),
+            doctor: false,
             config: None,
             profile: None,
             model: None,
@@ -841,6 +1190,7 @@ mod tests {
 
         let resolved = merge_sources(
             &cli,
+            "test-task".to_string(),
             Some("production-triage".to_string()),
             Some(&file_config),
             None,
@@ -859,6 +1209,7 @@ mod tests {
 
         let resolved = merge_sources(
             &cli,
+            "test-task".to_string(),
             Some("local-lab".to_string()),
             None,
             None,
@@ -878,6 +1229,7 @@ mod tests {
 
         let error = merge_sources(
             &cli,
+            "test-task".to_string(),
             Some("nonexistent".to_string()),
             None,
             None,
@@ -886,5 +1238,19 @@ mod tests {
         .expect_err("unknown profile should fail");
 
         assert!(error.to_string().contains("nonexistent"));
+    }
+
+    #[test]
+    fn renders_doctor_report_summary() {
+        let mut report = DoctorReport::default();
+        report.push(DoctorStatus::Pass, "config-file", "loaded config");
+        report.push(DoctorStatus::Warn, "live-model-path", "missing model");
+        report.push(DoctorStatus::Fail, "effective-runtime", "invalid profile");
+
+        let rendered = render_doctor_report(&report);
+
+        assert!(rendered.contains("WraithRun Doctor"));
+        assert!(rendered.contains("Summary: 1 pass, 1 warn, 1 fail"));
+        assert!(rendered.contains("[FAIL] effective-runtime"));
     }
 }

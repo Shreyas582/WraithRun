@@ -113,6 +113,7 @@ cargo run -p wraithrun -- --help
 Common options:
 
 - `--task <TASK>` required.
+- `--doctor` run runtime health checks and configuration diagnostics.
 - `--config <CONFIG>` load settings from a TOML file (default auto-load: `./wraithrun.toml` when present).
 - `--profile <PROFILE>` apply a named profile from built-ins or config file.
 - `--live` enables model inference mode (default is dry-run).
@@ -135,6 +136,12 @@ cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize 
 
 ```powershell
 cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize risk" --output-file .\launch-assets\network-report.json
+```
+
+Doctor checks:
+
+```powershell
+cargo run -p wraithrun -- --doctor
 ```
 
 ## Configuration Files and Profiles
@@ -239,6 +246,8 @@ You can start with prompts like:
     - Update sandbox environment variables to match your local policy.
 - Need more runtime logs:
     - Set `RUST_LOG=debug` before running.
+- Need a quick setup diagnostic:
+    - Run `wraithrun --doctor` to validate config/profile/env resolution and effective runtime settings.
 
 ## Project Status
 

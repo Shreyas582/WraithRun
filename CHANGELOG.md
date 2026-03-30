@@ -15,6 +15,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Built-in execution profiles: `local-lab`, `production-triage`, and `live-model`.
 - Environment-variable overrides for runtime settings (model, generation, output, logging, and Vitis knobs).
 - Repository config template: `wraithrun.example.toml`.
+- Doctor diagnostics mode via `--doctor` to validate config/profile/env/runtime readiness.
 
 ### Changed
 

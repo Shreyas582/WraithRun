@@ -83,3 +83,9 @@ Example:
 ```powershell
 cargo run -p wraithrun -- --task "Check suspicious listener ports" --config .\wraithrun.example.toml --profile production-triage
 ```
+
+Quick diagnostics:
+
+```powershell
+cargo run -p wraithrun -- --doctor
+```

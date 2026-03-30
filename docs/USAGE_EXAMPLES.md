@@ -120,6 +120,22 @@ To force dry-run over a live profile/config:
 .\wraithrun.exe --task "Check suspicious listener ports" --profile live-model --dry-run
 ```
 
+## Run Doctor Checks
+
+Quick diagnostics:
+
+```powershell
+.\wraithrun.exe --doctor
+```
+
+Check a specific profile and config combination:
+
+```powershell
+.\wraithrun.exe --doctor --config .\wraithrun.example.toml --profile live-model
+```
+
+If doctor reports failures, the command exits non-zero.
+
 ## Pretty-Print or Parse JSON Output
 
 PowerShell:

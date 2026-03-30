@@ -8,11 +8,13 @@ Basic usage:
 
 ```text
 wraithrun [OPTIONS] --task <TASK>
+wraithrun --doctor [OPTIONS]
 ```
 
 ## Options
 
 - `--task <TASK>`: required investigation prompt.
+- `--doctor`: run configuration/runtime diagnostics and exit.
 - `--config <CONFIG>`: explicit TOML config file path.
 - `--profile <PROFILE>`: named profile from built-ins or config file.
 - `--model <MODEL>`: model path for live mode. Default fallback: `./models/llm.onnx`.
@@ -42,6 +44,21 @@ Settings are resolved in this order:
 
 When a profile is selected, built-in profile defaults apply before config file values.
 
+## Doctor Mode
+
+Run `--doctor` to validate:
+
+- profile selection and availability,
+- config file discovery/parsing,
+- environment variable parsing,
+- final effective runtime resolution,
+- live-mode file-path readiness checks.
+
+Behavior:
+
+- Exit code `0`: no failures (warnings may still be present).
+- Non-zero exit code: one or more failures.
+
 ## Built-In Profiles
 
 - `local-lab`: dry-run, compact step/token budget, summary output.
@@ -66,6 +83,18 @@ Use config + profile:
 
 ```powershell
 wraithrun --task "Investigate unauthorized SSH keys" --config .\wraithrun.example.toml --profile production-triage
+```
+
+Run doctor:
+
+```powershell
+wraithrun --doctor
+```
+
+Run doctor for specific profile/config combination:
+
+```powershell
+wraithrun --doctor --config .\wraithrun.example.toml --profile live-model
 ```
 
 Live mode:
