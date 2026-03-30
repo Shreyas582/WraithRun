@@ -15,3 +15,8 @@ Thumbs.db
 # Environment files
 .env
 .env.*
+
+# Local run artifacts
+/launch-assets/generated/
+/launch-assets/reports/
+/launch-assets/*.json
