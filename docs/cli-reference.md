@@ -14,6 +14,7 @@ wraithrun [OPTIONS] --task-template <TASK_TEMPLATE>
 wraithrun --doctor [OPTIONS]
 wraithrun --list-task-templates
 wraithrun --list-tools [OPTIONS]
+wraithrun --describe-tool <NAME> [OPTIONS]
 wraithrun --list-profiles [OPTIONS]
 wraithrun --print-effective-config [OPTIONS]
 wraithrun --explain-effective-config [OPTIONS]
@@ -31,6 +32,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--doctor`: run configuration/runtime diagnostics and exit.
 - `--list-task-templates`: list built-in investigation templates and exit.
 - `--list-tools`: list built-in local investigation tools and exit.
+- `--describe-tool <NAME>`: render details for one tool and exit.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
 - `--introspection-format <INTROSPECTION_FORMAT>`: format for introspection modes. Values: `text`, `json`. Default: `text`.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
@@ -89,11 +91,14 @@ Behavior:
 - `--doctor`
 - `--list-task-templates`
 - `--list-tools`
+- `--describe-tool`
 - `--list-profiles`
 
 `--list-task-templates` output includes built-in task template names and their prompt text.
 
 `--list-tools` output includes tool names, descriptions, and JSON argument schemas.
+
+`--describe-tool` output includes one matching tool object by name.
 
 `--list-profiles` output includes:
 
@@ -195,6 +200,26 @@ When `--introspection-format json` is used, the output shape is stable per mode.
 }
 ```
 
+`--describe-tool hash_binary --introspection-format json`:
+
+```json
+{
+	"tool": {
+		"name": "hash_binary",
+		"description": "Computes SHA-256 hash of a file for local integrity triage.",
+		"args_schema": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				}
+			},
+			"required": ["path"]
+		}
+	}
+}
+```
+
 `selected_profile.source` values:
 
 - `built-in`
@@ -284,6 +309,18 @@ List tools as JSON:
 
 ```powershell
 wraithrun --list-tools --introspection-format json
+```
+
+Describe one tool:
+
+```powershell
+wraithrun --describe-tool hash_binary
+```
+
+Describe one tool as JSON:
+
+```powershell
+wraithrun --describe-tool hash_binary --introspection-format json
 ```
 
 Use built-in profile:

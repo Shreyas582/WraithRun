@@ -233,3 +233,45 @@ fn tools_json_contract_contains_expected_fields() {
         "args_schema should be an object"
     );
 }
+
+#[test]
+fn describe_tool_json_contract_contains_expected_fields() {
+    let output = run_capture(&[
+        "--describe-tool",
+        "hash_binary",
+        "--introspection-format",
+        "json",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let tool = json
+        .get("tool")
+        .and_then(Value::as_object)
+        .expect("tool should be an object");
+    assert_eq!(
+        tool.get("name").and_then(Value::as_str),
+        Some("hash_binary")
+    );
+    assert!(
+        tool.get("description").and_then(Value::as_str).is_some(),
+        "description should be present"
+    );
+}
+
+#[test]
+fn describe_tool_rejects_unknown_tool_name() {
+    let output = run_capture(&["--describe-tool", "nonexistent-tool"]);
+
+    assert!(
+        !output.status.success(),
+        "process should fail for unknown tool name"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Unknown tool 'nonexistent-tool'"));
+}

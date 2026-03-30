@@ -9,6 +9,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 ### Added
 
 - CLI tool catalog mode via `--list-tools` with text/JSON introspection output.
+- CLI single-tool introspection via `--describe-tool <NAME>` with text/JSON output.
 
 ### Changed
 

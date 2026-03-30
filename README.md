@@ -121,8 +121,9 @@ Common options:
 - `--doctor` run runtime health checks and configuration diagnostics.
 - `--list-task-templates` show available built-in investigation templates.
 - `--list-tools` list available local investigation tools and argument schemas.
+- `--describe-tool <NAME>` show details for one tool (name, description, argument schema).
 - `--list-profiles` list built-in and config-defined profiles.
-- `--introspection-format <text|json>` output format for `--doctor`, `--list-task-templates`, `--list-tools`, and `--list-profiles` (default `text`).
+- `--introspection-format <text|json>` output format for `--doctor`, `--list-task-templates`, `--list-tools`, `--describe-tool`, and `--list-profiles` (default `text`).
 - `--print-effective-config` render the resolved runtime settings as JSON and exit.
 - `--explain-effective-config` render resolved runtime settings plus per-field source attribution.
 - `--init-config` write a starter TOML config file and exit.
@@ -180,6 +181,18 @@ List available tools as JSON:
 
 ```powershell
 cargo run -p wraithrun -- --list-tools --introspection-format json
+```
+
+Describe one tool:
+
+```powershell
+cargo run -p wraithrun -- --describe-tool hash_binary
+```
+
+Describe one tool as JSON:
+
+```powershell
+cargo run -p wraithrun -- --describe-tool hash_binary --introspection-format json
 ```
 
 Run a task using a built-in template:

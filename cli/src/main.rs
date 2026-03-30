@@ -63,7 +63,7 @@ enum TaskTemplate {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
+    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
     task: Option<String>,
 
     #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_stdin", "task_template"])]
@@ -89,6 +89,9 @@ struct Cli {
 
     #[arg(long)]
     list_tools: bool,
+
+    #[arg(long, value_name = "NAME")]
+    describe_tool: Option<String>,
 
     #[arg(long)]
     list_profiles: bool,
@@ -263,6 +266,11 @@ struct TaskTemplateListView {
 #[derive(Debug, Serialize)]
 struct ToolListView {
     tools: Vec<ToolSpec>,
+}
+
+#[derive(Debug, Serialize)]
+struct ToolDetailView {
+    tool: ToolSpec,
 }
 
 #[derive(Debug, Serialize)]
@@ -470,6 +478,12 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let Some(tool_name) = cli.describe_tool.as_deref() {
+        let rendered = run_describe_tool(tool_name, cli.introspection_format)?;
+        println!("{rendered}");
+        return Ok(());
+    }
+
     if cli.init_config {
         let message = run_init_config(&cli)?;
         println!("{message}");
@@ -623,7 +637,7 @@ fn resolve_task_for_run(cli: &Cli) -> Result<String> {
     }
 
     bail!(
-        "Either --task, --task-stdin, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-tools, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
+        "Either --task, --task-stdin, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-tools, --describe-tool, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
     )
 }
 
@@ -820,8 +834,40 @@ fn run_list_tools(format: IntrospectionFormat) -> Result<String> {
     }
 }
 
+fn run_describe_tool(tool_name: &str, format: IntrospectionFormat) -> Result<String> {
+    let selected = tool_name.trim();
+    if selected.is_empty() {
+        bail!("--describe-tool cannot be empty");
+    }
+
+    let registry = ToolRegistry::with_default_tools();
+    let tools = registry.tool_specs();
+
+    let Some(tool) = tools
+        .iter()
+        .find(|candidate| candidate.name.eq_ignore_ascii_case(selected))
+    else {
+        let available = tools
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        bail!("Unknown tool '{selected}'. Available tools: {available}");
+    };
+
+    match format {
+        IntrospectionFormat::Text => Ok(render_tool_detail(tool)),
+        IntrospectionFormat::Json => render_tool_detail_json(tool.clone()),
+    }
+}
+
 fn render_tool_list_json(tools: Vec<ToolSpec>) -> Result<String> {
     let view = ToolListView { tools };
+    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
+}
+
+fn render_tool_detail_json(tool: ToolSpec) -> Result<String> {
+    let view = ToolDetailView { tool };
     serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
 }
 
@@ -832,6 +878,20 @@ fn render_tool_list(tools: &[ToolSpec]) -> String {
     for tool in tools {
         let _ = writeln!(output, "- {}: {}", tool.name, tool.description);
         let _ = writeln!(output, "  args_schema: {}", compact_json(&tool.args_schema));
+    }
+
+    output.trim_end().to_string()
+}
+
+fn render_tool_detail(tool: &ToolSpec) -> String {
+    let mut output = String::new();
+
+    let _ = writeln!(output, "WraithRun Tool");
+    let _ = writeln!(output, "name: {}", tool.name);
+    let _ = writeln!(output, "description: {}", tool.description);
+    let _ = writeln!(output, "args_schema:");
+    for line in pretty_json(&tool.args_schema).lines() {
+        let _ = writeln!(output, "  {line}");
     }
 
     output.trim_end().to_string()
@@ -1444,6 +1504,9 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     if cli.list_tools {
         selected.push("--list-tools");
     }
+    if cli.describe_tool.is_some() {
+        selected.push("--describe-tool");
+    }
     if cli.list_profiles {
         selected.push("--list-profiles");
     }
@@ -1469,10 +1532,14 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
 
 fn ensure_introspection_format_usage(cli: &Cli) -> Result<()> {
     if cli.introspection_format == IntrospectionFormat::Json
-        && !(cli.doctor || cli.list_task_templates || cli.list_tools || cli.list_profiles)
+        && !(cli.doctor
+            || cli.list_task_templates
+            || cli.list_tools
+            || cli.describe_tool.is_some()
+            || cli.list_profiles)
     {
         bail!(
-            "--introspection-format only applies to --doctor, --list-task-templates, --list-tools, or --list-profiles"
+            "--introspection-format only applies to --doctor, --list-task-templates, --list-tools, --describe-tool, or --list-profiles"
         );
     }
 
@@ -2143,11 +2210,12 @@ mod tests {
         ensure_introspection_format_usage, merge_sources, render_doctor_report,
         render_doctor_report_json, render_effective_config_explanation_json,
         render_effective_config_json, render_profile_list, render_profile_list_json, render_report,
-        render_task_template_list, render_task_template_list_json, render_tool_list,
-        render_tool_list_json, resolve_effective_config_explanation, resolve_init_config_path,
-        resolve_task_for_mode, resolve_task_for_run, run_init_config, Cli, DoctorReport,
-        DoctorStatus, FileConfig, IntrospectionFormat, OutputFormat, SettingsFragment,
-        TaskTemplate, ToolRegistry,
+        render_task_template_list, render_task_template_list_json, render_tool_detail,
+        render_tool_detail_json, render_tool_list, render_tool_list_json,
+        resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
+        resolve_task_for_run, run_describe_tool, run_init_config, Cli, DoctorReport, DoctorStatus,
+        FileConfig, IntrospectionFormat, OutputFormat, SettingsFragment, TaskTemplate,
+        ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -2161,6 +2229,7 @@ mod tests {
             doctor: false,
             list_task_templates: false,
             list_tools: false,
+            describe_tool: None,
             list_profiles: false,
             introspection_format: IntrospectionFormat::Text,
             print_effective_config: false,
@@ -2608,6 +2677,50 @@ mod tests {
     }
 
     #[test]
+    fn renders_tool_detail() {
+        let tool = ToolRegistry::with_default_tools()
+            .tool_specs()
+            .into_iter()
+            .find(|candidate| candidate.name == "hash_binary")
+            .expect("hash_binary should exist");
+
+        let rendered = render_tool_detail(&tool);
+        assert!(rendered.contains("WraithRun Tool"));
+        assert!(rendered.contains("name: hash_binary"));
+        assert!(rendered.contains("args_schema:"));
+    }
+
+    #[test]
+    fn renders_tool_detail_json() {
+        let tool = ToolRegistry::with_default_tools()
+            .tool_specs()
+            .into_iter()
+            .find(|candidate| candidate.name == "hash_binary")
+            .expect("hash_binary should exist");
+
+        let rendered =
+            render_tool_detail_json(tool).expect("tool detail json rendering should work");
+        assert!(rendered.contains("\"tool\""));
+        assert!(rendered.contains("\"name\": \"hash_binary\""));
+    }
+
+    #[test]
+    fn describes_tool_by_name() {
+        let rendered = run_describe_tool("hash_binary", IntrospectionFormat::Json)
+            .expect("describe-tool should work");
+        assert!(rendered.contains("\"tool\""));
+        assert!(rendered.contains("\"name\": \"hash_binary\""));
+    }
+
+    #[test]
+    fn describe_tool_rejects_unknown_name() {
+        let error = run_describe_tool("does-not-exist", IntrospectionFormat::Text)
+            .expect_err("unknown tool should fail");
+        assert!(error.to_string().contains("Unknown tool"));
+        assert!(error.to_string().contains("hash_binary"));
+    }
+
+    #[test]
     fn rejects_json_introspection_format_without_mode() {
         let mut cli = base_cli();
         cli.introspection_format = IntrospectionFormat::Json;
@@ -2637,6 +2750,16 @@ mod tests {
 
         ensure_introspection_format_usage(&cli)
             .expect("json introspection should be allowed for list-tools");
+    }
+
+    #[test]
+    fn allows_json_introspection_format_for_describe_tool_mode() {
+        let mut cli = base_cli();
+        cli.describe_tool = Some("hash_binary".to_string());
+        cli.introspection_format = IntrospectionFormat::Json;
+
+        ensure_introspection_format_usage(&cli)
+            .expect("json introspection should be allowed for describe-tool");
     }
 
     #[test]
