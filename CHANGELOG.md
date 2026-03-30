@@ -8,11 +8,11 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- `--list-tools --tool-filter <QUERY>` now supports multi-term query matching for faster triage lookups.
 
 ### Changed
 
-- (none yet)
+- `--tool-filter` matching now normalizes separators (spaces, hyphens, underscores, punctuation) and applies terms across tool names and descriptions.
 
 ### Fixed
 

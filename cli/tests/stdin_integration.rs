@@ -345,6 +345,38 @@ fn list_tools_filter_json_contract_contains_filtered_result() {
 }
 
 #[test]
+fn list_tools_filter_json_contract_supports_multi_term_query() {
+    let output = run_capture(&[
+        "--list-tools",
+        "--tool-filter",
+        "priv esc",
+        "--introspection-format",
+        "json",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let tools = json
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("tools should be an array");
+    assert_eq!(
+        tools.len(),
+        1,
+        "multi-term filter should narrow to one result"
+    );
+    assert_eq!(
+        tools[0].get("name").and_then(Value::as_str),
+        Some("check_privilege_escalation_vectors")
+    );
+}
+
+#[test]
 fn list_tools_filter_rejects_no_matches() {
     let output = run_capture(&["--list-tools", "--tool-filter", "no-such-tool"]);
 
@@ -354,4 +386,16 @@ fn list_tools_filter_rejects_no_matches() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("No tools matched filter 'no-such-tool'"));
+}
+
+#[test]
+fn list_tools_filter_rejects_separator_only_query() {
+    let output = run_capture(&["--list-tools", "--tool-filter", "___"]);
+
+    assert!(
+        !output.status.success(),
+        "process should fail when filter has no alphanumeric terms"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("at least one alphanumeric term"));
 }

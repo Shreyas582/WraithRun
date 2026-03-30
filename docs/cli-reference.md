@@ -32,7 +32,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--doctor`: run configuration/runtime diagnostics and exit.
 - `--list-task-templates`: list built-in investigation templates and exit.
 - `--list-tools`: list built-in local investigation tools and exit.
-- `--tool-filter <QUERY>`: filter `--list-tools` results by name/description substring.
+- `--tool-filter <QUERY>`: filter `--list-tools` results by name/description terms (case-insensitive, punctuation-normalized, multi-term support).
 - `--describe-tool <NAME>`: render details for one tool and exit. Accepts case-insensitive full names plus unique partial or hyphenated queries.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
 - `--introspection-format <INTROSPECTION_FORMAT>`: format for introspection modes. Values: `text`, `json`. Default: `text`.
@@ -99,7 +99,13 @@ Behavior:
 
 `--list-tools` output includes tool names, descriptions, and JSON argument schemas.
 
-When `--tool-filter` is used with `--list-tools`, only matching tools are returned.
+When `--tool-filter` is used with `--list-tools`, only tools matching all query terms are returned.
+
+`--tool-filter` matching behavior:
+
+- case-insensitive,
+- normalizes separators (spaces, hyphens, underscores, punctuation),
+- supports multi-term queries such as `priv esc`.
 
 `--describe-tool` output includes one matching tool object by name.
 

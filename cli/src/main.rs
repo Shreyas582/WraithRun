@@ -833,15 +833,8 @@ fn run_list_tools(format: IntrospectionFormat, filter: Option<&str>) -> Result<S
 
     if let Some(raw_filter) = filter {
         let normalized = raw_filter.trim();
-        if normalized.is_empty() {
-            bail!("--tool-filter cannot be empty");
-        }
-
-        let query = normalized.to_ascii_lowercase();
-        tools.retain(|tool| {
-            tool.name.to_ascii_lowercase().contains(&query)
-                || tool.description.to_ascii_lowercase().contains(&query)
-        });
+        let terms = parse_tool_filter_terms(normalized)?;
+        tools.retain(|tool| tool_matches_filter(tool, &terms));
 
         if tools.is_empty() {
             bail!(
@@ -855,6 +848,55 @@ fn run_list_tools(format: IntrospectionFormat, filter: Option<&str>) -> Result<S
         IntrospectionFormat::Text => Ok(render_tool_list(&tools)),
         IntrospectionFormat::Json => render_tool_list_json(tools),
     }
+}
+
+fn parse_tool_filter_terms(raw_filter: &str) -> Result<Vec<String>> {
+    if raw_filter.is_empty() {
+        bail!("--tool-filter cannot be empty");
+    }
+
+    let terms = normalize_search_terms(raw_filter);
+    if terms.is_empty() {
+        bail!("--tool-filter must include at least one alphanumeric term");
+    }
+
+    Ok(terms)
+}
+
+fn tool_matches_filter(tool: &ToolSpec, terms: &[String]) -> bool {
+    let searchable = format!(
+        "{} {}",
+        normalize_search_text(&tool.name),
+        normalize_search_text(&tool.description)
+    );
+
+    terms.iter().all(|term| searchable.contains(term))
+}
+
+fn normalize_search_terms(value: &str) -> Vec<String> {
+    normalize_search_text(value)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect()
+}
+
+fn normalize_search_text(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut pending_separator = false;
+
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if pending_separator && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            normalized.push(ch.to_ascii_lowercase());
+            pending_separator = false;
+        } else {
+            pending_separator = true;
+        }
+    }
+
+    normalized
 }
 
 fn run_describe_tool(tool_name: &str, format: IntrospectionFormat) -> Result<String> {
@@ -2763,6 +2805,22 @@ mod tests {
     }
 
     #[test]
+    fn list_tools_filter_matches_multi_term_query() {
+        let rendered = run_list_tools(IntrospectionFormat::Json, Some("priv esc"))
+            .expect("multi-term filtered list-tools should succeed");
+        assert!(rendered.contains("\"check_privilege_escalation_vectors\""));
+        assert!(!rendered.contains("\"scan_network\""));
+    }
+
+    #[test]
+    fn list_tools_filter_matches_hyphenated_query() {
+        let rendered = run_list_tools(IntrospectionFormat::Json, Some("hash-binary"))
+            .expect("hyphenated filtered list-tools should succeed");
+        assert!(rendered.contains("\"hash_binary\""));
+        assert!(!rendered.contains("\"scan_network\""));
+    }
+
+    #[test]
     fn list_tools_filter_rejects_unknown_query() {
         let error = run_list_tools(IntrospectionFormat::Text, Some("definitely-not-a-tool"))
             .expect_err("unknown filter should fail");
@@ -2774,6 +2832,13 @@ mod tests {
         let error = run_list_tools(IntrospectionFormat::Text, Some("   "))
             .expect_err("empty filter should fail");
         assert!(error.to_string().contains("--tool-filter cannot be empty"));
+    }
+
+    #[test]
+    fn list_tools_filter_rejects_non_alphanumeric_query() {
+        let error = run_list_tools(IntrospectionFormat::Text, Some("---"))
+            .expect_err("separator-only filter should fail");
+        assert!(error.to_string().contains("at least one alphanumeric term"));
     }
 
     #[test]

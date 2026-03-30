@@ -121,7 +121,7 @@ Common options:
 - `--doctor` run runtime health checks and configuration diagnostics.
 - `--list-task-templates` show available built-in investigation templates.
 - `--list-tools` list available local investigation tools and argument schemas.
-- `--tool-filter <QUERY>` filter `--list-tools` output by tool name or description substring.
+- `--tool-filter <QUERY>` filter `--list-tools` output by tool name or description terms (case-insensitive, punctuation-normalized, supports multi-word queries).
 - `--describe-tool <NAME>` show details for one tool (name, description, argument schema). Accepts case-insensitive full names plus unique partial or hyphenated queries.
 - `--list-profiles` list built-in and config-defined profiles.
 - `--introspection-format <text|json>` output format for `--doctor`, `--list-task-templates`, `--list-tools`, `--describe-tool`, and `--list-profiles` (default `text`).
@@ -188,6 +188,12 @@ Filter tool list by keyword:
 
 ```powershell
 cargo run -p wraithrun -- --list-tools --tool-filter hash
+```
+
+Filter tools with multi-word query terms:
+
+```powershell
+cargo run -p wraithrun -- --list-tools --tool-filter "priv esc"
 ```
 
 Describe one tool:
