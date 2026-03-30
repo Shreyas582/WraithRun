@@ -26,6 +26,18 @@ Fix:
 wraithrun --init-config
 ```
 
+## Not sure which layer set a value
+
+Symptom:
+
+- Effective runtime values are unexpected and you need to know whether CLI/env/config/profile/default won.
+
+Fix:
+
+```powershell
+wraithrun --explain-effective-config --profile local-lab
+```
+
 ## Vitis inference is disabled
 
 Symptom:

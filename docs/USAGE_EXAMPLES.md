@@ -150,6 +150,12 @@ Preview final merged runtime settings:
 .\wraithrun.exe --print-effective-config --profile production-triage --config .\wraithrun.example.toml
 ```
 
+Show effective settings with source attribution:
+
+```powershell
+.\wraithrun.exe --explain-effective-config --profile production-triage --config .\wraithrun.example.toml
+```
+
 Inspect commands are mutually exclusive with `--doctor`.
 
 ## Initialize a Config File

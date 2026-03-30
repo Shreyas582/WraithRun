@@ -40,7 +40,7 @@ enum LogMode {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["doctor", "list_profiles", "print_effective_config", "init_config"])]
+    #[arg(long, required_unless_present_any = ["doctor", "list_profiles", "print_effective_config", "init_config", "explain_effective_config"])]
     task: Option<String>,
 
     #[arg(long)]
@@ -51,6 +51,9 @@ struct Cli {
 
     #[arg(long)]
     print_effective_config: bool,
+
+    #[arg(long)]
+    explain_effective_config: bool,
 
     #[arg(long)]
     init_config: bool,
@@ -170,6 +173,31 @@ struct RuntimeConfigView {
     vitis_cache_key: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct RuntimeConfigSources {
+    task: String,
+    live: String,
+    model: String,
+    tokenizer: String,
+    max_steps: String,
+    max_new_tokens: String,
+    temperature: String,
+    format: String,
+    output_file: String,
+    log_mode: String,
+    vitis_config: String,
+    vitis_cache_dir: String,
+    vitis_cache_key: String,
+}
+
+#[derive(Debug, Serialize)]
+struct EffectiveConfigExplanationView {
+    effective: RuntimeConfigView,
+    sources: RuntimeConfigSources,
+    selected_profile: Option<String>,
+    config_path: Option<String>,
+}
+
 impl RuntimeConfig {
     fn new(task: String) -> Self {
         Self {
@@ -225,6 +253,26 @@ impl RuntimeConfig {
         }
         if let Some(vitis_cache_key) = &fragment.vitis_cache_key {
             self.vitis_cache_key = Some(vitis_cache_key.clone());
+        }
+    }
+}
+
+impl RuntimeConfigSources {
+    fn with_defaults(task_source: &str) -> Self {
+        Self {
+            task: task_source.to_string(),
+            live: "default".to_string(),
+            model: "default".to_string(),
+            tokenizer: "default".to_string(),
+            max_steps: "default".to_string(),
+            max_new_tokens: "default".to_string(),
+            temperature: "default".to_string(),
+            format: "default".to_string(),
+            output_file: "default".to_string(),
+            log_mode: "default".to_string(),
+            vitis_config: "default".to_string(),
+            vitis_cache_dir: "default".to_string(),
+            vitis_cache_key: "default".to_string(),
         }
     }
 }
@@ -304,6 +352,15 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if cli.explain_effective_config {
+        let explanation = resolve_effective_config_explanation(&cli)?;
+        println!(
+            "{}",
+            render_effective_config_explanation_json(&explanation)?
+        );
+        return Ok(());
+    }
+
     if cli.doctor {
         let report = run_doctor(&cli);
         println!("{}", render_doctor_report(&report));
@@ -345,7 +402,11 @@ fn resolve_runtime_config(cli: &Cli) -> Result<RuntimeConfig> {
     let task = cli
         .task
         .clone()
-        .ok_or_else(|| anyhow!("--task is required unless --doctor is set"))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "--task is required unless one of --doctor, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
+            )
+        })?;
 
     resolve_runtime_config_with_task(cli, task)
 }
@@ -356,6 +417,40 @@ fn resolve_runtime_config_for_preview(cli: &Cli) -> Result<RuntimeConfig> {
         .clone()
         .unwrap_or_else(|| "preview-effective-config".to_string());
     resolve_runtime_config_with_task(cli, task)
+}
+
+fn resolve_effective_config_explanation(cli: &Cli) -> Result<EffectiveConfigExplanationView> {
+    let task = cli
+        .task
+        .clone()
+        .unwrap_or_else(|| "explain-effective-config".to_string());
+
+    let task_source = if cli.task.is_some() {
+        "cli --task"
+    } else {
+        "mode default"
+    };
+
+    let profile = resolve_profile_name(cli)?;
+    let (file_config, file_config_path) = load_config_for_cli(cli)?;
+    let env_overrides = env_settings_fragment()?;
+
+    let (runtime, sources) = merge_sources_with_explanation(
+        cli,
+        task,
+        task_source,
+        profile.clone(),
+        file_config.as_ref(),
+        file_config_path.as_deref(),
+        &env_overrides,
+    )?;
+
+    Ok(EffectiveConfigExplanationView {
+        effective: RuntimeConfigView::from_runtime(&runtime),
+        sources,
+        selected_profile: profile,
+        config_path: file_config_path.map(|path| path.display().to_string()),
+    })
 }
 
 fn resolve_runtime_config_with_task(cli: &Cli, task: String) -> Result<RuntimeConfig> {
@@ -421,6 +516,72 @@ fn merge_sources(
     validate_runtime_config(&resolved)?;
 
     Ok(resolved)
+}
+
+fn merge_sources_with_explanation(
+    cli: &Cli,
+    task: String,
+    task_source: &str,
+    profile: Option<String>,
+    file_config: Option<&FileConfig>,
+    file_config_path: Option<&Path>,
+    env_overrides: &SettingsFragment,
+) -> Result<(RuntimeConfig, RuntimeConfigSources)> {
+    let mut resolved = RuntimeConfig::new(task);
+    let mut sources = RuntimeConfigSources::with_defaults(task_source);
+
+    let built_in_profile = profile.as_deref().and_then(builtin_profile);
+    if let Some(profile_name) = profile.as_deref() {
+        if let Some(fragment) = built_in_profile.as_ref() {
+            let source = format!("built-in profile '{profile_name}'");
+            apply_fragment_with_source(&mut resolved, &mut sources, fragment, &source);
+        }
+    }
+
+    let mut matched_file_profile = false;
+    if let Some(file_config) = file_config {
+        let source = file_config_path
+            .map(|path| format!("config defaults ({})", path.display()))
+            .unwrap_or_else(|| "config defaults".to_string());
+        apply_fragment_with_source(&mut resolved, &mut sources, &file_config.defaults, &source);
+
+        if let Some(profile_name) = profile.as_deref() {
+            if let Some(profile_settings) = lookup_profile(&file_config.profiles, profile_name) {
+                let source = file_config_path
+                    .map(|path| format!("config profile '{profile_name}' ({})", path.display()))
+                    .unwrap_or_else(|| format!("config profile '{profile_name}'"));
+                apply_fragment_with_source(&mut resolved, &mut sources, profile_settings, &source);
+                matched_file_profile = true;
+            }
+        }
+    }
+
+    if let Some(profile_name) = profile.as_deref() {
+        if built_in_profile.is_none() && !matched_file_profile {
+            let known_profiles = KNOWN_PROFILE_NAMES.join(", ");
+            if let Some(path) = file_config_path {
+                bail!(
+                    "Profile '{profile_name}' was not found in built-in profiles ({known_profiles}) or in config '{}'.",
+                    path.display()
+                );
+            }
+
+            bail!(
+                "Profile '{profile_name}' was not found in built-in profiles ({known_profiles}), and no config file was loaded."
+            );
+        }
+    }
+
+    apply_fragment_with_source(
+        &mut resolved,
+        &mut sources,
+        env_overrides,
+        "environment variables",
+    );
+    apply_cli_overrides_with_source(&mut resolved, &mut sources, cli);
+    validate_runtime_config(&resolved)?;
+
+    Ok((resolved, sources))
 }
 
 fn resolve_profile_name(cli: &Cli) -> Result<Option<String>> {
@@ -593,6 +754,125 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     }
 }
 
+fn apply_fragment_with_source(
+    runtime: &mut RuntimeConfig,
+    sources: &mut RuntimeConfigSources,
+    fragment: &SettingsFragment,
+    source: &str,
+) {
+    if let Some(model) = &fragment.model {
+        runtime.model = model.clone();
+        sources.model = source.to_string();
+    }
+    if let Some(tokenizer) = &fragment.tokenizer {
+        runtime.tokenizer = Some(tokenizer.clone());
+        sources.tokenizer = source.to_string();
+    }
+    if let Some(max_steps) = fragment.max_steps {
+        runtime.max_steps = max_steps;
+        sources.max_steps = source.to_string();
+    }
+    if let Some(max_new_tokens) = fragment.max_new_tokens {
+        runtime.max_new_tokens = max_new_tokens;
+        sources.max_new_tokens = source.to_string();
+    }
+    if let Some(temperature) = fragment.temperature {
+        runtime.temperature = temperature;
+        sources.temperature = source.to_string();
+    }
+    if let Some(live) = fragment.live {
+        runtime.live = live;
+        sources.live = source.to_string();
+    }
+    if let Some(format) = fragment.format {
+        runtime.format = format;
+        sources.format = source.to_string();
+    }
+    if let Some(output_file) = &fragment.output_file {
+        runtime.output_file = Some(output_file.clone());
+        sources.output_file = source.to_string();
+    }
+    if let Some(log_mode) = fragment.log {
+        runtime.log_mode = log_mode;
+        sources.log_mode = source.to_string();
+    }
+    if let Some(vitis_config) = &fragment.vitis_config {
+        runtime.vitis_config = Some(vitis_config.clone());
+        sources.vitis_config = source.to_string();
+    }
+    if let Some(vitis_cache_dir) = &fragment.vitis_cache_dir {
+        runtime.vitis_cache_dir = Some(vitis_cache_dir.clone());
+        sources.vitis_cache_dir = source.to_string();
+    }
+    if let Some(vitis_cache_key) = &fragment.vitis_cache_key {
+        runtime.vitis_cache_key = Some(vitis_cache_key.clone());
+        sources.vitis_cache_key = source.to_string();
+    }
+}
+
+fn apply_cli_overrides_with_source(
+    runtime: &mut RuntimeConfig,
+    sources: &mut RuntimeConfigSources,
+    cli: &Cli,
+) {
+    if let Some(model) = &cli.model {
+        runtime.model = model.clone();
+        sources.model = "cli --model".to_string();
+    }
+    if let Some(tokenizer) = &cli.tokenizer {
+        runtime.tokenizer = Some(tokenizer.clone());
+        sources.tokenizer = "cli --tokenizer".to_string();
+    }
+    if let Some(max_steps) = cli.max_steps {
+        runtime.max_steps = max_steps;
+        sources.max_steps = "cli --max-steps".to_string();
+    }
+    if let Some(max_new_tokens) = cli.max_new_tokens {
+        runtime.max_new_tokens = max_new_tokens;
+        sources.max_new_tokens = "cli --max-new-tokens".to_string();
+    }
+    if let Some(temperature) = cli.temperature {
+        runtime.temperature = temperature;
+        sources.temperature = "cli --temperature".to_string();
+    }
+    if cli.live {
+        runtime.live = true;
+        sources.live = "cli --live".to_string();
+    }
+    if cli.dry_run {
+        runtime.live = false;
+        sources.live = "cli --dry-run".to_string();
+    }
+    if let Some(format) = cli.format {
+        runtime.format = format;
+        sources.format = "cli --format".to_string();
+    }
+    if let Some(output_file) = &cli.output_file {
+        runtime.output_file = Some(output_file.clone());
+        sources.output_file = "cli --output-file".to_string();
+    }
+    if cli.quiet {
+        runtime.log_mode = LogMode::Quiet;
+        sources.log_mode = "cli --quiet".to_string();
+    }
+    if cli.verbose {
+        runtime.log_mode = LogMode::Verbose;
+        sources.log_mode = "cli --verbose".to_string();
+    }
+    if let Some(vitis_config) = &cli.vitis_config {
+        runtime.vitis_config = Some(vitis_config.clone());
+        sources.vitis_config = "cli --vitis-config".to_string();
+    }
+    if let Some(vitis_cache_dir) = &cli.vitis_cache_dir {
+        runtime.vitis_cache_dir = Some(vitis_cache_dir.clone());
+        sources.vitis_cache_dir = "cli --vitis-cache-dir".to_string();
+    }
+    if let Some(vitis_cache_key) = &cli.vitis_cache_key {
+        runtime.vitis_cache_key = Some(vitis_cache_key.clone());
+        sources.vitis_cache_key = "cli --vitis-cache-key".to_string();
+    }
+}
+
 fn validate_runtime_config(config: &RuntimeConfig) -> Result<()> {
     if config.max_steps == 0 {
         bail!("max_steps must be at least 1");
@@ -718,6 +998,9 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     }
     if cli.print_effective_config {
         selected.push("--print-effective-config");
+    }
+    if cli.explain_effective_config {
+        selected.push("--explain-effective-config");
     }
     if cli.init_config {
         selected.push("--init-config");
@@ -852,6 +1135,12 @@ fn render_profile_list(
 fn render_effective_config_json(runtime: &RuntimeConfig) -> Result<String> {
     serde_json::to_string_pretty(&RuntimeConfigView::from_runtime(runtime))
         .map_err(|err| anyhow!(err))
+}
+
+fn render_effective_config_explanation_json(
+    explanation: &EffectiveConfigExplanationView,
+) -> Result<String> {
+    serde_json::to_string_pretty(explanation).map_err(|err| anyhow!(err))
 }
 
 impl RuntimeConfigView {
@@ -1329,9 +1618,10 @@ mod tests {
     use core_engine::{AgentTurn, RunReport, ToolCall};
 
     use super::{
-        merge_sources, render_doctor_report, render_effective_config_json, render_profile_list,
-        render_report, resolve_init_config_path, run_init_config, Cli, DoctorReport, DoctorStatus,
-        FileConfig, OutputFormat, SettingsFragment,
+        merge_sources, render_doctor_report, render_effective_config_explanation_json,
+        render_effective_config_json, render_profile_list, render_report,
+        resolve_effective_config_explanation, resolve_init_config_path, run_init_config, Cli,
+        DoctorReport, DoctorStatus, FileConfig, OutputFormat, SettingsFragment,
     };
 
     fn base_cli() -> Cli {
@@ -1340,6 +1630,7 @@ mod tests {
             doctor: false,
             list_profiles: false,
             print_effective_config: false,
+            explain_effective_config: false,
             init_config: false,
             init_config_path: None,
             force: false,
@@ -1538,6 +1829,27 @@ mod tests {
         assert!(rendered.contains("\"mode\": \"dry-run\""));
         assert!(rendered.contains("\"max_steps\": 8"));
         assert!(rendered.contains("\"model\""));
+    }
+
+    #[test]
+    fn renders_effective_config_explanation_json() {
+        let mut cli = base_cli();
+        cli.task = None;
+        cli.profile = Some("local-lab".to_string());
+        let path = unique_temp_file("wraithrun-explain");
+        fs::write(&path, "").expect("config fixture should be created");
+        cli.config = Some(path.clone());
+
+        let explanation =
+            resolve_effective_config_explanation(&cli).expect("explanation should resolve");
+        let rendered = render_effective_config_explanation_json(&explanation)
+            .expect("explanation should serialize");
+
+        assert!(rendered.contains("\"sources\""));
+        assert!(rendered.contains("\"selected_profile\": \"local-lab\""));
+        assert!(rendered.contains("built-in profile 'local-lab'"));
+
+        let _ = fs::remove_file(&path);
     }
 
     #[test]

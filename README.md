@@ -116,6 +116,7 @@ Common options:
 - `--doctor` run runtime health checks and configuration diagnostics.
 - `--list-profiles` list built-in and config-defined profiles.
 - `--print-effective-config` render the resolved runtime settings as JSON and exit.
+- `--explain-effective-config` render resolved runtime settings plus per-field source attribution.
 - `--init-config` write a starter TOML config file and exit.
 - `--init-config-path <PATH>` output path used by `--init-config` (default `./wraithrun.toml`).
 - `--force` overwrite an existing file when used with `--init-config`.
@@ -159,6 +160,12 @@ Preview resolved runtime config:
 
 ```powershell
 cargo run -p wraithrun -- --print-effective-config --profile local-lab
+```
+
+Explain where each resolved value came from:
+
+```powershell
+cargo run -p wraithrun -- --explain-effective-config --profile local-lab
 ```
 
 Initialize a local config file:

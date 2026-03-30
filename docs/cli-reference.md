@@ -11,6 +11,7 @@ wraithrun [OPTIONS] --task <TASK>
 wraithrun --doctor [OPTIONS]
 wraithrun --list-profiles [OPTIONS]
 wraithrun --print-effective-config [OPTIONS]
+wraithrun --explain-effective-config [OPTIONS]
 wraithrun --init-config [--init-config-path <PATH>] [--force]
 ```
 
@@ -20,6 +21,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--doctor`: run configuration/runtime diagnostics and exit.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
+- `--explain-effective-config`: print resolved runtime settings and per-field source attribution as JSON.
 - `--init-config`: write a starter TOML config file and exit.
 - `--init-config-path <INIT_CONFIG_PATH>`: output path for `--init-config`. Default: `./wraithrun.toml`.
 - `--force`: allow overwrite of an existing file when `--init-config` is used.
@@ -78,6 +80,12 @@ Behavior:
 
 `--print-effective-config` output includes the final merged runtime settings after applying precedence rules.
 
+`--explain-effective-config` output includes:
+
+- the same effective settings as `--print-effective-config`,
+- a `sources` object showing where each field came from (default, profile, config, env, or CLI),
+- selected profile and loaded config path context.
+
 `--init-config` output includes the target path and suggested follow-up commands.
 
 These modes are mutually exclusive with each other and with `--doctor`.
@@ -130,6 +138,12 @@ Print effective config:
 
 ```powershell
 wraithrun --print-effective-config --profile production-triage --config .\wraithrun.example.toml
+```
+
+Explain effective config sources:
+
+```powershell
+wraithrun --explain-effective-config --profile production-triage --config .\wraithrun.example.toml
 ```
 
 Initialize config at default path:
