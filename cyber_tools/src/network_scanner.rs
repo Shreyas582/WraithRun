@@ -18,11 +18,7 @@ pub async fn list_local_listeners(limit: usize) -> Result<Vec<ListenerRecord>, T
     let output = Command::new("netstat").args(["-ano"]).output().await?;
 
     #[cfg(not(target_os = "windows"))]
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg("ss -tulpen")
-        .output()
-        .await?;
+    let output = Command::new("ss").args(["-tulpen"]).output().await?;
 
     if !output.status.success() {
         return Err(ToolError::Execution(format!(
