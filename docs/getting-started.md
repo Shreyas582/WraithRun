@@ -89,3 +89,15 @@ Quick diagnostics:
 ```powershell
 cargo run -p wraithrun -- --doctor
 ```
+
+List profiles:
+
+```powershell
+cargo run -p wraithrun -- --list-profiles
+```
+
+Preview effective config:
+
+```powershell
+cargo run -p wraithrun -- --print-effective-config --profile local-lab
+```

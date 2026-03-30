@@ -114,6 +114,8 @@ Common options:
 
 - `--task <TASK>` required.
 - `--doctor` run runtime health checks and configuration diagnostics.
+- `--list-profiles` list built-in and config-defined profiles.
+- `--print-effective-config` render the resolved runtime settings as JSON and exit.
 - `--config <CONFIG>` load settings from a TOML file (default auto-load: `./wraithrun.toml` when present).
 - `--profile <PROFILE>` apply a named profile from built-ins or config file.
 - `--live` enables model inference mode (default is dry-run).
@@ -142,6 +144,18 @@ Doctor checks:
 
 ```powershell
 cargo run -p wraithrun -- --doctor
+```
+
+List available profiles:
+
+```powershell
+cargo run -p wraithrun -- --list-profiles
+```
+
+Preview resolved runtime config:
+
+```powershell
+cargo run -p wraithrun -- --print-effective-config --profile local-lab
 ```
 
 ## Configuration Files and Profiles

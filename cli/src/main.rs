@@ -8,7 +8,7 @@ use core_engine::agent::Agent;
 use core_engine::RunReport;
 use cyber_tools::ToolRegistry;
 use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing_subscriber::EnvFilter;
 
@@ -18,7 +18,7 @@ const DEFAULT_MAX_STEPS: usize = 8;
 const DEFAULT_MAX_NEW_TOKENS: usize = 256;
 const DEFAULT_TEMPERATURE: f32 = 0.2;
 
-#[derive(Debug, Clone, Copy, ValueEnum, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 enum OutputFormat {
     #[default]
@@ -27,7 +27,7 @@ enum OutputFormat {
     Markdown,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 enum LogMode {
     Quiet,
@@ -39,11 +39,17 @@ enum LogMode {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present = "doctor")]
+    #[arg(long, required_unless_present_any = ["doctor", "list_profiles", "print_effective_config"])]
     task: Option<String>,
 
     #[arg(long)]
     doctor: bool,
+
+    #[arg(long)]
+    list_profiles: bool,
+
+    #[arg(long)]
+    print_effective_config: bool,
 
     #[arg(long)]
     config: Option<PathBuf>,
@@ -130,6 +136,24 @@ struct RuntimeConfig {
     live: bool,
     format: OutputFormat,
     output_file: Option<PathBuf>,
+    log_mode: LogMode,
+    vitis_config: Option<String>,
+    vitis_cache_dir: Option<String>,
+    vitis_cache_key: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeConfigView {
+    task: String,
+    mode: &'static str,
+    live: bool,
+    model: String,
+    tokenizer: Option<String>,
+    max_steps: usize,
+    max_new_tokens: usize,
+    temperature: f32,
+    format: OutputFormat,
+    output_file: Option<String>,
     log_mode: LogMode,
     vitis_config: Option<String>,
     vitis_cache_dir: Option<String>,
@@ -250,6 +274,19 @@ impl DoctorReport {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    ensure_exclusive_modes(&cli)?;
+
+    if cli.list_profiles {
+        let listing = run_list_profiles(&cli)?;
+        println!("{listing}");
+        return Ok(());
+    }
+
+    if cli.print_effective_config {
+        let runtime = resolve_runtime_config_for_preview(&cli)?;
+        println!("{}", render_effective_config_json(&runtime)?);
+        return Ok(());
+    }
 
     if cli.doctor {
         let report = run_doctor(&cli);
@@ -294,6 +331,14 @@ fn resolve_runtime_config(cli: &Cli) -> Result<RuntimeConfig> {
         .clone()
         .ok_or_else(|| anyhow!("--task is required unless --doctor is set"))?;
 
+    resolve_runtime_config_with_task(cli, task)
+}
+
+fn resolve_runtime_config_for_preview(cli: &Cli) -> Result<RuntimeConfig> {
+    let task = cli
+        .task
+        .clone()
+        .unwrap_or_else(|| "preview-effective-config".to_string());
     resolve_runtime_config_with_task(cli, task)
 }
 
@@ -644,6 +689,142 @@ fn parse_log_mode(raw: &str, source: &str) -> Result<LogMode> {
         "normal" => Ok(LogMode::Normal),
         "verbose" => Ok(LogMode::Verbose),
         _ => bail!("{source} must be one of: quiet, normal, verbose (got '{raw}')"),
+    }
+}
+
+fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
+    let mut selected = Vec::new();
+    if cli.doctor {
+        selected.push("--doctor");
+    }
+    if cli.list_profiles {
+        selected.push("--list-profiles");
+    }
+    if cli.print_effective_config {
+        selected.push("--print-effective-config");
+    }
+
+    if selected.len() > 1 {
+        bail!(
+            "Options {} are mutually exclusive; choose only one mode.",
+            selected.join(", ")
+        );
+    }
+
+    Ok(())
+}
+
+fn run_list_profiles(cli: &Cli) -> Result<String> {
+    let selected_profile = resolve_profile_name(cli)?;
+    let (file_config, config_path) = load_config_for_cli(cli)?;
+    Ok(render_profile_list(
+        selected_profile.as_deref(),
+        config_path.as_deref(),
+        file_config.as_ref(),
+    ))
+}
+
+fn render_profile_list(
+    selected_profile: Option<&str>,
+    config_path: Option<&Path>,
+    file_config: Option<&FileConfig>,
+) -> String {
+    let mut output = String::new();
+
+    let _ = writeln!(output, "WraithRun Profiles");
+    let _ = writeln!(output, "Built-in profiles:");
+    let _ = writeln!(
+        output,
+        "- local-lab: dry-run, compact step/token budget, summary output"
+    );
+    let _ = writeln!(
+        output,
+        "- production-triage: dry-run, deeper loops, markdown output"
+    );
+    let _ = writeln!(
+        output,
+        "- live-model: live inference enabled, larger token budget"
+    );
+
+    match config_path {
+        Some(path) => {
+            let _ = writeln!(output, "Config file: {}", path.display());
+        }
+        None => {
+            let _ = writeln!(output, "Config file: none detected");
+        }
+    }
+
+    let mut profile_names = file_config
+        .map(|config| config.profiles.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    profile_names.sort_unstable();
+
+    let _ = writeln!(output, "Config-defined profiles:");
+    if profile_names.is_empty() {
+        let _ = writeln!(output, "- (none)");
+    } else {
+        for profile in &profile_names {
+            let _ = writeln!(output, "- {profile}");
+        }
+    }
+
+    if let Some(profile_name) = selected_profile {
+        let is_builtin = builtin_profile(profile_name).is_some();
+        let is_in_config = file_config
+            .and_then(|config| lookup_profile(&config.profiles, profile_name))
+            .is_some();
+
+        let _ = writeln!(output, "Selected profile: {profile_name}");
+        if is_builtin && is_in_config {
+            let _ = writeln!(
+                output,
+                "Profile source: built-in and config (config overrides overlapping keys)"
+            );
+        } else if is_builtin {
+            let _ = writeln!(output, "Profile source: built-in");
+        } else if is_in_config {
+            let _ = writeln!(output, "Profile source: config");
+        } else {
+            let _ = writeln!(
+                output,
+                "Profile source: missing (not found in built-ins or config)"
+            );
+        }
+    }
+
+    output.trim_end().to_string()
+}
+
+fn render_effective_config_json(runtime: &RuntimeConfig) -> Result<String> {
+    serde_json::to_string_pretty(&RuntimeConfigView::from_runtime(runtime))
+        .map_err(|err| anyhow!(err))
+}
+
+impl RuntimeConfigView {
+    fn from_runtime(runtime: &RuntimeConfig) -> Self {
+        Self {
+            task: runtime.task.clone(),
+            mode: if runtime.live { "live" } else { "dry-run" },
+            live: runtime.live,
+            model: runtime.model.display().to_string(),
+            tokenizer: runtime
+                .tokenizer
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            max_steps: runtime.max_steps,
+            max_new_tokens: runtime.max_new_tokens,
+            temperature: runtime.temperature,
+            format: runtime.format,
+            output_file: runtime
+                .output_file
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            log_mode: runtime.log_mode,
+            vitis_config: runtime.vitis_config.clone(),
+            vitis_cache_dir: runtime.vitis_cache_dir.clone(),
+            vitis_cache_key: runtime.vitis_cache_key.clone(),
+        }
     }
 }
 
@@ -1086,20 +1267,23 @@ fn init_tracing(log_mode: LogMode) {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::Path;
 
     use serde_json::json;
 
     use core_engine::{AgentTurn, RunReport, ToolCall};
 
     use super::{
-        merge_sources, render_doctor_report, render_report, Cli, DoctorReport, DoctorStatus,
-        FileConfig, OutputFormat, SettingsFragment,
+        merge_sources, render_doctor_report, render_effective_config_json, render_profile_list,
+        render_report, Cli, DoctorReport, DoctorStatus, FileConfig, OutputFormat, SettingsFragment,
     };
 
     fn base_cli() -> Cli {
         Cli {
             task: Some("Check suspicious listener ports and summarize risk".to_string()),
             doctor: false,
+            list_profiles: false,
+            print_effective_config: false,
             config: None,
             profile: None,
             model: None,
@@ -1252,5 +1436,48 @@ mod tests {
         assert!(rendered.contains("WraithRun Doctor"));
         assert!(rendered.contains("Summary: 1 pass, 1 warn, 1 fail"));
         assert!(rendered.contains("[FAIL] effective-runtime"));
+    }
+
+    #[test]
+    fn renders_profile_list_with_config_profiles() {
+        let file_config = FileConfig {
+            defaults: SettingsFragment::default(),
+            profiles: HashMap::from([
+                ("team-default".to_string(), SettingsFragment::default()),
+                ("incident-hotfix".to_string(), SettingsFragment::default()),
+            ]),
+        };
+
+        let rendered = render_profile_list(
+            Some("local-lab"),
+            Some(Path::new("./wraithrun.toml")),
+            Some(&file_config),
+        );
+
+        assert!(rendered.contains("WraithRun Profiles"));
+        assert!(rendered.contains("team-default"));
+        assert!(rendered.contains("incident-hotfix"));
+        assert!(rendered.contains("Profile source: built-in"));
+    }
+
+    #[test]
+    fn renders_effective_config_json() {
+        let cli = base_cli();
+        let runtime = merge_sources(
+            &cli,
+            "test-task".to_string(),
+            None,
+            None,
+            None,
+            &SettingsFragment::default(),
+        )
+        .expect("runtime resolution should succeed");
+
+        let rendered =
+            render_effective_config_json(&runtime).expect("effective config rendering works");
+
+        assert!(rendered.contains("\"mode\": \"dry-run\""));
+        assert!(rendered.contains("\"max_steps\": 8"));
+        assert!(rendered.contains("\"model\""));
     }
 }

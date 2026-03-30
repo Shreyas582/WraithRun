@@ -136,6 +136,22 @@ Check a specific profile and config combination:
 
 If doctor reports failures, the command exits non-zero.
 
+## Inspect Profile and Config Resolution
+
+List built-in and config-defined profiles:
+
+```powershell
+.\wraithrun.exe --list-profiles --config .\wraithrun.example.toml
+```
+
+Preview final merged runtime settings:
+
+```powershell
+.\wraithrun.exe --print-effective-config --profile production-triage --config .\wraithrun.example.toml
+```
+
+Inspect commands are mutually exclusive with `--doctor`.
+
 ## Pretty-Print or Parse JSON Output
 
 PowerShell:

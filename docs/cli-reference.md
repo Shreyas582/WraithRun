@@ -9,12 +9,16 @@ Basic usage:
 ```text
 wraithrun [OPTIONS] --task <TASK>
 wraithrun --doctor [OPTIONS]
+wraithrun --list-profiles [OPTIONS]
+wraithrun --print-effective-config [OPTIONS]
 ```
 
 ## Options
 
 - `--task <TASK>`: required investigation prompt.
 - `--doctor`: run configuration/runtime diagnostics and exit.
+- `--list-profiles`: list built-in and config-defined profiles, then exit.
+- `--print-effective-config`: print resolved runtime settings as JSON and exit.
 - `--config <CONFIG>`: explicit TOML config file path.
 - `--profile <PROFILE>`: named profile from built-ins or config file.
 - `--model <MODEL>`: model path for live mode. Default fallback: `./models/llm.onnx`.
@@ -59,6 +63,19 @@ Behavior:
 - Exit code `0`: no failures (warnings may still be present).
 - Non-zero exit code: one or more failures.
 
+## Introspection Modes
+
+`--list-profiles` output includes:
+
+- built-in profile names and purpose,
+- config file path detection status,
+- config-defined profile names,
+- selected profile source (built-in/config/missing) when `--profile` is set.
+
+`--print-effective-config` output includes the final merged runtime settings after applying precedence rules.
+
+These modes are mutually exclusive with `--doctor`.
+
 ## Built-In Profiles
 
 - `local-lab`: dry-run, compact step/token budget, summary output.
@@ -95,6 +112,18 @@ Run doctor for specific profile/config combination:
 
 ```powershell
 wraithrun --doctor --config .\wraithrun.example.toml --profile live-model
+```
+
+List profiles:
+
+```powershell
+wraithrun --list-profiles --config .\wraithrun.example.toml
+```
+
+Print effective config:
+
+```powershell
+wraithrun --print-effective-config --profile production-triage --config .\wraithrun.example.toml
 ```
 
 Live mode:
