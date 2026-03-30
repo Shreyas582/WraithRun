@@ -68,17 +68,17 @@ Release should be blocked when:
 - Refresh roadmap in `README.md` if priorities changed.
 - Optionally create next milestone tracking issue.
 
-## Immediate Next Steps for v0.4.1
+## Immediate Next Steps for v0.4.2
 
 Use this runbook to execute the next release milestone end-to-end.
 
 1. Create a tracking issue from the Release Checklist template.
-2. Apply labels `release`, `milestone:v0.4.1` (or next milestone label), and priority labels as needed.
+2. Apply labels `release`, `milestone:v0.4.2` (or next milestone label), and priority labels as needed.
 3. Run milestone bootstrap workflow:
    - Workflow: `Milestone Bootstrap`
    - Inputs:
-   - `title`: `v0.4.1`
-   - `description`: `Post-v0.4.0 refinements and automation hardening`
+   - `title`: `v0.4.2`
+   - `description`: `Post-v0.4.1 refinements and automation hardening`
      - `due_date`: optional (`YYYY-MM-DD`)
 4. Verify quality gates locally:
    - `cargo check`
@@ -86,11 +86,11 @@ Use this runbook to execute the next release milestone end-to-end.
    - `cargo check -p inference_bridge --features vitis`
 5. Verify GitHub Actions CI is green on latest `main`.
 6. Tag and publish:
-   - `git tag -a v0.4.1 -m "Release v0.4.1"`
-   - `git push origin v0.4.1`
+   - `git tag -a v0.4.2 -m "Release v0.4.2"`
+   - `git push origin v0.4.2`
 7. Confirm `Release` workflow completed and assets are attached.
 8. Close the milestone and open a follow-on milestone.
-9. Open planning issue for `v0.5.0` scope.
+9. Open planning issue for `v0.4.2` scope.
 
 ## Labels and Milestones
 

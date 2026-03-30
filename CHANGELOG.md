@@ -8,6 +8,20 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 0.4.1 - 2026-03-30
+
+### Added
+
 - `--describe-tool <NAME>` now accepts unique partial and hyphenated tool queries for faster operator lookups.
 
 ### Changed
@@ -16,7 +30,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Fixed
 
-- (none yet)
+- (none)
 
 ## 0.4.0 - 2026-03-30
 

@@ -1,5 +1,31 @@
 # Upgrade Notes
 
+## v0.4.1
+
+### Breaking/visible changes
+
+- `--describe-tool <NAME>` now accepts unique partial and hyphenated tool queries.
+- `--describe-tool` now fails fast with an explicit ambiguous-query error when multiple tools match.
+
+### Migration examples
+
+Describe a tool with a hyphenated alias:
+
+```powershell
+.\wraithrun.exe --describe-tool hash-binary
+```
+
+Describe a tool with a unique partial query:
+
+```powershell
+.\wraithrun.exe --describe-tool privilege
+```
+
+### Recommended checks after upgrade
+
+- If automation drives `--describe-tool`, ensure query strings remain unique or switch to full tool names.
+- Confirm operator runbooks handle ambiguous-query failures by retrying with exact tool names.
+
 ## v0.4.0
 
 ### Breaking/visible changes
