@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn parses_json_tool_call() {
-        let text = r#"<call>{\"tool\":\"scan_network\",\"args\":{\"limit\":5}}</call>"#;
+        let text = r#"<call>{"tool":"scan_network","args":{"limit":5}}</call>"#;
         let call = parse_tool_call(text).expect("tool call should parse");
 
         assert_eq!(call.tool, "scan_network");

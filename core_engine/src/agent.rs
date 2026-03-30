@@ -90,3 +90,112 @@ impl<B: InferenceEngine> Agent<B> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::VecDeque,
+        sync::{Arc, Mutex},
+    };
+
+    use anyhow::Result;
+    use async_trait::async_trait;
+
+    use cyber_tools::ToolRegistry;
+    use inference_bridge::InferenceEngine;
+
+    use super::Agent;
+
+    #[derive(Clone)]
+    struct MockEngine {
+        responses: Arc<Mutex<VecDeque<String>>>,
+    }
+
+    impl MockEngine {
+        fn new(responses: Vec<&str>) -> Self {
+            Self {
+                responses: Arc::new(Mutex::new(
+                    responses.into_iter().map(|value| value.to_string()).collect(),
+                )),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl InferenceEngine for MockEngine {
+        async fn generate(&self, _prompt: &str) -> Result<String> {
+            let mut responses = self.responses.lock().expect("response queue mutex poisoned");
+            Ok(responses
+                .pop_front()
+                .unwrap_or_else(|| "<final>fallback</final>".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn executes_tool_then_finalizes() {
+        let engine = MockEngine::new(vec![
+            r#"<call>{"tool":"unknown_tool","args":{}}</call>"#,
+            "<final>investigation completed</final>",
+        ]);
+
+        let agent = Agent::new(engine, ToolRegistry::with_default_tools()).with_max_steps(4);
+        let report = agent
+            .run("Investigate suspicious account behavior")
+            .await
+            .expect("agent run should succeed");
+
+        assert_eq!(report.final_answer, "investigation completed");
+        assert_eq!(report.turns.len(), 1);
+        assert_eq!(
+            report.turns[0]
+                .tool_call
+                .as_ref()
+                .expect("tool call should exist")
+                .tool,
+            "unknown_tool"
+        );
+        assert!(report.turns[0]
+            .observation
+            .as_ref()
+            .expect("observation should exist")
+            .get("error")
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn returns_direct_output_when_no_tags_are_present() {
+        let engine = MockEngine::new(vec!["No significant anomalies detected."]);
+
+        let agent = Agent::new(engine, ToolRegistry::with_default_tools()).with_max_steps(3);
+        let report = agent
+            .run("Perform a quick triage")
+            .await
+            .expect("agent run should succeed");
+
+        assert_eq!(report.final_answer, "No significant anomalies detected.");
+        assert_eq!(report.turns.len(), 1);
+        assert!(report.turns[0].tool_call.is_none());
+        assert!(report.turns[0].observation.is_none());
+    }
+
+    #[tokio::test]
+    async fn stops_when_max_steps_is_reached() {
+        let engine = MockEngine::new(vec![
+            r#"<call>{"tool":"unknown_tool","args":{}}</call>"#,
+            r#"<call>{"tool":"unknown_tool","args":{}}</call>"#,
+            r#"<call>{"tool":"unknown_tool","args":{}}</call>"#,
+        ]);
+
+        let agent = Agent::new(engine, ToolRegistry::with_default_tools()).with_max_steps(2);
+        let report = agent
+            .run("Keep collecting observations")
+            .await
+            .expect("agent run should succeed");
+
+        assert_eq!(report.turns.len(), 2);
+        assert_eq!(
+            report.final_answer,
+            "Maximum step count reached before receiving <final>."
+        );
+    }
+}
