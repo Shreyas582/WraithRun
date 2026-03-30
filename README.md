@@ -12,15 +12,16 @@ What is implemented now:
 
 - Rust workspace with modular crates for engine, tools, inference bridge, and CLI.
 - Bounded ReAct loop with tool-call parsing and observation feedback.
-- Sandboxed local tools that return structured JSON output.
-- Feature-gated ONNX Runtime + Vitis execution provider session initialization path.
+- Sandboxed local tools with path and command policy enforcement.
+- Feature-gated ONNX Runtime + Vitis execution provider path with tokenizer-backed greedy decode loop.
 - Dry-run mode for local end-to-end testing without model deployment.
+- Integration tests for core ReAct transitions with mocked inference behavior.
 
 What is intentionally pending:
 
-- Tokenizer integration and token-by-token decode loop for live text generation.
-- Expanded policy-based tool sandboxing.
-- Integration and regression test suite.
+- KV-cache and streaming decode support for larger context efficiency.
+- Expanded end-to-end workspace test coverage beyond core engine transitions.
+- Signed release artifacts and SBOM publication.
 
 ## Why Local-First
 
@@ -84,8 +85,25 @@ cargo check -p inference_bridge --features vitis
 4. Run live mode with ONNX model (requires Vitis-capable ONNX Runtime deployment):
 
 ```powershell
-cargo run -p agentic-cyber-cli --features inference_bridge/vitis -- --live --model C:/models/llm.onnx --task "Investigate unauthorized SSH keys"
+cargo run -p agentic-cyber-cli --features inference_bridge/vitis -- --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
 ```
+
+## Tool Sandbox Policy
+
+WraithRun enforces a default sandbox policy for tool execution.
+
+- Read paths are restricted to allowlisted roots.
+- Sensitive paths are denylisted.
+- Command-based tools are constrained by command allowlist and denylist checks.
+
+Policy overrides are supported via environment variables:
+
+- `WRAITHRUN_ALLOWED_READ_ROOTS`
+- `WRAITHRUN_DENIED_READ_ROOTS`
+- `WRAITHRUN_COMMAND_ALLOWLIST`
+- `WRAITHRUN_COMMAND_DENYLIST`
+
+Use platform path-list separators (`;` on Windows, `:` on Unix-like systems) for path list variables.
 
 ## Dependencies
 
@@ -114,6 +132,14 @@ Public contributions are welcome.
 - Contribution process: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Community expectations: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - Security disclosure: [SECURITY.md](SECURITY.md)
+
+## Release Management
+
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- Release strategy and checklist: [docs/RELEASE_PLAN.md](docs/RELEASE_PLAN.md)
+- CI/CD workflow documentation: [docs/CI_CD.md](docs/CI_CD.md)
+
+Releases are automated through GitHub Actions when tags matching `v*.*.*` are pushed.
 
 ## Roadmap
 
