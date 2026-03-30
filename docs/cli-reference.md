@@ -21,6 +21,8 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 
 - `--task <TASK>`: investigation prompt.
 - `--task-template <TASK_TEMPLATE>`: built-in investigation prompt template.
+- `--template-target <TEMPLATE_TARGET>`: optional target path for supported task templates.
+- `--template-lines <TEMPLATE_LINES>`: optional line count for `syslog-summary` template.
 - `--doctor`: run configuration/runtime diagnostics and exit.
 - `--list-task-templates`: list built-in investigation templates and exit.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
@@ -106,6 +108,12 @@ Built-in template values for `--task-template`:
 - `priv-esc-review`
 - `syslog-summary`
 
+Template parameter support:
+
+- `hash-integrity`: supports `--template-target`.
+- `syslog-summary`: supports `--template-target` and `--template-lines`.
+- `ssh-keys`, `listener-risk`, `priv-esc-review`: no template parameters.
+
 ## Built-In Profiles
 
 - `local-lab`: dry-run, compact step/token budget, summary output.
@@ -124,6 +132,18 @@ Template-driven dry-run mode:
 
 ```powershell
 wraithrun --task-template listener-risk
+```
+
+Template-driven hash with custom target:
+
+```powershell
+wraithrun --task-template hash-integrity --template-target C:/Temp/suspicious.exe --format summary
+```
+
+Template-driven syslog summary with custom path and line count:
+
+```powershell
+wraithrun --task-template syslog-summary --template-target C:/Logs/security.log --template-lines 50 --format summary
 ```
 
 List task templates:

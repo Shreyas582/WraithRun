@@ -21,6 +21,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Source-attributed runtime explanation mode via `--explain-effective-config`.
 - Config bootstrap mode via `--init-config` with `--init-config-path` and `--force` support.
 - Built-in investigation task templates via `--task-template` and discovery mode `--list-task-templates`.
+- Template parameter support via `--template-target` and `--template-lines` for path/line-sensitive templates.
 
 ### Changed
 

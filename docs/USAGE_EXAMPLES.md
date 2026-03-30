@@ -28,6 +28,18 @@ Template-driven run:
 .\wraithrun.exe --task-template listener-risk
 ```
 
+Hash template with custom target:
+
+```powershell
+.\wraithrun.exe --task-template hash-integrity --template-target C:/Temp/suspicious.exe --format summary
+```
+
+Syslog template with custom path and line count:
+
+```powershell
+.\wraithrun.exe --task-template syslog-summary --template-target C:/Logs/security.log --template-lines 50 --format summary
+```
+
 List available templates:
 
 ```powershell

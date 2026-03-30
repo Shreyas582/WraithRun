@@ -56,6 +56,11 @@ Run one directly:
 wraithrun --task-template listener-risk
 ```
 
+If you need path or line overrides, use templates that support them:
+
+- `hash-integrity` supports `--template-target`.
+- `syslog-summary` supports `--template-target` and `--template-lines`.
+
 ## Vitis inference is disabled
 
 Symptom:

@@ -74,6 +74,41 @@ impl OnnxVitisEngine {
         value.replace('\\', "\\\\").replace('"', "\\\"")
     }
 
+    fn guess_line_count_from_task(task: &str) -> Option<usize> {
+        let tokens: Vec<String> = task
+            .split_whitespace()
+            .map(|token| {
+                token
+                    .trim_matches(|ch: char| {
+                        matches!(
+                            ch,
+                            '"' | '\'' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}' | '.'
+                        )
+                    })
+                    .to_string()
+            })
+            .collect();
+
+        for (idx, token) in tokens.iter().enumerate() {
+            let Ok(value) = token.parse::<usize>() else {
+                continue;
+            };
+
+            if value == 0 {
+                continue;
+            }
+
+            if let Some(next) = tokens.get(idx + 1) {
+                let next = next.to_ascii_lowercase();
+                if next.starts_with("line") {
+                    return Some(value.min(5000));
+                }
+            }
+        }
+
+        None
+    }
+
     fn dry_run_response(&self, prompt: &str) -> String {
         let lower = prompt.to_ascii_lowercase();
         let task = Self::extract_task_from_prompt(prompt).unwrap_or(prompt);
@@ -98,8 +133,9 @@ impl OnnxVitisEngine {
             let path =
                 Self::guess_path_from_task(task).unwrap_or_else(|| "./README.md".to_string());
             let path = Self::escape_json_string(&path);
+            let max_lines = Self::guess_line_count_from_task(task).unwrap_or(200);
             return format!(
-                r#"<call>{{"tool":"read_syslog","args":{{"path":"{path}","max_lines":200}}}}</call>"#
+                r#"<call>{{"tool":"read_syslog","args":{{"path":"{path}","max_lines":{max_lines}}}}}</call>"#
             );
         }
 
@@ -178,6 +214,16 @@ mod tests {
         let output = engine.dry_run_response("Task: Read and summarize ./README.md log context");
         assert!(output.contains("\"tool\":\"read_syslog\""));
         assert!(output.contains("\"max_lines\":200"));
+    }
+
+    #[test]
+    fn routes_log_task_with_requested_line_count() {
+        let engine = dry_run_engine();
+        let output = engine.dry_run_response(
+            "Task: Read and summarize last 50 lines from ./README.md log context",
+        );
+        assert!(output.contains("\"tool\":\"read_syslog\""));
+        assert!(output.contains("\"max_lines\":50"));
     }
 
     #[test]

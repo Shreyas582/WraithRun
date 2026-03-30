@@ -60,6 +60,12 @@ struct Cli {
     #[arg(long, value_enum, conflicts_with = "task")]
     task_template: Option<TaskTemplate>,
 
+    #[arg(long, requires = "task_template")]
+    template_target: Option<String>,
+
+    #[arg(long, requires = "task_template")]
+    template_lines: Option<usize>,
+
     #[arg(long)]
     doctor: bool,
 
@@ -430,12 +436,12 @@ fn resolve_runtime_config(cli: &Cli) -> Result<RuntimeConfig> {
 }
 
 fn resolve_runtime_config_for_preview(cli: &Cli) -> Result<RuntimeConfig> {
-    let task = resolve_task_for_mode(cli, "preview-effective-config");
+    let task = resolve_task_for_mode(cli, "preview-effective-config")?;
     resolve_runtime_config_with_task(cli, task)
 }
 
 fn resolve_effective_config_explanation(cli: &Cli) -> Result<EffectiveConfigExplanationView> {
-    let task = resolve_task_for_mode(cli, "explain-effective-config");
+    let task = resolve_task_for_mode(cli, "explain-effective-config")?;
 
     let task_source = if cli.task.is_some() {
         "cli --task".to_string()
@@ -492,7 +498,7 @@ fn resolve_task_for_run(cli: &Cli) -> Result<String> {
     }
 
     if let Some(template) = cli.task_template {
-        return Ok(task_template_prompt(template).to_string());
+        return resolve_task_from_template(cli, template);
     }
 
     bail!(
@@ -500,14 +506,14 @@ fn resolve_task_for_run(cli: &Cli) -> Result<String> {
     )
 }
 
-fn resolve_task_for_mode(cli: &Cli, fallback: &str) -> String {
+fn resolve_task_for_mode(cli: &Cli, fallback: &str) -> Result<String> {
     if let Some(task) = &cli.task {
-        return task.trim().to_string();
+        return Ok(task.trim().to_string());
     }
     if let Some(template) = cli.task_template {
-        return task_template_prompt(template).to_string();
+        return resolve_task_from_template(cli, template);
     }
-    fallback.to_string()
+    Ok(fallback.to_string())
 }
 
 fn task_template_name(template: TaskTemplate) -> &'static str {
@@ -532,6 +538,53 @@ fn task_template_prompt(template: TaskTemplate) -> &'static str {
     }
 }
 
+fn resolve_task_from_template(cli: &Cli, template: TaskTemplate) -> Result<String> {
+    if let Some(raw_target) = &cli.template_target {
+        if raw_target.trim().is_empty() {
+            bail!("--template-target cannot be empty when provided");
+        }
+    }
+
+    match template {
+        TaskTemplate::SshKeys | TaskTemplate::ListenerRisk | TaskTemplate::PrivEscReview => {
+            if cli.template_target.is_some() || cli.template_lines.is_some() {
+                bail!(
+                    "--template-target and --template-lines are not supported for task template '{}'.",
+                    task_template_name(template)
+                );
+            }
+            Ok(task_template_prompt(template).to_string())
+        }
+        TaskTemplate::HashIntegrity => {
+            if cli.template_lines.is_some() {
+                bail!("--template-lines is not supported for task template 'hash-integrity'.");
+            }
+
+            let target = cli
+                .template_target
+                .as_deref()
+                .unwrap_or("C:/Windows/System32/notepad.exe")
+                .trim();
+            Ok(format!("Hash {target} and report integrity context"))
+        }
+        TaskTemplate::SyslogSummary => {
+            let target = cli
+                .template_target
+                .as_deref()
+                .unwrap_or("C:/Logs/agent.log")
+                .trim();
+            let lines = cli.template_lines.unwrap_or(200);
+            if lines == 0 {
+                bail!("--template-lines must be at least 1 for task template 'syslog-summary'.");
+            }
+
+            Ok(format!(
+                "Read and summarize last {lines} lines from {target}"
+            ))
+        }
+    }
+}
+
 fn render_task_template_list() -> String {
     let mut output = String::new();
 
@@ -553,6 +606,10 @@ fn render_task_template_list() -> String {
     );
     let _ = writeln!(
         output,
+        "  options: --template-target <PATH> (default C:/Windows/System32/notepad.exe)"
+    );
+    let _ = writeln!(
+        output,
         "- priv-esc-review: {}",
         task_template_prompt(TaskTemplate::PrivEscReview)
     );
@@ -560,6 +617,10 @@ fn render_task_template_list() -> String {
         output,
         "- syslog-summary: {}",
         task_template_prompt(TaskTemplate::SyslogSummary)
+    );
+    let _ = writeln!(
+        output,
+        "  options: --template-target <PATH> (default C:/Logs/agent.log), --template-lines <N> (default 200)"
     );
 
     output.trim_end().to_string()
@@ -1729,6 +1790,8 @@ mod tests {
         Cli {
             task: Some("Check suspicious listener ports and summarize risk".to_string()),
             task_template: None,
+            template_target: None,
+            template_lines: None,
             doctor: false,
             list_task_templates: false,
             list_profiles: false,
@@ -1973,6 +2036,52 @@ mod tests {
 
         let task = resolve_task_for_run(&cli).expect("template task should resolve");
         assert!(task.contains("listener ports"));
+    }
+
+    #[test]
+    fn resolves_hash_template_with_custom_target() {
+        let mut cli = base_cli();
+        cli.task = None;
+        cli.task_template = Some(TaskTemplate::HashIntegrity);
+        cli.template_target = Some("C:/Temp/suspicious.exe".to_string());
+
+        let task = resolve_task_for_run(&cli).expect("hash template should resolve");
+        assert!(task.contains("C:/Temp/suspicious.exe"));
+    }
+
+    #[test]
+    fn resolves_syslog_template_with_target_and_lines() {
+        let mut cli = base_cli();
+        cli.task = None;
+        cli.task_template = Some(TaskTemplate::SyslogSummary);
+        cli.template_target = Some("C:/Logs/security.log".to_string());
+        cli.template_lines = Some(50);
+
+        let task = resolve_task_for_run(&cli).expect("syslog template should resolve");
+        assert!(task.contains("last 50 lines"));
+        assert!(task.contains("C:/Logs/security.log"));
+    }
+
+    #[test]
+    fn rejects_invalid_template_options() {
+        let mut cli = base_cli();
+        cli.task = None;
+        cli.task_template = Some(TaskTemplate::ListenerRisk);
+        cli.template_lines = Some(10);
+
+        let err = resolve_task_for_run(&cli).expect_err("invalid template options should fail");
+        assert!(err.to_string().contains("not supported"));
+    }
+
+    #[test]
+    fn rejects_zero_syslog_lines() {
+        let mut cli = base_cli();
+        cli.task = None;
+        cli.task_template = Some(TaskTemplate::SyslogSummary);
+        cli.template_lines = Some(0);
+
+        let err = resolve_task_for_run(&cli).expect_err("zero lines should fail");
+        assert!(err.to_string().contains("at least 1"));
     }
 
     #[test]

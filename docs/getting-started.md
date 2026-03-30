@@ -42,6 +42,12 @@ Template-based run:
 cargo run -p wraithrun -- --task-template listener-risk
 ```
 
+Template-based run with target overrides:
+
+```powershell
+cargo run -p wraithrun -- --task-template syslog-summary --template-target C:/Logs/security.log --template-lines 50
+```
+
 ## Live Inference Mode (Optional)
 
 Live inference requires:

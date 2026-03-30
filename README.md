@@ -114,6 +114,8 @@ Common options:
 
 - `--task <TASK>` investigation prompt (required unless `--task-template` or a mode command is used).
 - `--task-template <NAME>` use a built-in investigation prompt template.
+- `--template-target <PATH>` optional target path for supported templates (`hash-integrity`, `syslog-summary`).
+- `--template-lines <N>` optional line count for `syslog-summary` template (default `200`).
 - `--doctor` run runtime health checks and configuration diagnostics.
 - `--list-task-templates` show available built-in investigation templates.
 - `--list-profiles` list built-in and config-defined profiles.
@@ -156,6 +158,18 @@ Run a task using a built-in template:
 
 ```powershell
 cargo run -p wraithrun -- --task-template listener-risk --format summary
+```
+
+Run hash template with a custom target:
+
+```powershell
+cargo run -p wraithrun -- --task-template hash-integrity --template-target C:/Temp/suspicious.exe --format summary
+```
+
+Run syslog template with custom path and line count:
+
+```powershell
+cargo run -p wraithrun -- --task-template syslog-summary --template-target C:/Logs/security.log --template-lines 50 --format summary
 ```
 
 Doctor checks:
@@ -293,6 +307,11 @@ Equivalent built-in template names:
 - `hash-integrity`
 - `priv-esc-review`
 - `syslog-summary`
+
+Template parameter support:
+
+- `hash-integrity`: supports `--template-target`.
+- `syslog-summary`: supports `--template-target` and `--template-lines`.
 
 ## Troubleshooting
 
