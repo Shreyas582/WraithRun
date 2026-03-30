@@ -5,8 +5,11 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
+
+#[cfg(target_os = "windows")]
+use std::sync::OnceLock;
 
 #[cfg(not(target_os = "windows"))]
 use std::io::ErrorKind;
@@ -332,6 +335,7 @@ fn parse_max_lines(args: &Value, default: usize) -> usize {
     value.clamp(1, 1000) as usize
 }
 
+#[cfg(target_os = "windows")]
 fn suspicious_windows_privilege_markers() -> &'static Vec<&'static str> {
     static MARKERS: OnceLock<Vec<&'static str>> = OnceLock::new();
     MARKERS.get_or_init(|| {
