@@ -112,7 +112,8 @@ cargo run -p wraithrun -- --help
 
 Common options:
 
-- `--task <TASK>` investigation prompt (required unless `--task-file`, `--task-template`, or a mode command is used).
+- `--task <TASK>` investigation prompt (required unless `--task-stdin`, `--task-file`, `--task-template`, or a mode command is used).
+- `--task-stdin` read investigation prompt text from stdin (pipe content into the command).
 - `--task-file <PATH>` read investigation prompt text from a local file.
 - `--task-template <NAME>` use a built-in investigation prompt template.
 - `--template-target <PATH>` optional target path for supported templates (`hash-integrity`, `syslog-summary`).
@@ -120,6 +121,7 @@ Common options:
 - `--doctor` run runtime health checks and configuration diagnostics.
 - `--list-task-templates` show available built-in investigation templates.
 - `--list-profiles` list built-in and config-defined profiles.
+- `--introspection-format <text|json>` output format for `--doctor`, `--list-task-templates`, and `--list-profiles` (default `text`).
 - `--print-effective-config` render the resolved runtime settings as JSON and exit.
 - `--explain-effective-config` render resolved runtime settings plus per-field source attribution.
 - `--init-config` write a starter TOML config file and exit.
@@ -153,6 +155,12 @@ Run a task from a prompt file:
 
 ```powershell
 cargo run -p wraithrun -- --task-file .\launch-assets\incident-task.txt --format summary
+```
+
+Run a task from stdin:
+
+```powershell
+Get-Content .\launch-assets\incident-task.txt | cargo run -p wraithrun -- --task-stdin --format summary
 ```
 
 List built-in task templates:
@@ -189,6 +197,12 @@ List available profiles:
 
 ```powershell
 cargo run -p wraithrun -- --list-profiles
+```
+
+List profiles as JSON:
+
+```powershell
+cargo run -p wraithrun -- --list-profiles --introspection-format json
 ```
 
 Preview resolved runtime config:

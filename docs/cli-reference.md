@@ -8,6 +8,7 @@ Basic usage:
 
 ```text
 wraithrun [OPTIONS] --task <TASK>
+wraithrun [OPTIONS] --task-stdin
 wraithrun [OPTIONS] --task-file <PATH>
 wraithrun [OPTIONS] --task-template <TASK_TEMPLATE>
 wraithrun --doctor [OPTIONS]
@@ -21,6 +22,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 ## Options
 
 - `--task <TASK>`: investigation prompt.
+- `--task-stdin`: read investigation prompt text from stdin.
 - `--task-file <PATH>`: read investigation prompt text from a local file.
 - `--task-template <TASK_TEMPLATE>`: built-in investigation prompt template.
 - `--template-target <TEMPLATE_TARGET>`: optional target path for supported task templates.
@@ -28,6 +30,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--doctor`: run configuration/runtime diagnostics and exit.
 - `--list-task-templates`: list built-in investigation templates and exit.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
+- `--introspection-format <INTROSPECTION_FORMAT>`: format for introspection modes. Values: `text`, `json`. Default: `text`.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
 - `--explain-effective-config`: print resolved runtime settings and per-field source attribution as JSON.
 - `--init-config`: write a starter TOML config file and exit.
@@ -79,6 +82,12 @@ Behavior:
 
 ## Introspection Modes
 
+`--introspection-format json` applies to:
+
+- `--doctor`
+- `--list-task-templates`
+- `--list-profiles`
+
 `--list-task-templates` output includes built-in task template names and their prompt text.
 
 `--list-profiles` output includes:
@@ -86,7 +95,7 @@ Behavior:
 - built-in profile names and purpose,
 - config file path detection status,
 - config-defined profile names,
-- selected profile source (built-in/config/missing) when `--profile` is set.
+- selected profile source (`built-in`, `config`, `built-in+config`, or `missing`) when `--profile` is set.
 
 `--print-effective-config` output includes the final merged runtime settings after applying precedence rules.
 
@@ -128,6 +137,12 @@ Dry-run mode:
 
 ```powershell
 wraithrun --task "Check suspicious listener ports"
+```
+
+Task from stdin:
+
+```powershell
+Get-Content .\launch-assets\incident-task.txt | wraithrun --task-stdin --format summary
 ```
 
 Task from file:
@@ -188,6 +203,18 @@ List profiles:
 
 ```powershell
 wraithrun --list-profiles --config .\wraithrun.example.toml
+```
+
+List profiles as JSON:
+
+```powershell
+wraithrun --list-profiles --introspection-format json
+```
+
+Doctor report as JSON:
+
+```powershell
+wraithrun --doctor --introspection-format json
 ```
 
 Print effective config:

@@ -8,6 +8,20 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 0.3.0 - 2026-03-30
+
+### Added
+
 - CLI output format controls: `--format json|summary|markdown`.
 - CLI export control: `--output-file` with automatic parent directory creation.
 - CLI configuration controls: `--config`, `--profile`, and `--dry-run`.
@@ -23,12 +37,15 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Built-in investigation task templates via `--task-template` and discovery mode `--list-task-templates`.
 - Template parameter support via `--template-target` and `--template-lines` for path/line-sensitive templates.
 - Task prompt file input via `--task-file` for reusable long-form investigations.
+- Task prompt stdin input via `--task-stdin` (plus `--task-file -` shortcut).
+- JSON introspection output for `--doctor`, `--list-task-templates`, and `--list-profiles` via `--introspection-format json`.
 
 ### Changed
 
 - Default runtime logging now avoids polluting standard output, making report piping safer.
 - Dry-run task routing now maps hash, network, log, and privilege prompts to expected tools more reliably.
 - Runtime settings now resolve deterministically with precedence: CLI > env > config > defaults.
+- Release runbook milestone steps now target `v0.3.0`.
 
 ### Fixed
 

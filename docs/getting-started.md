@@ -48,6 +48,12 @@ Task file run:
 cargo run -p wraithrun -- --task-file .\launch-assets\incident-task.txt --format summary
 ```
 
+Task stdin run:
+
+```powershell
+Get-Content .\launch-assets\incident-task.txt | cargo run -p wraithrun -- --task-stdin --format summary
+```
+
 Template-based run with target overrides:
 
 ```powershell
@@ -106,6 +112,12 @@ Quick diagnostics:
 
 ```powershell
 cargo run -p wraithrun -- --doctor
+```
+
+Quick diagnostics as JSON:
+
+```powershell
+cargo run -p wraithrun -- --doctor --introspection-format json
 ```
 
 List profiles:

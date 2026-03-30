@@ -22,6 +22,12 @@ From a task file:
 .\wraithrun.exe --task-file .\launch-assets\incident-task.txt --format summary
 ```
 
+From stdin:
+
+```powershell
+Get-Content .\launch-assets\incident-task.txt | .\wraithrun.exe --task-stdin --format summary
+```
+
 Linux/macOS binary:
 
 ```bash
@@ -50,6 +56,12 @@ List available templates:
 
 ```powershell
 .\wraithrun.exe --list-task-templates
+```
+
+List templates as JSON:
+
+```powershell
+.\wraithrun.exe --list-task-templates --introspection-format json
 ```
 
 ## Save Results to a File
@@ -172,6 +184,12 @@ List built-in and config-defined profiles:
 
 ```powershell
 .\wraithrun.exe --list-profiles --config .\wraithrun.example.toml
+```
+
+List profiles as JSON:
+
+```powershell
+.\wraithrun.exe --list-profiles --introspection-format json
 ```
 
 Preview final merged runtime settings:

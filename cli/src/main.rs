@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::{fmt::Write as _, fs};
 
@@ -37,6 +38,14 @@ enum LogMode {
     Verbose,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+enum IntrospectionFormat {
+    #[default]
+    Text,
+    Json,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 enum TaskTemplate {
     #[value(name = "ssh-keys")]
@@ -54,13 +63,16 @@ enum TaskTemplate {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["task_file", "task_template", "doctor", "list_profiles", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
+    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
     task: Option<String>,
 
-    #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_template"])]
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_stdin", "task_template"])]
     task_file: Option<PathBuf>,
 
-    #[arg(long, value_enum, conflicts_with = "task")]
+    #[arg(long, conflicts_with_all = ["task", "task_file", "task_template"])]
+    task_stdin: bool,
+
+    #[arg(long, value_enum, conflicts_with_all = ["task", "task_file", "task_stdin"])]
     task_template: Option<TaskTemplate>,
 
     #[arg(long, requires = "task_template")]
@@ -77,6 +89,9 @@ struct Cli {
 
     #[arg(long)]
     list_profiles: bool,
+
+    #[arg(long, value_enum, default_value_t = IntrospectionFormat::Text)]
+    introspection_format: IntrospectionFormat,
 
     #[arg(long)]
     print_effective_config: bool,
@@ -227,6 +242,54 @@ struct EffectiveConfigExplanationView {
     config_path: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct TaskTemplateDescriptor {
+    name: &'static str,
+    prompt: &'static str,
+    supports_template_target: bool,
+    supports_template_lines: bool,
+    default_target: Option<&'static str>,
+    default_lines: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskTemplateListView {
+    templates: Vec<TaskTemplateDescriptor>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProfileSummaryView {
+    name: &'static str,
+    description: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct SelectedProfileView {
+    name: String,
+    source: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ProfileListView {
+    built_in_profiles: Vec<ProfileSummaryView>,
+    config_path: Option<String>,
+    config_profiles: Vec<String>,
+    selected_profile: Option<SelectedProfileView>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorSummaryView {
+    pass: usize,
+    warn: usize,
+    fail: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorReportView<'a> {
+    summary: DoctorSummaryView,
+    checks: &'a [DoctorCheck],
+}
+
 impl RuntimeConfig {
     fn new(task: String) -> Self {
         Self {
@@ -313,7 +376,8 @@ enum ConfigPathSelection {
     Required(PathBuf),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 enum DoctorStatus {
     Pass,
     Warn,
@@ -330,14 +394,14 @@ impl DoctorStatus {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct DoctorCheck {
     status: DoctorStatus,
     name: &'static str,
     detail: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
 struct DoctorReport {
     checks: Vec<DoctorCheck>,
 }
@@ -356,15 +420,39 @@ impl DoctorReport {
             .iter()
             .any(|check| check.status == DoctorStatus::Fail)
     }
+
+    fn counts(&self) -> (usize, usize, usize) {
+        let pass_count = self
+            .checks
+            .iter()
+            .filter(|check| check.status == DoctorStatus::Pass)
+            .count();
+        let warn_count = self
+            .checks
+            .iter()
+            .filter(|check| check.status == DoctorStatus::Warn)
+            .count();
+        let fail_count = self
+            .checks
+            .iter()
+            .filter(|check| check.status == DoctorStatus::Fail)
+            .count();
+        (pass_count, warn_count, fail_count)
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     ensure_exclusive_modes(&cli)?;
+    ensure_introspection_format_usage(&cli)?;
 
     if cli.list_task_templates {
-        println!("{}", render_task_template_list());
+        let rendered = match cli.introspection_format {
+            IntrospectionFormat::Text => render_task_template_list(),
+            IntrospectionFormat::Json => render_task_template_list_json()?,
+        };
+        println!("{rendered}");
         return Ok(());
     }
 
@@ -375,7 +463,7 @@ async fn main() -> Result<()> {
     }
 
     if cli.list_profiles {
-        let listing = run_list_profiles(&cli)?;
+        let listing = run_list_profiles(&cli, cli.introspection_format)?;
         println!("{listing}");
         return Ok(());
     }
@@ -397,7 +485,11 @@ async fn main() -> Result<()> {
 
     if cli.doctor {
         let report = run_doctor(&cli);
-        println!("{}", render_doctor_report(&report));
+        let rendered = match cli.introspection_format {
+            IntrospectionFormat::Text => render_doctor_report(&report),
+            IntrospectionFormat::Json => render_doctor_report_json(&report)?,
+        };
+        println!("{rendered}");
         if report.has_failures() {
             bail!("doctor checks reported failures");
         }
@@ -448,6 +540,8 @@ fn resolve_effective_config_explanation(cli: &Cli) -> Result<EffectiveConfigExpl
 
     let task_source = if cli.task.is_some() {
         "cli --task".to_string()
+    } else if cli.task_stdin {
+        "cli --task-stdin".to_string()
     } else if cli.task_file.is_some() {
         "cli --task-file".to_string()
     } else if let Some(template) = cli.task_template {
@@ -502,6 +596,10 @@ fn resolve_task_for_run(cli: &Cli) -> Result<String> {
         return Ok(trimmed.to_string());
     }
 
+    if cli.task_stdin {
+        return load_task_from_stdin();
+    }
+
     if let Some(task_file) = &cli.task_file {
         return load_task_from_file(task_file);
     }
@@ -511,13 +609,16 @@ fn resolve_task_for_run(cli: &Cli) -> Result<String> {
     }
 
     bail!(
-        "Either --task, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
+        "Either --task, --task-stdin, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
     )
 }
 
 fn resolve_task_for_mode(cli: &Cli, fallback: &str) -> Result<String> {
     if let Some(task) = &cli.task {
         return Ok(task.trim().to_string());
+    }
+    if cli.task_stdin {
+        return load_task_from_stdin();
     }
     if let Some(task_file) = &cli.task_file {
         return load_task_from_file(task_file);
@@ -529,15 +630,43 @@ fn resolve_task_for_mode(cli: &Cli, fallback: &str) -> Result<String> {
 }
 
 fn load_task_from_file(path: &Path) -> Result<String> {
+    if path == Path::new("-") {
+        return load_task_from_stdin();
+    }
+
     if !path.is_file() {
         bail!("Task file not found: {}", path.display());
     }
 
-    let task_text = fs::read_to_string(path)
+    let mut task_text = String::new();
+    let mut file = fs::File::open(path)
         .with_context(|| format!("Failed reading task file {}", path.display()))?;
+    file.read_to_string(&mut task_text)
+        .with_context(|| format!("Failed reading task file {}", path.display()))?;
+
     let trimmed = task_text.trim();
     if trimmed.is_empty() {
         bail!("Task file '{}' is empty", path.display());
+    }
+
+    Ok(trimmed.to_string())
+}
+
+fn load_task_from_stdin() -> Result<String> {
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        bail!("--task-stdin requires piped stdin input");
+    }
+
+    let mut task_text = String::new();
+    stdin
+        .lock()
+        .read_to_string(&mut task_text)
+        .context("Failed reading task text from stdin")?;
+
+    let trimmed = task_text.trim();
+    if trimmed.is_empty() {
+        bail!("Stdin task input is empty");
     }
 
     Ok(trimmed.to_string())
@@ -563,6 +692,58 @@ fn task_template_prompt(template: TaskTemplate) -> &'static str {
         TaskTemplate::PrivEscReview => "Review local privilege escalation indicators",
         TaskTemplate::SyslogSummary => "Read and summarize last 200 lines from C:/Logs/agent.log",
     }
+}
+
+fn task_template_descriptors() -> Vec<TaskTemplateDescriptor> {
+    vec![
+        TaskTemplateDescriptor {
+            name: "ssh-keys",
+            prompt: task_template_prompt(TaskTemplate::SshKeys),
+            supports_template_target: false,
+            supports_template_lines: false,
+            default_target: None,
+            default_lines: None,
+        },
+        TaskTemplateDescriptor {
+            name: "listener-risk",
+            prompt: task_template_prompt(TaskTemplate::ListenerRisk),
+            supports_template_target: false,
+            supports_template_lines: false,
+            default_target: None,
+            default_lines: None,
+        },
+        TaskTemplateDescriptor {
+            name: "hash-integrity",
+            prompt: task_template_prompt(TaskTemplate::HashIntegrity),
+            supports_template_target: true,
+            supports_template_lines: false,
+            default_target: Some("C:/Windows/System32/notepad.exe"),
+            default_lines: None,
+        },
+        TaskTemplateDescriptor {
+            name: "priv-esc-review",
+            prompt: task_template_prompt(TaskTemplate::PrivEscReview),
+            supports_template_target: false,
+            supports_template_lines: false,
+            default_target: None,
+            default_lines: None,
+        },
+        TaskTemplateDescriptor {
+            name: "syslog-summary",
+            prompt: task_template_prompt(TaskTemplate::SyslogSummary),
+            supports_template_target: true,
+            supports_template_lines: true,
+            default_target: Some("C:/Logs/agent.log"),
+            default_lines: Some(200),
+        },
+    ]
+}
+
+fn render_task_template_list_json() -> Result<String> {
+    let view = TaskTemplateListView {
+        templates: task_template_descriptors(),
+    };
+    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
 }
 
 fn resolve_task_from_template(cli: &Cli, template: TaskTemplate) -> Result<String> {
@@ -614,41 +795,29 @@ fn resolve_task_from_template(cli: &Cli, template: TaskTemplate) -> Result<Strin
 
 fn render_task_template_list() -> String {
     let mut output = String::new();
+    let templates = task_template_descriptors();
 
     let _ = writeln!(output, "WraithRun Task Templates");
-    let _ = writeln!(
-        output,
-        "- ssh-keys: {}",
-        task_template_prompt(TaskTemplate::SshKeys)
-    );
-    let _ = writeln!(
-        output,
-        "- listener-risk: {}",
-        task_template_prompt(TaskTemplate::ListenerRisk)
-    );
-    let _ = writeln!(
-        output,
-        "- hash-integrity: {}",
-        task_template_prompt(TaskTemplate::HashIntegrity)
-    );
-    let _ = writeln!(
-        output,
-        "  options: --template-target <PATH> (default C:/Windows/System32/notepad.exe)"
-    );
-    let _ = writeln!(
-        output,
-        "- priv-esc-review: {}",
-        task_template_prompt(TaskTemplate::PrivEscReview)
-    );
-    let _ = writeln!(
-        output,
-        "- syslog-summary: {}",
-        task_template_prompt(TaskTemplate::SyslogSummary)
-    );
-    let _ = writeln!(
-        output,
-        "  options: --template-target <PATH> (default C:/Logs/agent.log), --template-lines <N> (default 200)"
-    );
+    for descriptor in templates {
+        let _ = writeln!(output, "- {}: {}", descriptor.name, descriptor.prompt);
+        if descriptor.supports_template_target && descriptor.supports_template_lines {
+            let default_target = descriptor.default_target.unwrap_or("(none)");
+            let default_lines = descriptor.default_lines.unwrap_or(0);
+            let _ = writeln!(
+                output,
+                "  options: --template-target <PATH> (default {default_target}), --template-lines <N> (default {default_lines})"
+            );
+            continue;
+        }
+
+        if descriptor.supports_template_target {
+            let default_target = descriptor.default_target.unwrap_or("(none)");
+            let _ = writeln!(
+                output,
+                "  options: --template-target <PATH> (default {default_target})"
+            );
+        }
+    }
 
     output.trim_end().to_string()
 }
@@ -1204,6 +1373,18 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
+fn ensure_introspection_format_usage(cli: &Cli) -> Result<()> {
+    if cli.introspection_format == IntrospectionFormat::Json
+        && !(cli.doctor || cli.list_task_templates || cli.list_profiles)
+    {
+        bail!(
+            "--introspection-format only applies to --doctor, --list-task-templates, or --list-profiles"
+        );
+    }
+
+    Ok(())
+}
+
 fn run_init_config(cli: &Cli) -> Result<String> {
     let target_path = resolve_init_config_path(cli);
 
@@ -1238,14 +1419,59 @@ fn resolve_init_config_path(cli: &Cli) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_FILE))
 }
 
-fn run_list_profiles(cli: &Cli) -> Result<String> {
+fn run_list_profiles(cli: &Cli, format: IntrospectionFormat) -> Result<String> {
     let selected_profile = resolve_profile_name(cli)?;
     let (file_config, config_path) = load_config_for_cli(cli)?;
-    Ok(render_profile_list(
-        selected_profile.as_deref(),
-        config_path.as_deref(),
-        file_config.as_ref(),
-    ))
+
+    match format {
+        IntrospectionFormat::Text => Ok(render_profile_list(
+            selected_profile.as_deref(),
+            config_path.as_deref(),
+            file_config.as_ref(),
+        )),
+        IntrospectionFormat::Json => render_profile_list_json(
+            selected_profile.as_deref(),
+            config_path.as_deref(),
+            file_config.as_ref(),
+        ),
+    }
+}
+
+fn builtin_profile_summaries() -> Vec<ProfileSummaryView> {
+    vec![
+        ProfileSummaryView {
+            name: "local-lab",
+            description: "dry-run, compact step/token budget, summary output",
+        },
+        ProfileSummaryView {
+            name: "production-triage",
+            description: "dry-run, deeper loops, markdown output",
+        },
+        ProfileSummaryView {
+            name: "live-model",
+            description: "live inference enabled, larger token budget",
+        },
+    ]
+}
+
+fn selected_profile_source(
+    selected_profile: &str,
+    file_config: Option<&FileConfig>,
+) -> &'static str {
+    let is_builtin = builtin_profile(selected_profile).is_some();
+    let is_in_config = file_config
+        .and_then(|config| lookup_profile(&config.profiles, selected_profile))
+        .is_some();
+
+    if is_builtin && is_in_config {
+        "built-in+config"
+    } else if is_builtin {
+        "built-in"
+    } else if is_in_config {
+        "config"
+    } else {
+        "missing"
+    }
 }
 
 fn render_profile_list(
@@ -1257,18 +1483,9 @@ fn render_profile_list(
 
     let _ = writeln!(output, "WraithRun Profiles");
     let _ = writeln!(output, "Built-in profiles:");
-    let _ = writeln!(
-        output,
-        "- local-lab: dry-run, compact step/token budget, summary output"
-    );
-    let _ = writeln!(
-        output,
-        "- production-triage: dry-run, deeper loops, markdown output"
-    );
-    let _ = writeln!(
-        output,
-        "- live-model: live inference enabled, larger token budget"
-    );
+    for summary in builtin_profile_summaries() {
+        let _ = writeln!(output, "- {}: {}", summary.name, summary.description);
+    }
 
     match config_path {
         Some(path) => {
@@ -1294,30 +1511,55 @@ fn render_profile_list(
     }
 
     if let Some(profile_name) = selected_profile {
-        let is_builtin = builtin_profile(profile_name).is_some();
-        let is_in_config = file_config
-            .and_then(|config| lookup_profile(&config.profiles, profile_name))
-            .is_some();
-
         let _ = writeln!(output, "Selected profile: {profile_name}");
-        if is_builtin && is_in_config {
-            let _ = writeln!(
-                output,
-                "Profile source: built-in and config (config overrides overlapping keys)"
-            );
-        } else if is_builtin {
-            let _ = writeln!(output, "Profile source: built-in");
-        } else if is_in_config {
-            let _ = writeln!(output, "Profile source: config");
-        } else {
-            let _ = writeln!(
-                output,
-                "Profile source: missing (not found in built-ins or config)"
-            );
+        match selected_profile_source(profile_name, file_config) {
+            "built-in+config" => {
+                let _ = writeln!(
+                    output,
+                    "Profile source: built-in and config (config overrides overlapping keys)"
+                );
+            }
+            "built-in" => {
+                let _ = writeln!(output, "Profile source: built-in");
+            }
+            "config" => {
+                let _ = writeln!(output, "Profile source: config");
+            }
+            _ => {
+                let _ = writeln!(
+                    output,
+                    "Profile source: missing (not found in built-ins or config)"
+                );
+            }
         }
     }
 
     output.trim_end().to_string()
+}
+
+fn render_profile_list_json(
+    selected_profile: Option<&str>,
+    config_path: Option<&Path>,
+    file_config: Option<&FileConfig>,
+) -> Result<String> {
+    let mut profile_names = file_config
+        .map(|config| config.profiles.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    profile_names.sort_unstable();
+
+    let selected = selected_profile.map(|name| SelectedProfileView {
+        name: name.to_string(),
+        source: selected_profile_source(name, file_config),
+    });
+
+    let view = ProfileListView {
+        built_in_profiles: builtin_profile_summaries(),
+        config_path: config_path.map(|path| path.display().to_string()),
+        config_profiles: profile_names,
+        selected_profile: selected,
+    };
+
+    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
 }
 
 fn render_effective_config_json(runtime: &RuntimeConfig) -> Result<String> {
@@ -1598,22 +1840,7 @@ fn run_doctor(cli: &Cli) -> DoctorReport {
 
 fn render_doctor_report(report: &DoctorReport) -> String {
     let mut output = String::new();
-
-    let pass_count = report
-        .checks
-        .iter()
-        .filter(|check| check.status == DoctorStatus::Pass)
-        .count();
-    let warn_count = report
-        .checks
-        .iter()
-        .filter(|check| check.status == DoctorStatus::Warn)
-        .count();
-    let fail_count = report
-        .checks
-        .iter()
-        .filter(|check| check.status == DoctorStatus::Fail)
-        .count();
+    let (pass_count, warn_count, fail_count) = report.counts();
 
     let _ = writeln!(output, "WraithRun Doctor");
     let _ = writeln!(
@@ -1632,6 +1859,19 @@ fn render_doctor_report(report: &DoctorReport) -> String {
     }
 
     output.trim_end().to_string()
+}
+
+fn render_doctor_report_json(report: &DoctorReport) -> Result<String> {
+    let (pass_count, warn_count, fail_count) = report.counts();
+    let view = DoctorReportView {
+        summary: DoctorSummaryView {
+            pass: pass_count,
+            warn: warn_count,
+            fail: fail_count,
+        },
+        checks: &report.checks,
+    };
+    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
 }
 
 fn render_report(report: &RunReport, format: OutputFormat) -> Result<String> {
@@ -1806,23 +2046,27 @@ mod tests {
     use core_engine::{AgentTurn, RunReport, ToolCall};
 
     use super::{
-        merge_sources, render_doctor_report, render_effective_config_explanation_json,
-        render_effective_config_json, render_profile_list, render_report,
-        render_task_template_list, resolve_effective_config_explanation, resolve_init_config_path,
+        ensure_introspection_format_usage, merge_sources, render_doctor_report,
+        render_doctor_report_json, render_effective_config_explanation_json,
+        render_effective_config_json, render_profile_list, render_profile_list_json, render_report,
+        render_task_template_list, render_task_template_list_json,
+        resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
         resolve_task_for_run, run_init_config, Cli, DoctorReport, DoctorStatus, FileConfig,
-        OutputFormat, SettingsFragment, TaskTemplate,
+        IntrospectionFormat, OutputFormat, SettingsFragment, TaskTemplate,
     };
 
     fn base_cli() -> Cli {
         Cli {
             task: Some("Check suspicious listener ports and summarize risk".to_string()),
             task_file: None,
+            task_stdin: false,
             task_template: None,
             template_target: None,
             template_lines: None,
             doctor: false,
             list_task_templates: false,
             list_profiles: false,
+            introspection_format: IntrospectionFormat::Text,
             print_effective_config: false,
             explain_effective_config: false,
             init_config: false,
@@ -1983,6 +2227,20 @@ mod tests {
     }
 
     #[test]
+    fn renders_doctor_report_json() {
+        let mut report = DoctorReport::default();
+        report.push(DoctorStatus::Pass, "config-file", "loaded config");
+        report.push(DoctorStatus::Warn, "live-model-path", "missing model");
+        report.push(DoctorStatus::Fail, "effective-runtime", "invalid profile");
+
+        let rendered = render_doctor_report_json(&report).expect("json doctor render works");
+
+        assert!(rendered.contains("\"summary\""));
+        assert!(rendered.contains("\"pass\": 1"));
+        assert!(rendered.contains("\"status\": \"fail\""));
+    }
+
+    #[test]
     fn renders_profile_list_with_config_profiles() {
         let file_config = FileConfig {
             defaults: SettingsFragment::default(),
@@ -2002,6 +2260,25 @@ mod tests {
         assert!(rendered.contains("team-default"));
         assert!(rendered.contains("incident-hotfix"));
         assert!(rendered.contains("Profile source: built-in"));
+    }
+
+    #[test]
+    fn renders_profile_list_json_with_selected_source() {
+        let file_config = FileConfig {
+            defaults: SettingsFragment::default(),
+            profiles: HashMap::from([("incident-hotfix".to_string(), SettingsFragment::default())]),
+        };
+
+        let rendered = render_profile_list_json(
+            Some("incident-hotfix"),
+            Some(Path::new("./wraithrun.toml")),
+            Some(&file_config),
+        )
+        .expect("json profile render works");
+
+        assert!(rendered.contains("\"built_in_profiles\""));
+        assert!(rendered.contains("\"selected_profile\""));
+        assert!(rendered.contains("\"source\": \"config\""));
     }
 
     #[test]
@@ -2082,6 +2359,45 @@ mod tests {
     }
 
     #[test]
+    fn task_source_precedence_prefers_explicit_task() {
+        let mut cli = base_cli();
+        cli.task = Some("explicit task".to_string());
+        let path = unique_temp_file("wraithrun-task-file-precedence");
+        fs::write(&path, "task from file").expect("task file fixture should be created");
+        cli.task_file = Some(path.clone());
+        cli.task_template = Some(TaskTemplate::SshKeys);
+
+        let task = resolve_task_for_run(&cli).expect("task should resolve");
+        assert_eq!(task, "explicit task");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn task_source_precedence_prefers_task_file_over_template() {
+        let mut cli = base_cli();
+        cli.task = None;
+        let path = unique_temp_file("wraithrun-task-file-over-template");
+        fs::write(&path, "task from file").expect("task file fixture should be created");
+        cli.task_file = Some(path.clone());
+        cli.task_template = Some(TaskTemplate::SshKeys);
+
+        let task = resolve_task_for_run(&cli).expect("task should resolve");
+        assert_eq!(task, "task from file");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn resolve_task_for_mode_uses_fallback_without_sources() {
+        let mut cli = base_cli();
+        cli.task = None;
+
+        let task = resolve_task_for_mode(&cli, "fallback-task").expect("fallback should resolve");
+        assert_eq!(task, "fallback-task");
+    }
+
+    #[test]
     fn rejects_empty_task_file() {
         let mut cli = base_cli();
         cli.task = None;
@@ -2147,6 +2463,37 @@ mod tests {
         assert!(rendered.contains("WraithRun Task Templates"));
         assert!(rendered.contains("ssh-keys"));
         assert!(rendered.contains("priv-esc-review"));
+    }
+
+    #[test]
+    fn renders_task_template_list_json() {
+        let rendered =
+            render_task_template_list_json().expect("template list json rendering should work");
+        assert!(rendered.contains("\"templates\""));
+        assert!(rendered.contains("\"syslog-summary\""));
+        assert!(rendered.contains("\"supports_template_lines\": true"));
+    }
+
+    #[test]
+    fn rejects_json_introspection_format_without_mode() {
+        let mut cli = base_cli();
+        cli.introspection_format = IntrospectionFormat::Json;
+
+        let err = ensure_introspection_format_usage(&cli)
+            .expect_err("json introspection should require introspection mode");
+        assert!(err
+            .to_string()
+            .contains("--introspection-format only applies"));
+    }
+
+    #[test]
+    fn allows_json_introspection_format_with_mode() {
+        let mut cli = base_cli();
+        cli.list_profiles = true;
+        cli.introspection_format = IntrospectionFormat::Json;
+
+        ensure_introspection_format_usage(&cli)
+            .expect("json introspection should be allowed for list-profiles");
     }
 
     #[test]
