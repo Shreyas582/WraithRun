@@ -19,6 +19,9 @@ struct Cli {
     #[arg(long, default_value = "./models/llm.onnx")]
     model: PathBuf,
 
+    #[arg(long)]
+    tokenizer: Option<PathBuf>,
+
     #[arg(long, default_value_t = 8)]
     max_steps: usize,
 
@@ -50,6 +53,7 @@ async fn main() -> Result<()> {
 
     let model_config = ModelConfig {
         model_path: cli.model,
+        tokenizer_path: cli.tokenizer,
         max_new_tokens: cli.max_new_tokens,
         temperature: cli.temperature,
         dry_run: !cli.live,

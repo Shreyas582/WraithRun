@@ -17,6 +17,7 @@ pub struct VitisEpConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub model_path: PathBuf,
+    pub tokenizer_path: Option<PathBuf>,
     pub max_new_tokens: usize,
     pub temperature: f32,
     pub dry_run: bool,
