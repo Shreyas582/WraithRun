@@ -17,11 +17,197 @@ pub struct AgentTurn {
     pub observation: Option<Value>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FindingSeverity {
+    Info,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvidencePointer {
+    pub turn: Option<usize>,
+    pub tool: Option<String>,
+    pub field: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Finding {
+    pub title: String,
+    pub severity: FindingSeverity,
+    pub confidence: f32,
+    pub evidence_pointer: EvidencePointer,
+    pub recommended_action: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunReport {
     pub task: String,
     pub turns: Vec<AgentTurn>,
     pub final_answer: String,
+    #[serde(default)]
+    pub findings: Vec<Finding>,
+}
+
+pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    for (idx, turn) in turns.iter().enumerate() {
+        let Some(observation) = turn.observation.as_ref() else {
+            continue;
+        };
+
+        let tool_name = turn.tool_call.as_ref().map(|call| call.tool.clone());
+
+        if let Some(error) = observation.get("error").and_then(Value::as_str) {
+            let tool_label = tool_name.as_deref().unwrap_or("unknown_tool");
+            findings.push(Finding {
+                title: format!("Tool execution failed for {tool_label}"),
+                severity: FindingSeverity::High,
+                confidence: 0.95,
+                evidence_pointer: EvidencePointer {
+                    turn: Some(idx + 1),
+                    tool: tool_name.clone(),
+                    field: "observation.error".to_string(),
+                },
+                recommended_action: format!(
+                    "Review tool arguments and host access policy, then rerun {tool_label}. Error sample: {error}"
+                ),
+            });
+            continue;
+        }
+
+        if let Some(indicator_count) = observation.get("indicator_count").and_then(Value::as_u64) {
+            if indicator_count > 0 {
+                let severity = if indicator_count >= 4 {
+                    FindingSeverity::High
+                } else {
+                    FindingSeverity::Medium
+                };
+
+                findings.push(Finding {
+                    title: format!(
+                        "Privilege escalation indicators detected ({indicator_count})"
+                    ),
+                    severity,
+                    confidence: confidence_from_count(0.68, indicator_count, 0.06, 0.96),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.indicator_count".to_string(),
+                    },
+                    recommended_action: "Review potential_vectors and verify whether elevated rights are expected; revoke or constrain unexpected grants.".to_string(),
+                });
+            }
+        }
+
+        if let Some(listener_count) = observation.get("listener_count").and_then(Value::as_u64) {
+            if listener_count > 0 {
+                let severity = if listener_count >= 25 {
+                    FindingSeverity::High
+                } else if listener_count >= 8 {
+                    FindingSeverity::Medium
+                } else {
+                    FindingSeverity::Low
+                };
+
+                findings.push(Finding {
+                    title: format!("Active listening sockets observed ({listener_count})"),
+                    severity,
+                    confidence: confidence_from_count(0.62, listener_count, 0.02, 0.92),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.listener_count".to_string(),
+                    },
+                    recommended_action: "Correlate listener PIDs and ports with expected services; investigate unknown listeners and expose only required interfaces.".to_string(),
+                });
+            }
+        }
+
+        if let (Some(path), Some(_digest)) = (
+            observation.get("path").and_then(Value::as_str),
+            observation.get("sha256").and_then(Value::as_str),
+        ) {
+            findings.push(Finding {
+                title: format!("File hash captured for {path}"),
+                severity: FindingSeverity::Info,
+                confidence: 0.90,
+                evidence_pointer: EvidencePointer {
+                    turn: Some(idx + 1),
+                    tool: tool_name.clone(),
+                    field: "observation.sha256".to_string(),
+                },
+                recommended_action: "Compare the hash against trusted baseline or threat-intel sources before taking containment action.".to_string(),
+            });
+        }
+
+        if let Some(lines) = observation.get("lines").and_then(Value::as_array) {
+            let suspicious_hits = lines
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|line| is_suspicious_log_line(line))
+                .count();
+
+            if suspicious_hits > 0 {
+                let severity = if suspicious_hits >= 5 {
+                    FindingSeverity::High
+                } else {
+                    FindingSeverity::Medium
+                };
+
+                findings.push(Finding {
+                    title: format!(
+                        "Suspicious log keywords observed in {suspicious_hits} line(s)"
+                    ),
+                    severity,
+                    confidence: confidence_from_count(0.64, suspicious_hits as u64, 0.05, 0.93),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.lines".to_string(),
+                    },
+                    recommended_action: "Inspect matching log lines for account abuse or execution anomalies, then pivot to host and identity telemetry.".to_string(),
+                });
+            }
+        }
+    }
+
+    if findings.is_empty() {
+        findings.push(Finding {
+            title: "No high-confidence host findings derived from collected evidence".to_string(),
+            severity: FindingSeverity::Info,
+            confidence: 0.55,
+            evidence_pointer: EvidencePointer {
+                turn: None,
+                tool: None,
+                field: "final_answer".to_string(),
+            },
+            recommended_action: if final_answer.trim().is_empty() {
+                "Review raw observations and rerun targeted task templates for deeper coverage."
+                    .to_string()
+            } else {
+                "Review the final answer and raw observations; rerun targeted task templates if analyst confidence is low.".to_string()
+            },
+        });
+    }
+
+    findings
+}
+
+fn confidence_from_count(base: f32, count: u64, slope: f32, ceiling: f32) -> f32 {
+    let raw = (base + (count as f32 * slope)).min(ceiling);
+    (raw * 100.0).round() / 100.0
+}
+
+fn is_suspicious_log_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    ["error", "failed", "denied", "unauthorized", "suspicious"]
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 pub fn format_system_prompt(tool_manifest_json: &str) -> String {
@@ -67,7 +253,11 @@ pub fn parse_tool_call(text: &str) -> Option<ToolCall> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_tag, parse_tool_call};
+    use serde_json::json;
+
+    use super::{
+        derive_findings, extract_tag, parse_tool_call, AgentTurn, FindingSeverity, ToolCall,
+    };
 
     #[test]
     fn parses_json_tool_call() {
@@ -83,5 +273,65 @@ mod tests {
         let text = "noise <final>done</final> trailing";
         let final_text = extract_tag(text, "final").expect("final tag should parse");
         assert_eq!(final_text, "done");
+    }
+
+    #[test]
+    fn derives_privilege_indicator_finding() {
+        let turns = vec![AgentTurn {
+            thought: "<call>{...}</call>".to_string(),
+            tool_call: Some(ToolCall {
+                tool: "check_privilege_escalation_vectors".to_string(),
+                args: json!({}),
+            }),
+            observation: Some(json!({
+                "indicator_count": 2,
+                "potential_vectors": ["SeDebugPrivilege"]
+            })),
+        }];
+
+        let findings = derive_findings(&turns, "final");
+        assert!(findings
+            .iter()
+            .any(|finding| finding.title.contains("Privilege escalation indicators")));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.evidence_pointer.field == "observation.indicator_count"));
+    }
+
+    #[test]
+    fn derives_error_finding_for_failed_tool_observation() {
+        let turns = vec![AgentTurn {
+            thought: "<call>{...}</call>".to_string(),
+            tool_call: Some(ToolCall {
+                tool: "scan_network".to_string(),
+                args: json!({}),
+            }),
+            observation: Some(json!({
+                "error": "socket inventory command failed"
+            })),
+        }];
+
+        let findings = derive_findings(&turns, "final");
+        assert!(findings
+            .iter()
+            .any(|finding| finding.severity == FindingSeverity::High));
+        assert!(findings.iter().any(|finding| {
+            finding.evidence_pointer.field == "observation.error"
+                && finding.evidence_pointer.turn == Some(1)
+        }));
+    }
+
+    #[test]
+    fn emits_fallback_finding_when_no_signals_exist() {
+        let turns = vec![AgentTurn {
+            thought: "No-op".to_string(),
+            tool_call: None,
+            observation: None,
+        }];
+
+        let findings = derive_findings(&turns, "No significant anomalies detected.");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, FindingSeverity::Info);
+        assert_eq!(findings[0].evidence_pointer.field, "final_answer");
     }
 }

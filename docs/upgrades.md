@@ -1,5 +1,33 @@
 # Upgrade Notes
 
+## v0.4.2
+
+### Breaking/visible changes
+
+- Run report JSON now includes a first-class `findings[]` layer with severity, confidence, evidence pointers, and recommended actions.
+- Summary and markdown output now render findings before turn-by-turn evidence.
+- `--list-tools --tool-filter <QUERY>` now supports multi-term, separator-normalized matching.
+
+### Migration examples
+
+Run a standard task and inspect findings in JSON output:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys"
+```
+
+Filter tools using multiple terms:
+
+```powershell
+.\wraithrun.exe --list-tools --tool-filter "priv esc"
+```
+
+### Recommended checks after upgrade
+
+- If automation consumes run output JSON, parse `findings[]` and ignore unknown future fields for forward compatibility.
+- Validate analyst runbooks treat `evidence_pointer` as a jump target into `turns[]` observations.
+- Confirm triage dashboards can display severity/confidence and recommended action from findings.
+
 ## v0.4.1
 
 ### Breaking/visible changes

@@ -77,6 +77,52 @@ fn accepts_task_file_dash_from_stdin() {
 }
 
 #[test]
+fn report_json_contract_contains_findings_layer() {
+    let output = run_capture(&["--task", "Investigate unauthorized SSH keys"]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let findings = json
+        .get("findings")
+        .and_then(Value::as_array)
+        .expect("findings should be an array");
+    assert!(!findings.is_empty(), "findings should not be empty");
+
+    let first = findings[0]
+        .as_object()
+        .expect("first finding should be an object");
+    assert!(
+        first.get("severity").and_then(Value::as_str).is_some(),
+        "finding severity should be present"
+    );
+    assert!(
+        first.get("confidence").and_then(Value::as_f64).is_some(),
+        "finding confidence should be present"
+    );
+    assert!(
+        first
+            .get("recommended_action")
+            .and_then(Value::as_str)
+            .is_some(),
+        "finding recommended_action should be present"
+    );
+
+    let evidence = first
+        .get("evidence_pointer")
+        .and_then(Value::as_object)
+        .expect("evidence_pointer should be an object");
+    assert!(
+        evidence.get("field").and_then(Value::as_str).is_some(),
+        "evidence_pointer.field should be present"
+    );
+}
+
+#[test]
 fn rejects_empty_stdin_task() {
     let output = Command::new(env!("CARGO_BIN_EXE_wraithrun"))
         .args(["--task-stdin", "--format", "summary"])

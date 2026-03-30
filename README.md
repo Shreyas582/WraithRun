@@ -57,6 +57,19 @@ Each run prints a JSON report:
 ```json
 {
     "task": "Investigate unauthorized SSH keys",
+    "findings": [
+        {
+            "title": "Privilege escalation indicators detected (1)",
+            "severity": "medium",
+            "confidence": 0.74,
+            "evidence_pointer": {
+                "turn": 1,
+                "tool": "check_privilege_escalation_vectors",
+                "field": "observation.indicator_count"
+            },
+            "recommended_action": "Review potential_vectors and verify whether elevated rights are expected."
+        }
+    ],
     "turns": [
         {
             "thought": "...",
@@ -71,6 +84,7 @@ Each run prints a JSON report:
 Top-level fields:
 
 - `task`: your input task string.
+- `findings`: normalized actionable findings with severity, confidence, evidence pointer, and recommended action.
 - `turns`: intermediate reasoning/tool interaction history.
 - `final_answer`: the model/runtime conclusion.
 

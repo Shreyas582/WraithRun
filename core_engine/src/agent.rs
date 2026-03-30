@@ -5,7 +5,9 @@ use tracing::info;
 use cyber_tools::ToolRegistry;
 use inference_bridge::InferenceEngine;
 
-use crate::{extract_tag, format_system_prompt, parse_tool_call, AgentTurn, RunReport};
+use crate::{
+    derive_findings, extract_tag, format_system_prompt, parse_tool_call, AgentTurn, RunReport,
+};
 
 pub struct Agent<B: InferenceEngine> {
     brain: B,
@@ -44,10 +46,12 @@ impl<B: InferenceEngine> Agent<B> {
             info!(step = step + 1, output = %output, "agent brain output");
 
             if let Some(final_answer) = extract_tag(&output, "final") {
+                let findings = derive_findings(&turns, &final_answer);
                 return Ok(RunReport {
                     task: task.to_string(),
                     turns,
                     final_answer,
+                    findings,
                 });
             }
 
@@ -76,17 +80,24 @@ impl<B: InferenceEngine> Agent<B> {
                 observation: None,
             });
 
+            let findings = derive_findings(&turns, &output);
+
             return Ok(RunReport {
                 task: task.to_string(),
                 turns,
                 final_answer: output,
+                findings,
             });
         }
+
+        let final_answer = "Maximum step count reached before receiving <final>.".to_string();
+        let findings = derive_findings(&turns, &final_answer);
 
         Ok(RunReport {
             task: task.to_string(),
             turns,
-            final_answer: "Maximum step count reached before receiving <final>.".to_string(),
+            final_answer,
+            findings,
         })
     }
 }

@@ -249,6 +249,29 @@ Schema compatibility policy:
 - Minor releases (`0.Y.0`) may add new JSON fields, but existing documented fields are not removed or renamed without an explicit changelog note.
 - Automation should ignore unknown extra fields to remain forward-compatible.
 
+## Run Report JSON Fields
+
+Default run output (`--format json`) includes:
+
+- `task`: original task text.
+- `findings`: actionable finding list synthesized from collected evidence.
+- `turns`: tool-thought-observation trace.
+- `final_answer`: model/runtime conclusion string.
+
+`findings[]` object fields:
+
+- `title`: concise finding summary.
+- `severity`: one of `info`, `low`, `medium`, `high`, `critical`.
+- `confidence`: numeric confidence score (`0.00` to `1.00`).
+- `evidence_pointer`: pointer back to supporting evidence.
+- `recommended_action`: analyst-facing next action.
+
+`evidence_pointer` fields:
+
+- `turn`: 1-based turn index when evidence comes from a tool observation (`null` when sourced from `final_answer`).
+- `tool`: tool name associated with the evidence (`null` for non-tool evidence).
+- `field`: JSON field path for supporting evidence (for example `observation.indicator_count`).
+
 ## Task Templates
 
 Built-in template values for `--task-template`:

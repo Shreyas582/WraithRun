@@ -6,7 +6,7 @@ use std::{fmt::Write as _, fs};
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use core_engine::agent::Agent;
-use core_engine::RunReport;
+use core_engine::{EvidencePointer, FindingSeverity, RunReport};
 use cyber_tools::{ToolRegistry, ToolSpec};
 use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
 use serde::{Deserialize, Serialize};
@@ -2178,7 +2178,32 @@ fn render_summary(report: &RunReport) -> String {
 
     let _ = writeln!(output, "Task: {}", report.task);
     let _ = writeln!(output, "Turns: {}", report.turns.len());
+    let _ = writeln!(output, "Findings: {}", report.findings.len());
     let _ = writeln!(output, "Final Answer: {}", report.final_answer);
+
+    if !report.findings.is_empty() {
+        let _ = writeln!(output, "\nFindings:");
+        for (idx, finding) in report.findings.iter().enumerate() {
+            let _ = writeln!(
+                output,
+                "{}. [{}] {} (confidence {:.2})",
+                idx + 1,
+                finding_severity_label(finding.severity),
+                finding.title,
+                finding.confidence
+            );
+            let _ = writeln!(
+                output,
+                "   evidence: {}",
+                render_evidence_pointer(&finding.evidence_pointer)
+            );
+            let _ = writeln!(
+                output,
+                "   recommended_action: {}",
+                finding.recommended_action
+            );
+        }
+    }
 
     if report.turns.is_empty() {
         return output.trim_end().to_string();
@@ -2216,7 +2241,32 @@ fn render_markdown(report: &RunReport) -> String {
     let _ = writeln!(output);
     let _ = writeln!(output, "- Task: {}", report.task);
     let _ = writeln!(output, "- Turns: {}", report.turns.len());
+    let _ = writeln!(output, "- Findings: {}", report.findings.len());
     let _ = writeln!(output, "- Final Answer: {}", report.final_answer);
+
+    if !report.findings.is_empty() {
+        let _ = writeln!(output, "\n## Findings");
+        for (idx, finding) in report.findings.iter().enumerate() {
+            let _ = writeln!(output, "\n### Finding {}", idx + 1);
+            let _ = writeln!(output, "- Title: {}", finding.title);
+            let _ = writeln!(
+                output,
+                "- Severity: {}",
+                finding_severity_label(finding.severity)
+            );
+            let _ = writeln!(output, "- Confidence: {:.2}", finding.confidence);
+            let _ = writeln!(
+                output,
+                "- Evidence: {}",
+                render_evidence_pointer(&finding.evidence_pointer)
+            );
+            let _ = writeln!(
+                output,
+                "- Recommended Action: {}",
+                finding.recommended_action
+            );
+        }
+    }
 
     if report.turns.is_empty() {
         return output.trim_end().to_string();
@@ -2280,6 +2330,25 @@ fn summarize_observation(value: &Value) -> String {
     compact_json(value)
 }
 
+fn finding_severity_label(severity: FindingSeverity) -> &'static str {
+    match severity {
+        FindingSeverity::Info => "INFO",
+        FindingSeverity::Low => "LOW",
+        FindingSeverity::Medium => "MEDIUM",
+        FindingSeverity::High => "HIGH",
+        FindingSeverity::Critical => "CRITICAL",
+    }
+}
+
+fn render_evidence_pointer(pointer: &EvidencePointer) -> String {
+    let turn = pointer
+        .turn
+        .map(|turn| format!("turn {turn}"))
+        .unwrap_or_else(|| "turn n/a".to_string());
+    let tool = pointer.tool.as_deref().unwrap_or("tool n/a");
+    format!("{turn}, {tool}, {}", pointer.field)
+}
+
 fn build_vitis_config(runtime: &RuntimeConfig) -> Option<VitisEpConfig> {
     if runtime.vitis_config.is_none()
         && runtime.vitis_cache_dir.is_none()
@@ -2323,7 +2392,7 @@ mod tests {
 
     use serde_json::json;
 
-    use core_engine::{AgentTurn, RunReport, ToolCall};
+    use core_engine::{AgentTurn, EvidencePointer, Finding, FindingSeverity, RunReport, ToolCall};
 
     use super::{
         ensure_introspection_format_usage, merge_sources, render_doctor_report,
@@ -2388,6 +2457,18 @@ mod tests {
                 observation: Some(json!({ "listener_count": 3, "listeners": [] })),
             }],
             final_answer: "Dry-run cycle complete.".to_string(),
+            findings: vec![Finding {
+                title: "Active listening sockets observed (3)".to_string(),
+                severity: FindingSeverity::Medium,
+                confidence: 0.68,
+                evidence_pointer: EvidencePointer {
+                    turn: Some(1),
+                    tool: Some("scan_network".to_string()),
+                    field: "observation.listener_count".to_string(),
+                },
+                recommended_action: "Correlate listener PIDs and ports with expected services."
+                    .to_string(),
+            }],
         }
     }
 
@@ -2397,6 +2478,7 @@ mod tests {
         let rendered = render_report(&report, OutputFormat::Json).expect("json render should work");
         assert!(rendered.contains("\"task\""));
         assert!(rendered.contains("\"scan_network\""));
+        assert!(rendered.contains("\"findings\""));
     }
 
     #[test]
@@ -2405,6 +2487,7 @@ mod tests {
         let rendered =
             render_report(&report, OutputFormat::Summary).expect("summary render should work");
         assert!(rendered.contains("Task:"));
+        assert!(rendered.contains("Findings:"));
         assert!(rendered.contains("tool: scan_network"));
         assert!(rendered.contains("Final Answer:"));
     }
@@ -2415,6 +2498,7 @@ mod tests {
         let rendered =
             render_report(&report, OutputFormat::Markdown).expect("markdown render should work");
         assert!(rendered.contains("# WraithRun Report"));
+        assert!(rendered.contains("## Findings"));
         assert!(rendered.contains("## Turns"));
         assert!(rendered.contains("```json"));
     }
