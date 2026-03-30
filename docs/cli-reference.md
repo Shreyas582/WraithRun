@@ -32,6 +32,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--doctor`: run configuration/runtime diagnostics and exit.
 - `--list-task-templates`: list built-in investigation templates and exit.
 - `--list-tools`: list built-in local investigation tools and exit.
+- `--tool-filter <QUERY>`: filter `--list-tools` results by name/description substring.
 - `--describe-tool <NAME>`: render details for one tool and exit.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
 - `--introspection-format <INTROSPECTION_FORMAT>`: format for introspection modes. Values: `text`, `json`. Default: `text`.
@@ -97,6 +98,8 @@ Behavior:
 `--list-task-templates` output includes built-in task template names and their prompt text.
 
 `--list-tools` output includes tool names, descriptions, and JSON argument schemas.
+
+When `--tool-filter` is used with `--list-tools`, only matching tools are returned.
 
 `--describe-tool` output includes one matching tool object by name.
 
@@ -309,6 +312,12 @@ List tools as JSON:
 
 ```powershell
 wraithrun --list-tools --introspection-format json
+```
+
+Filter tools by keyword:
+
+```powershell
+wraithrun --list-tools --tool-filter hash
 ```
 
 Describe one tool:

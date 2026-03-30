@@ -93,6 +93,9 @@ struct Cli {
     #[arg(long, value_name = "NAME")]
     describe_tool: Option<String>,
 
+    #[arg(long, value_name = "QUERY", requires = "list_tools")]
+    tool_filter: Option<String>,
+
     #[arg(long)]
     list_profiles: bool,
 
@@ -473,7 +476,7 @@ async fn main() -> Result<()> {
     }
 
     if cli.list_tools {
-        let rendered = run_list_tools(cli.introspection_format)?;
+        let rendered = run_list_tools(cli.introspection_format, cli.tool_filter.as_deref())?;
         println!("{rendered}");
         return Ok(());
     }
@@ -824,9 +827,29 @@ fn render_task_template_list_json() -> Result<String> {
     serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
 }
 
-fn run_list_tools(format: IntrospectionFormat) -> Result<String> {
+fn run_list_tools(format: IntrospectionFormat, filter: Option<&str>) -> Result<String> {
     let registry = ToolRegistry::with_default_tools();
-    let tools = registry.tool_specs();
+    let mut tools = registry.tool_specs();
+
+    if let Some(raw_filter) = filter {
+        let normalized = raw_filter.trim();
+        if normalized.is_empty() {
+            bail!("--tool-filter cannot be empty");
+        }
+
+        let query = normalized.to_ascii_lowercase();
+        tools.retain(|tool| {
+            tool.name.to_ascii_lowercase().contains(&query)
+                || tool.description.to_ascii_lowercase().contains(&query)
+        });
+
+        if tools.is_empty() {
+            bail!(
+                "No tools matched filter '{}'. Use --list-tools without --tool-filter to show all tools.",
+                normalized
+            );
+        }
+    }
 
     match format {
         IntrospectionFormat::Text => Ok(render_tool_list(&tools)),
@@ -2213,9 +2236,9 @@ mod tests {
         render_task_template_list, render_task_template_list_json, render_tool_detail,
         render_tool_detail_json, render_tool_list, render_tool_list_json,
         resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
-        resolve_task_for_run, run_describe_tool, run_init_config, Cli, DoctorReport, DoctorStatus,
-        FileConfig, IntrospectionFormat, OutputFormat, SettingsFragment, TaskTemplate,
-        ToolRegistry,
+        resolve_task_for_run, run_describe_tool, run_init_config, run_list_tools, Cli,
+        DoctorReport, DoctorStatus, FileConfig, IntrospectionFormat, OutputFormat,
+        SettingsFragment, TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -2230,6 +2253,7 @@ mod tests {
             list_task_templates: false,
             list_tools: false,
             describe_tool: None,
+            tool_filter: None,
             list_profiles: false,
             introspection_format: IntrospectionFormat::Text,
             print_effective_config: false,
@@ -2674,6 +2698,28 @@ mod tests {
         assert!(rendered.contains("\"tools\""));
         assert!(rendered.contains("\"check_privilege_escalation_vectors\""));
         assert!(rendered.contains("\"args_schema\""));
+    }
+
+    #[test]
+    fn list_tools_filter_matches_expected_tool() {
+        let rendered = run_list_tools(IntrospectionFormat::Json, Some("hash"))
+            .expect("filtered list-tools should succeed");
+        assert!(rendered.contains("\"hash_binary\""));
+        assert!(!rendered.contains("\"scan_network\""));
+    }
+
+    #[test]
+    fn list_tools_filter_rejects_unknown_query() {
+        let error = run_list_tools(IntrospectionFormat::Text, Some("definitely-not-a-tool"))
+            .expect_err("unknown filter should fail");
+        assert!(error.to_string().contains("No tools matched filter"));
+    }
+
+    #[test]
+    fn list_tools_filter_rejects_empty_query() {
+        let error = run_list_tools(IntrospectionFormat::Text, Some("   "))
+            .expect_err("empty filter should fail");
+        assert!(error.to_string().contains("--tool-filter cannot be empty"));
     }
 
     #[test]

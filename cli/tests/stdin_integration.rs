@@ -275,3 +275,43 @@ fn describe_tool_rejects_unknown_tool_name() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Unknown tool 'nonexistent-tool'"));
 }
+
+#[test]
+fn list_tools_filter_json_contract_contains_filtered_result() {
+    let output = run_capture(&[
+        "--list-tools",
+        "--tool-filter",
+        "hash",
+        "--introspection-format",
+        "json",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let tools = json
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("tools should be an array");
+    assert_eq!(tools.len(), 1, "filter should narrow tools to one result");
+    assert_eq!(
+        tools[0].get("name").and_then(Value::as_str),
+        Some("hash_binary")
+    );
+}
+
+#[test]
+fn list_tools_filter_rejects_no_matches() {
+    let output = run_capture(&["--list-tools", "--tool-filter", "no-such-tool"]);
+
+    assert!(
+        !output.status.success(),
+        "process should fail when filter has no matches"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("No tools matched filter 'no-such-tool'"));
+}

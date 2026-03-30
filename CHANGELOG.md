@@ -8,7 +8,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- Tool discovery filtering via `--tool-filter <QUERY>` for `--list-tools` output.
 
 ### Changed
 
