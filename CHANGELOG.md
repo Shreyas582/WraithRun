@@ -8,6 +8,12 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- No user-facing changes recorded yet.
+
+## 0.2.1 - 2026-03-29
+
+### Added
+
 - Public usage examples guide for self-serve adoption.
 
 ### Changed
