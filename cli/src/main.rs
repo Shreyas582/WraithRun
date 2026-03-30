@@ -8,10 +8,7 @@ use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "wraithrun",
-    about = "Local-first cyber investigation runtime"
-)]
+#[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
     #[arg(long)]
     task: String,
