@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (example: v0.2.0)"
+        required: true
+        type: string
+      draft:
+        description: "Create release as draft"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: Release preflight checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Workspace check
+        run: cargo check --workspace
+
+      - name: Workspace tests
+        run: cargo test --workspace
+
+      - name: Validate Vitis feature path
+        run: cargo check -p inference_bridge --features vitis
+
+  build:
+    name: Build release binaries (${{ matrix.os }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: agentic-cyber-cli-linux-x86_64.tar.gz
+          - os: macos-latest
+            artifact: agentic-cyber-cli-macos-x86_64.tar.gz
+          - os: windows-latest
+            artifact: agentic-cyber-cli-windows-x86_64.zip
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build -p agentic-cyber-cli --release
+
+      - name: Package Linux artifact
+        if: runner.os == 'Linux'
+        run: |
+          cp target/release/agentic-cyber-cli agentic-cyber-cli
+          tar -czf ${{ matrix.artifact }} agentic-cyber-cli
+
+      - name: Package macOS artifact
+        if: runner.os == 'macOS'
+        run: |
+          cp target/release/agentic-cyber-cli agentic-cyber-cli
+          tar -czf ${{ matrix.artifact }} agentic-cyber-cli
+
+      - name: Package Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item target/release/agentic-cyber-cli.exe agentic-cyber-cli.exe
+          Compress-Archive -Path agentic-cyber-cli.exe -DestinationPath ${{ matrix.artifact }}
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+            echo "draft=${{ github.event.inputs.draft }}" >> "$GITHUB_OUTPUT"
+          else
+            tag="${GITHUB_REF_NAME}"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if ! echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid release tag format: $tag"
+            echo "Expected semantic version tag like v0.2.0"
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          draft: ${{ steps.meta.outputs.draft }}
+          generate_release_notes: true
+          files: dist/**/*
