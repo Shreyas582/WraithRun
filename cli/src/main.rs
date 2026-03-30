@@ -669,7 +669,7 @@ fn decode_task_text(bytes: &[u8], path: &Path) -> Result<String> {
 }
 
 fn decode_utf16_text(bytes: &[u8], little_endian: bool, path: &Path) -> Result<String> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         bail!(
             "Task file '{}' has invalid UTF-16 byte length",
             path.display()
