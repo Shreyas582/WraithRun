@@ -38,6 +38,24 @@ Fix:
 wraithrun --explain-effective-config --profile local-lab
 ```
 
+## Unsure how to phrase an investigation task
+
+Symptom:
+
+- You want a valid task prompt quickly.
+
+Fix:
+
+```powershell
+wraithrun --list-task-templates
+```
+
+Run one directly:
+
+```powershell
+wraithrun --task-template listener-risk
+```
+
 ## Vitis inference is disabled
 
 Symptom:

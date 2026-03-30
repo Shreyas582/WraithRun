@@ -37,14 +37,34 @@ enum LogMode {
     Verbose,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum TaskTemplate {
+    #[value(name = "ssh-keys")]
+    SshKeys,
+    #[value(name = "listener-risk")]
+    ListenerRisk,
+    #[value(name = "hash-integrity")]
+    HashIntegrity,
+    #[value(name = "priv-esc-review")]
+    PrivEscReview,
+    #[value(name = "syslog-summary")]
+    SyslogSummary,
+}
+
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["doctor", "list_profiles", "print_effective_config", "init_config", "explain_effective_config"])]
+    #[arg(long, required_unless_present_any = ["task_template", "doctor", "list_profiles", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
     task: Option<String>,
+
+    #[arg(long, value_enum, conflicts_with = "task")]
+    task_template: Option<TaskTemplate>,
 
     #[arg(long)]
     doctor: bool,
+
+    #[arg(long)]
+    list_task_templates: bool,
 
     #[arg(long)]
     list_profiles: bool,
@@ -334,6 +354,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     ensure_exclusive_modes(&cli)?;
 
+    if cli.list_task_templates {
+        println!("{}", render_task_template_list());
+        return Ok(());
+    }
+
     if cli.init_config {
         let message = run_init_config(&cli)?;
         println!("{message}");
@@ -399,36 +424,25 @@ async fn main() -> Result<()> {
 }
 
 fn resolve_runtime_config(cli: &Cli) -> Result<RuntimeConfig> {
-    let task = cli
-        .task
-        .clone()
-        .ok_or_else(|| {
-            anyhow!(
-                "--task is required unless one of --doctor, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
-            )
-        })?;
+    let task = resolve_task_for_run(cli)?;
 
     resolve_runtime_config_with_task(cli, task)
 }
 
 fn resolve_runtime_config_for_preview(cli: &Cli) -> Result<RuntimeConfig> {
-    let task = cli
-        .task
-        .clone()
-        .unwrap_or_else(|| "preview-effective-config".to_string());
+    let task = resolve_task_for_mode(cli, "preview-effective-config");
     resolve_runtime_config_with_task(cli, task)
 }
 
 fn resolve_effective_config_explanation(cli: &Cli) -> Result<EffectiveConfigExplanationView> {
-    let task = cli
-        .task
-        .clone()
-        .unwrap_or_else(|| "explain-effective-config".to_string());
+    let task = resolve_task_for_mode(cli, "explain-effective-config");
 
     let task_source = if cli.task.is_some() {
-        "cli --task"
+        "cli --task".to_string()
+    } else if let Some(template) = cli.task_template {
+        format!("cli --task-template ({})", task_template_name(template))
     } else {
-        "mode default"
+        "mode default".to_string()
     };
 
     let profile = resolve_profile_name(cli)?;
@@ -438,7 +452,7 @@ fn resolve_effective_config_explanation(cli: &Cli) -> Result<EffectiveConfigExpl
     let (runtime, sources) = merge_sources_with_explanation(
         cli,
         task,
-        task_source,
+        &task_source,
         profile.clone(),
         file_config.as_ref(),
         file_config_path.as_deref(),
@@ -466,6 +480,89 @@ fn resolve_runtime_config_with_task(cli: &Cli, task: String) -> Result<RuntimeCo
         file_config_path.as_deref(),
         &env_overrides,
     )
+}
+
+fn resolve_task_for_run(cli: &Cli) -> Result<String> {
+    if let Some(task) = &cli.task {
+        let trimmed = task.trim();
+        if trimmed.is_empty() {
+            bail!("--task cannot be empty");
+        }
+        return Ok(trimmed.to_string());
+    }
+
+    if let Some(template) = cli.task_template {
+        return Ok(task_template_prompt(template).to_string());
+    }
+
+    bail!(
+        "Either --task or --task-template is required unless one of --doctor, --list-task-templates, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
+    )
+}
+
+fn resolve_task_for_mode(cli: &Cli, fallback: &str) -> String {
+    if let Some(task) = &cli.task {
+        return task.trim().to_string();
+    }
+    if let Some(template) = cli.task_template {
+        return task_template_prompt(template).to_string();
+    }
+    fallback.to_string()
+}
+
+fn task_template_name(template: TaskTemplate) -> &'static str {
+    match template {
+        TaskTemplate::SshKeys => "ssh-keys",
+        TaskTemplate::ListenerRisk => "listener-risk",
+        TaskTemplate::HashIntegrity => "hash-integrity",
+        TaskTemplate::PrivEscReview => "priv-esc-review",
+        TaskTemplate::SyslogSummary => "syslog-summary",
+    }
+}
+
+fn task_template_prompt(template: TaskTemplate) -> &'static str {
+    match template {
+        TaskTemplate::SshKeys => "Investigate unauthorized SSH keys",
+        TaskTemplate::ListenerRisk => "Check suspicious listener ports and summarize risk",
+        TaskTemplate::HashIntegrity => {
+            "Hash C:/Windows/System32/notepad.exe and report integrity context"
+        }
+        TaskTemplate::PrivEscReview => "Review local privilege escalation indicators",
+        TaskTemplate::SyslogSummary => "Read and summarize last 200 lines from C:/Logs/agent.log",
+    }
+}
+
+fn render_task_template_list() -> String {
+    let mut output = String::new();
+
+    let _ = writeln!(output, "WraithRun Task Templates");
+    let _ = writeln!(
+        output,
+        "- ssh-keys: {}",
+        task_template_prompt(TaskTemplate::SshKeys)
+    );
+    let _ = writeln!(
+        output,
+        "- listener-risk: {}",
+        task_template_prompt(TaskTemplate::ListenerRisk)
+    );
+    let _ = writeln!(
+        output,
+        "- hash-integrity: {}",
+        task_template_prompt(TaskTemplate::HashIntegrity)
+    );
+    let _ = writeln!(
+        output,
+        "- priv-esc-review: {}",
+        task_template_prompt(TaskTemplate::PrivEscReview)
+    );
+    let _ = writeln!(
+        output,
+        "- syslog-summary: {}",
+        task_template_prompt(TaskTemplate::SyslogSummary)
+    );
+
+    output.trim_end().to_string()
 }
 
 fn merge_sources(
@@ -992,6 +1089,9 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     let mut selected = Vec::new();
     if cli.doctor {
         selected.push("--doctor");
+    }
+    if cli.list_task_templates {
+        selected.push("--list-task-templates");
     }
     if cli.list_profiles {
         selected.push("--list-profiles");
@@ -1620,14 +1720,17 @@ mod tests {
     use super::{
         merge_sources, render_doctor_report, render_effective_config_explanation_json,
         render_effective_config_json, render_profile_list, render_report,
-        resolve_effective_config_explanation, resolve_init_config_path, run_init_config, Cli,
-        DoctorReport, DoctorStatus, FileConfig, OutputFormat, SettingsFragment,
+        render_task_template_list, resolve_effective_config_explanation, resolve_init_config_path,
+        resolve_task_for_run, run_init_config, Cli, DoctorReport, DoctorStatus, FileConfig,
+        OutputFormat, SettingsFragment, TaskTemplate,
     };
 
     fn base_cli() -> Cli {
         Cli {
             task: Some("Check suspicious listener ports and summarize risk".to_string()),
+            task_template: None,
             doctor: false,
+            list_task_templates: false,
             list_profiles: false,
             print_effective_config: false,
             explain_effective_config: false,
@@ -1860,6 +1963,24 @@ mod tests {
 
         let path = resolve_init_config_path(&cli);
         assert!(path.ends_with("custom.toml"));
+    }
+
+    #[test]
+    fn resolves_task_from_template() {
+        let mut cli = base_cli();
+        cli.task = None;
+        cli.task_template = Some(TaskTemplate::ListenerRisk);
+
+        let task = resolve_task_for_run(&cli).expect("template task should resolve");
+        assert!(task.contains("listener ports"));
+    }
+
+    #[test]
+    fn renders_task_template_list() {
+        let rendered = render_task_template_list();
+        assert!(rendered.contains("WraithRun Task Templates"));
+        assert!(rendered.contains("ssh-keys"));
+        assert!(rendered.contains("priv-esc-review"));
     }
 
     #[test]

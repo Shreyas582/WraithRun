@@ -22,6 +22,18 @@ Linux/macOS binary:
 ./wraithrun --task "Investigate unauthorized SSH keys"
 ```
 
+Template-driven run:
+
+```powershell
+.\wraithrun.exe --task-template listener-risk
+```
+
+List available templates:
+
+```powershell
+.\wraithrun.exe --list-task-templates
+```
+
 ## Save Results to a File
 
 PowerShell:

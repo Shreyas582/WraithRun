@@ -20,6 +20,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Effective runtime preview mode via `--print-effective-config`.
 - Source-attributed runtime explanation mode via `--explain-effective-config`.
 - Config bootstrap mode via `--init-config` with `--init-config-path` and `--force` support.
+- Built-in investigation task templates via `--task-template` and discovery mode `--list-task-templates`.
 
 ### Changed
 

@@ -8,7 +8,9 @@ Basic usage:
 
 ```text
 wraithrun [OPTIONS] --task <TASK>
+wraithrun [OPTIONS] --task-template <TASK_TEMPLATE>
 wraithrun --doctor [OPTIONS]
+wraithrun --list-task-templates
 wraithrun --list-profiles [OPTIONS]
 wraithrun --print-effective-config [OPTIONS]
 wraithrun --explain-effective-config [OPTIONS]
@@ -17,8 +19,10 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 
 ## Options
 
-- `--task <TASK>`: required investigation prompt.
+- `--task <TASK>`: investigation prompt.
+- `--task-template <TASK_TEMPLATE>`: built-in investigation prompt template.
 - `--doctor`: run configuration/runtime diagnostics and exit.
+- `--list-task-templates`: list built-in investigation templates and exit.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
 - `--explain-effective-config`: print resolved runtime settings and per-field source attribution as JSON.
@@ -71,6 +75,8 @@ Behavior:
 
 ## Introspection Modes
 
+`--list-task-templates` output includes built-in task template names and their prompt text.
+
 `--list-profiles` output includes:
 
 - built-in profile names and purpose,
@@ -90,6 +96,16 @@ Behavior:
 
 These modes are mutually exclusive with each other and with `--doctor`.
 
+## Task Templates
+
+Built-in template values for `--task-template`:
+
+- `ssh-keys`
+- `listener-risk`
+- `hash-integrity`
+- `priv-esc-review`
+- `syslog-summary`
+
 ## Built-In Profiles
 
 - `local-lab`: dry-run, compact step/token budget, summary output.
@@ -102,6 +118,18 @@ Dry-run mode:
 
 ```powershell
 wraithrun --task "Check suspicious listener ports"
+```
+
+Template-driven dry-run mode:
+
+```powershell
+wraithrun --task-template listener-risk
+```
+
+List task templates:
+
+```powershell
+wraithrun --list-task-templates
 ```
 
 Use built-in profile:

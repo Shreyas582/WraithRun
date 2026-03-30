@@ -112,8 +112,10 @@ cargo run -p wraithrun -- --help
 
 Common options:
 
-- `--task <TASK>` required.
+- `--task <TASK>` investigation prompt (required unless `--task-template` or a mode command is used).
+- `--task-template <NAME>` use a built-in investigation prompt template.
 - `--doctor` run runtime health checks and configuration diagnostics.
+- `--list-task-templates` show available built-in investigation templates.
 - `--list-profiles` list built-in and config-defined profiles.
 - `--print-effective-config` render the resolved runtime settings as JSON and exit.
 - `--explain-effective-config` render resolved runtime settings plus per-field source attribution.
@@ -142,6 +144,18 @@ cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize 
 
 ```powershell
 cargo run -p wraithrun -- --task "Check suspicious listener ports and summarize risk" --output-file .\launch-assets\network-report.json
+```
+
+List built-in task templates:
+
+```powershell
+cargo run -p wraithrun -- --list-task-templates
+```
+
+Run a task using a built-in template:
+
+```powershell
+cargo run -p wraithrun -- --task-template listener-risk --format summary
 ```
 
 Doctor checks:
@@ -271,6 +285,14 @@ You can start with prompts like:
 - `Check suspicious listener ports and summarize risk`
 - `Hash /usr/local/bin/custom-agent and report integrity context`
 - `Review local privilege escalation indicators`
+
+Equivalent built-in template names:
+
+- `ssh-keys`
+- `listener-risk`
+- `hash-integrity`
+- `priv-esc-review`
+- `syslog-summary`
 
 ## Troubleshooting
 

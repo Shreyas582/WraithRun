@@ -36,6 +36,12 @@ cd WraithRun
 cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys"
 ```
 
+Template-based run:
+
+```powershell
+cargo run -p wraithrun -- --task-template listener-risk
+```
+
 ## Live Inference Mode (Optional)
 
 Live inference requires:
