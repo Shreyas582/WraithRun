@@ -8,14 +8,32 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- Tokenizer-backed greedy decode loop for live ONNX/Vitis inference.
-- Path and command policy enforcement for local tool sandboxing.
-- Core ReAct integration tests using mocked inference responses.
-- Initial GitHub Actions automation for CI, release drafting, security checks, and tagged releases.
+- Public usage examples guide for self-serve adoption.
 
 ### Changed
 
-- README and contribution docs expanded with release and CI/CD guidance.
+- README rewritten with user-first onboarding, binary usage, and practical CLI guidance.
+- CI/CD and release docs updated for annotated tag flow and latest workflow behavior.
+
+### Fixed
+
+- Dependency review workflow now auto-detects dependency graph support and skips with warning when unavailable.
+- Linux-target clippy dead-code failure in cross-platform CI.
+
+## 0.2.0 - 2026-03-29
+
+### Added
+
+- Tokenizer-backed greedy decode loop for live ONNX/Vitis inference.
+- Path and command policy enforcement for local tool sandboxing.
+- Core ReAct integration tests using mocked inference responses.
+- GitHub Actions automation for CI, release drafting, security checks, label sync, milestone bootstrap, and tagged releases.
+
+### Changed
+
+- Release workflow now runs preflight checks before publishing and includes Linux, macOS, and Windows artifacts.
+- Release drafting configuration now uses resolved semantic versioning based on labels.
+- Project docs expanded with release planning and CI/CD guidance.
 
 ## 0.1.0 - 2026-03-29
 

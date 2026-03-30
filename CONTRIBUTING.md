@@ -38,6 +38,14 @@ cargo test -p core_engine
 
 Use labels to improve release note quality and version planning:
 
+- `feature`: new user-facing capability.
+- `enhancement`: extension of an existing capability.
+- `fix`: bug fix.
+- `bug`: alternative bug-fix label recognized by release drafting.
+- `docs`: documentation-only changes.
+- `test`: test-only changes.
+- `chore`: maintenance with no behavior change.
+- `breaking`: backward-incompatible behavior change.
 - `ci`: continuous integration changes.
 - `dependencies`: changes related to dependencies.
 - `release`: changes related to release processes.
@@ -45,7 +53,7 @@ Use labels to improve release note quality and version planning:
 - `priority:p0`: highest priority issues.
 - `priority:p1`: medium priority issues.
 - `priority:p2`: lower priority issues.
-- `milestone:v0.2.0`: milestone for version 0.2.0.
+- `milestone:v0.2.1`: milestone for version 0.2.1.
 
 Release notes are assembled automatically from merged pull requests.
 
@@ -53,7 +61,7 @@ Release notes are assembled automatically from merged pull requests.
 
 1. Keep [CHANGELOG.md](CHANGELOG.md) up to date.
 2. Confirm CI is green on `main`.
-3. Create a tag using semantic versioning, for example `v0.2.0`.
+3. Create an annotated semantic version tag, for example `git tag -a v0.2.1 -m "Release v0.2.1"`.
 4. Push the tag to trigger the release workflow.
 5. Verify generated release notes and attached binaries.
 

@@ -17,8 +17,18 @@ This repository uses GitHub Actions for quality gates, release planning, and art
   - Builds release binaries on tag pushes (`v*.*.*`) and publishes GitHub Releases.
   - Publishes Linux, macOS, and Windows CLI artifacts.
 
+- `dependency-review.yml`
+  - Runs dependency review on pull requests.
+  - If Dependency graph is disabled for the repository, the workflow skips review with a warning instead of failing.
+
 - `security.yml`
   - Runs dependency audit on schedule and manual invocation.
+
+- `labels.yml`
+  - Synchronizes repository labels from `.github/labels.yml`.
+
+- `milestones.yml`
+  - Creates milestones from manual workflow dispatch input if they do not already exist.
 
 ## CI Expectations for Pull Requests
 
@@ -37,10 +47,16 @@ Release notes quality depends on pull request labels.
 Recommended labels:
 
 - `feature`
+- `enhancement`
 - `fix`
+- `bug`
 - `docs`
 - `test`
 - `chore`
+- `ci`
+- `dependencies`
+- `release`
+- `security`
 - `breaking`
 
 ## Release Trigger
@@ -48,13 +64,15 @@ Recommended labels:
 Create and push a semantic version tag:
 
 ```powershell
-git tag v0.2.0
-git push origin v0.2.0
+git tag -a v0.2.1 -m "Release v0.2.1"
+git push origin v0.2.1
 ```
 
 This triggers release build and publication workflow.
 
-Manual dispatch is also supported, but the provided tag must match semantic version format (for example `v0.2.0`).
+Manual dispatch is also supported, but the provided tag must match semantic version format (for example `v0.2.1`).
+
+To enforce full dependency review behavior, enable Dependency graph in repository security analysis settings.
 
 ## Branch Protection Baseline (main)
 
@@ -72,7 +90,7 @@ Recommended required checks:
 - `Cross-platform compile (ubuntu-latest)`
 - `Cross-platform compile (macos-latest)`
 - `Cross-platform compile (windows-latest)`
-- `dependency-review`
+- `dependency-review` (recommended once Dependency graph is enabled)
 
 Optional checks (advisory, not required for every PR):
 

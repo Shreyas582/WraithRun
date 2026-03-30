@@ -1,14 +1,14 @@
 ---
 name: Release Checklist
 about: Track readiness and publication tasks for a versioned release
-title: "release: v0.2.0 checklist"
+title: "release: vX.Y.Z checklist"
 labels: ["release", "chore"]
 assignees: []
 ---
 
 ## Release Metadata
 
-- Version: `v0.2.0`
+- Version: `vX.Y.Z`
 - Target date:
 - Release lead:
 
@@ -38,8 +38,8 @@ assignees: []
 
 ## Tag and Publish
 
-- [ ] Tag is created from latest `main`: `v0.2.0`
-- [ ] Tag pushed: `git push origin v0.2.0`
+- [ ] Tag is created from latest `main`: `vX.Y.Z`
+- [ ] Tag pushed: `git push origin vX.Y.Z`
 - [ ] Release workflow completed successfully.
 - [ ] Linux, macOS, and Windows artifacts are present.
 
