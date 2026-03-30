@@ -115,7 +115,10 @@ mod tests {
         fn new(responses: Vec<&str>) -> Self {
             Self {
                 responses: Arc::new(Mutex::new(
-                    responses.into_iter().map(|value| value.to_string()).collect(),
+                    responses
+                        .into_iter()
+                        .map(|value| value.to_string())
+                        .collect(),
                 )),
             }
         }
@@ -124,7 +127,10 @@ mod tests {
     #[async_trait]
     impl InferenceEngine for MockEngine {
         async fn generate(&self, _prompt: &str) -> Result<String> {
-            let mut responses = self.responses.lock().expect("response queue mutex poisoned");
+            let mut responses = self
+                .responses
+                .lock()
+                .expect("response queue mutex poisoned");
             Ok(responses
                 .pop_front()
                 .unwrap_or_else(|| "<final>fallback</final>".to_string()))

@@ -71,7 +71,8 @@ async fn main() -> Result<()> {
 }
 
 fn build_vitis_config(cli: &Cli) -> Option<VitisEpConfig> {
-    if cli.vitis_config.is_none() && cli.vitis_cache_dir.is_none() && cli.vitis_cache_key.is_none() {
+    if cli.vitis_config.is_none() && cli.vitis_cache_dir.is_none() && cli.vitis_cache_key.is_none()
+    {
         return None;
     }
 

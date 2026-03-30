@@ -79,8 +79,9 @@ fn tokenizer_candidates(config: &ModelConfig) -> Vec<PathBuf> {
 fn load_tokenizer(config: &ModelConfig) -> Result<Tokenizer> {
     for candidate in tokenizer_candidates(config) {
         if candidate.exists() {
-            return Tokenizer::from_file(&candidate)
-                .map_err(|err| anyhow!("failed to load tokenizer '{}': {err}", candidate.display()));
+            return Tokenizer::from_file(&candidate).map_err(|err| {
+                anyhow!("failed to load tokenizer '{}': {err}", candidate.display())
+            });
         }
     }
 
@@ -154,7 +155,11 @@ fn select_next_token(logits_value: &DynValue) -> Result<i64> {
 #[cfg(feature = "vitis")]
 fn find_input_name(session: &Session, preferred: &[&str]) -> Option<String> {
     for candidate in preferred {
-        if session.inputs().iter().any(|outlet| outlet.name() == *candidate) {
+        if session
+            .inputs()
+            .iter()
+            .any(|outlet| outlet.name() == *candidate)
+        {
             return Some((*candidate).to_string());
         }
     }
@@ -190,7 +195,12 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
     let tokenizer = load_tokenizer(config)?;
 
     let input_ids_name = find_input_name(&session, &["input_ids", "tokens"])
-        .or_else(|| session.inputs().first().map(|outlet| outlet.name().to_string()))
+        .or_else(|| {
+            session
+                .inputs()
+                .first()
+                .map(|outlet| outlet.name().to_string())
+        })
         .ok_or_else(|| anyhow!("model has no inputs"))?;
     let attention_mask_name = find_input_name(&session, &["attention_mask"]);
     let position_ids_name = find_input_name(&session, &["position_ids"]);

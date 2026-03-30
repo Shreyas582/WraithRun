@@ -73,8 +73,10 @@ impl SandboxPolicy {
         }
 
         #[cfg(target_os = "windows")]
-        let command_allowlist: HashSet<String> =
-            ["whoami", "netstat"].into_iter().map(|c| c.to_string()).collect();
+        let command_allowlist: HashSet<String> = ["whoami", "netstat"]
+            .into_iter()
+            .map(|c| c.to_string())
+            .collect();
 
         #[cfg(not(target_os = "windows"))]
         let command_allowlist: HashSet<String> = ["id", "ss", "sudo"]
@@ -426,10 +428,9 @@ impl Tool for HashBinaryTool {
     }
 
     async fn run(&self, args: Value) -> Result<Value, ToolError> {
-        let path = args
-            .get("path")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ToolError::InvalidArguments("missing string field 'path'".to_string()))?;
+        let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
+            ToolError::InvalidArguments("missing string field 'path'".to_string())
+        })?;
 
         let digest = log_parser::sha256_file(Path::new(path))?;
 
@@ -447,8 +448,9 @@ impl Tool for CheckPrivilegeEscalationVectorsTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "check_privilege_escalation_vectors".to_string(),
-            description: "Collects a host-local privilege surface snapshot for quick escalation triage."
-                .to_string(),
+            description:
+                "Collects a host-local privilege surface snapshot for quick escalation triage."
+                    .to_string(),
             args_schema: json!({ "type": "object" }),
         }
     }

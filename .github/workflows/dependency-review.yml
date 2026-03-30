@@ -16,5 +16,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect dependency graph support
+        id: depgraph
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            try {
+              await github.request("GET /repos/{owner}/{repo}/dependency-graph/sbom", {
+                owner,
+                repo,
+              });
+              core.setOutput("enabled", "true");
+              core.notice("Dependency graph is available; running dependency review.");
+            } catch (error) {
+              if (error.status === 403 || error.status === 404) {
+                core.setOutput("enabled", "false");
+                core.warning(
+                  "Dependency graph is unavailable; skipping dependency review. Enable Dependency graph in repository security analysis settings to enforce this check.",
+                );
+              } else {
+                throw error;
+              }
+            }
+
       - name: Dependency review
+        if: steps.depgraph.outputs.enabled == 'true'
         uses: actions/dependency-review-action@v4
