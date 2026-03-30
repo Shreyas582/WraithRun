@@ -1,6 +1,6 @@
 # Upgrade Notes
 
-## v0.3.1
+## v0.3.2
 
 ### Breaking/visible changes
 
@@ -34,6 +34,18 @@ Get-Content .\SHA256SUMS
 - Validate automation that reads introspection JSON still works with the documented schema contract.
 - Verify local wrappers/scripts can pass task input via stdin where desired.
 - For release consumers, verify downloaded artifact hashes against `SHA256SUMS`.
+
+## v0.3.1
+
+### Breaking/visible changes
+
+- Added integration-test coverage for stdin task entry paths.
+- Added documented introspection JSON schema examples for automation consumers.
+
+### Recommended checks after upgrade
+
+- Re-run automation that consumes `--introspection-format json` output.
+- Confirm local scripted runs using `--task-stdin` and `--task-file -` still behave as expected.
 
 ## v0.2.1
 

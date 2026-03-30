@@ -18,14 +18,29 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 0.3.2 - 2026-03-30
+
+### Added
+
+- Dedicated CI job to run stdin integration tests on Linux and Windows.
+- Release workflow checksum manifest generation (`SHA256SUMS`) for published artifacts.
+
+### Changed
+
+- Release planning docs now advance to `v0.4.0` as the next milestone target.
+- Label source-of-truth now includes `milestone:v0.3.1` for repository sync consistency.
+
+### Fixed
+
+- UTF-16 BOM encoded task files are now accepted by `--task-file`.
+- Clippy lint compatibility fixed for Rust 1.92 (`manual_is_multiple_of`).
+
 ## 0.3.1 - 2026-03-30
 
 ### Added
 
 - CLI integration tests for stdin-based task input (`--task-stdin` and `--task-file -`).
 - Introspection JSON schema reference in CLI documentation for automation users.
-- Dedicated CI job to run stdin integration tests on Linux and Windows.
-- Release workflow checksum manifest generation (`SHA256SUMS`) for published artifacts.
 
 ### Changed
 
@@ -33,7 +48,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Fixed
 
-- UTF-16 BOM encoded task files are now accepted by `--task-file`.
+- (none)
 
 ## 0.3.0 - 2026-03-30
 
