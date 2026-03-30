@@ -38,12 +38,14 @@ cargo test -p core_engine
 
 Use labels to improve release note quality and version planning:
 
-- `feature`: new user-facing capability.
-- `fix`: bug fix.
-- `docs`: documentation-only changes.
-- `test`: test-only changes.
-- `chore`: maintenance with no behavior change.
-- `breaking`: backward-incompatible behavior change.
+- `ci`: continuous integration changes.
+- `dependencies`: changes related to dependencies.
+- `release`: changes related to release processes.
+- `security`: changes that affect security.
+- `priority:p0`: highest priority issues.
+- `priority:p1`: medium priority issues.
+- `priority:p2`: lower priority issues.
+- `milestone:v0.2.0`: milestone for version 0.2.0.
 
 Release notes are assembled automatically from merged pull requests.
 

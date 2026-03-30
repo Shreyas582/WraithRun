@@ -55,3 +55,26 @@ git push origin v0.2.0
 This triggers release build and publication workflow.
 
 Manual dispatch is also supported, but the provided tag must match semantic version format (for example `v0.2.0`).
+
+## Branch Protection Baseline (main)
+
+Recommended branch protection settings for `main`:
+
+- Require a pull request before merging.
+- Require at least 1 approving review.
+- Require status checks to pass before merging.
+- Require branches to be up to date before merging.
+- Restrict direct pushes to `main`.
+
+Recommended required checks:
+
+- `Quality Gates (ubuntu)`
+- `Cross-platform compile (ubuntu-latest)`
+- `Cross-platform compile (macos-latest)`
+- `Cross-platform compile (windows-latest)`
+- `dependency-review`
+
+Optional checks (advisory, not required for every PR):
+
+- `Dependency Vulnerability Audit` (scheduled/manual security workflow)
+- `Release Drafter` (draft notes maintenance)

@@ -65,3 +65,34 @@ Release should be blocked when:
 - Open follow-up issues for deferred work.
 - Refresh roadmap in `README.md` if priorities changed.
 - Optionally create next milestone tracking issue.
+
+## Immediate Next Steps for v0.2.0
+
+Use this runbook to execute the next release milestone end-to-end.
+
+1. Create a tracking issue from the Release Checklist template.
+2. Apply labels `release`, `milestone:v0.2.0`, and priority labels as needed.
+3. Run milestone bootstrap workflow:
+   - Workflow: `Milestone Bootstrap`
+   - Inputs:
+     - `title`: `v0.2.0`
+     - `description`: `First feature-complete milestone with release automation baseline`
+     - `due_date`: optional (`YYYY-MM-DD`)
+4. Verify quality gates locally:
+   - `cargo check`
+   - `cargo test --workspace`
+   - `cargo check -p inference_bridge --features vitis`
+5. Verify GitHub Actions CI is green on latest `main`.
+6. Tag and publish:
+   - `git tag v0.2.0`
+   - `git push origin v0.2.0`
+7. Confirm `Release` workflow completed and assets are attached.
+8. Close the milestone and open a follow-on milestone.
+
+## Labels and Milestones
+
+- Source of truth for labels: `.github/labels.yml`
+- Label sync workflow: `.github/workflows/labels.yml`
+- Milestone creation workflow: `.github/workflows/milestones.yml`
+
+If labels drift, run the `Labels` workflow manually.
