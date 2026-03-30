@@ -122,7 +122,7 @@ Common options:
 - `--list-task-templates` show available built-in investigation templates.
 - `--list-tools` list available local investigation tools and argument schemas.
 - `--tool-filter <QUERY>` filter `--list-tools` output by tool name or description substring.
-- `--describe-tool <NAME>` show details for one tool (name, description, argument schema).
+- `--describe-tool <NAME>` show details for one tool (name, description, argument schema). Accepts case-insensitive full names plus unique partial or hyphenated queries.
 - `--list-profiles` list built-in and config-defined profiles.
 - `--introspection-format <text|json>` output format for `--doctor`, `--list-task-templates`, `--list-tools`, `--describe-tool`, and `--list-profiles` (default `text`).
 - `--print-effective-config` render the resolved runtime settings as JSON and exit.
@@ -194,6 +194,12 @@ Describe one tool:
 
 ```powershell
 cargo run -p wraithrun -- --describe-tool hash_binary
+```
+
+Describe one tool with a unique partial query:
+
+```powershell
+cargo run -p wraithrun -- --describe-tool privilege
 ```
 
 Describe one tool as JSON:

@@ -265,6 +265,32 @@ fn describe_tool_json_contract_contains_expected_fields() {
 }
 
 #[test]
+fn describe_tool_json_contract_accepts_hyphenated_alias() {
+    let output = run_capture(&[
+        "--describe-tool",
+        "hash-binary",
+        "--introspection-format",
+        "json",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let tool = json
+        .get("tool")
+        .and_then(Value::as_object)
+        .expect("tool should be an object");
+    assert_eq!(
+        tool.get("name").and_then(Value::as_str),
+        Some("hash_binary")
+    );
+}
+
+#[test]
 fn describe_tool_rejects_unknown_tool_name() {
     let output = run_capture(&["--describe-tool", "nonexistent-tool"]);
 
@@ -274,6 +300,20 @@ fn describe_tool_rejects_unknown_tool_name() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Unknown tool 'nonexistent-tool'"));
+}
+
+#[test]
+fn describe_tool_rejects_ambiguous_query() {
+    let output = run_capture(&["--describe-tool", "c"]);
+
+    assert!(
+        !output.status.success(),
+        "process should fail for ambiguous describe-tool query"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Ambiguous tool query 'c'"));
+    assert!(stderr.contains("scan_network"));
+    assert!(stderr.contains("check_privilege_escalation_vectors"));
 }
 
 #[test]

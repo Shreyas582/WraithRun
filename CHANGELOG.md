@@ -8,11 +8,11 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- `--describe-tool <NAME>` now accepts unique partial and hyphenated tool queries for faster operator lookups.
 
 ### Changed
 
-- (none yet)
+- `--describe-tool` now returns an explicit ambiguous-query error when a partial query matches multiple tools.
 
 ### Fixed
 

@@ -33,7 +33,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--list-task-templates`: list built-in investigation templates and exit.
 - `--list-tools`: list built-in local investigation tools and exit.
 - `--tool-filter <QUERY>`: filter `--list-tools` results by name/description substring.
-- `--describe-tool <NAME>`: render details for one tool and exit.
+- `--describe-tool <NAME>`: render details for one tool and exit. Accepts case-insensitive full names plus unique partial or hyphenated queries.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
 - `--introspection-format <INTROSPECTION_FORMAT>`: format for introspection modes. Values: `text`, `json`. Default: `text`.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
@@ -102,6 +102,13 @@ Behavior:
 When `--tool-filter` is used with `--list-tools`, only matching tools are returned.
 
 `--describe-tool` output includes one matching tool object by name.
+
+`--describe-tool` query resolution order:
+
+- case-insensitive full-name match,
+- normalized full-name match (hyphen and underscore treated equivalently),
+- unique partial-name match,
+- otherwise an error (`unknown` or `ambiguous`).
 
 `--list-profiles` output includes:
 

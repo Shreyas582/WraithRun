@@ -866,22 +866,76 @@ fn run_describe_tool(tool_name: &str, format: IntrospectionFormat) -> Result<Str
     let registry = ToolRegistry::with_default_tools();
     let tools = registry.tool_specs();
 
-    let Some(tool) = tools
-        .iter()
-        .find(|candidate| candidate.name.eq_ignore_ascii_case(selected))
-    else {
-        let available = tools
-            .iter()
-            .map(|candidate| candidate.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        bail!("Unknown tool '{selected}'. Available tools: {available}");
-    };
+    let tool = resolve_tool_query(&tools, selected)?;
 
     match format {
         IntrospectionFormat::Text => Ok(render_tool_detail(tool)),
         IntrospectionFormat::Json => render_tool_detail_json(tool.clone()),
     }
+}
+
+fn resolve_tool_query<'a>(tools: &'a [ToolSpec], query: &str) -> Result<&'a ToolSpec> {
+    if let Some(tool) = tools
+        .iter()
+        .find(|candidate| candidate.name.eq_ignore_ascii_case(query))
+    {
+        return Ok(tool);
+    }
+
+    let normalized_query = normalize_tool_query(query);
+
+    if let Some(tool) = find_unique_tool_match(tools, &normalized_query, |name, normalized| {
+        name == normalized
+    })? {
+        return Ok(tool);
+    }
+
+    if let Some(tool) = find_unique_tool_match(tools, &normalized_query, |name, normalized| {
+        name.contains(normalized)
+    })? {
+        return Ok(tool);
+    }
+
+    let available = tools
+        .iter()
+        .map(|candidate| candidate.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!("Unknown tool '{query}'. Available tools: {available}");
+}
+
+fn find_unique_tool_match<'a, F>(
+    tools: &'a [ToolSpec],
+    normalized_query: &str,
+    matcher: F,
+) -> Result<Option<&'a ToolSpec>>
+where
+    F: Fn(&str, &str) -> bool,
+{
+    let mut matches = tools
+        .iter()
+        .filter(|candidate| matcher(&normalize_tool_query(&candidate.name), normalized_query));
+
+    let first = matches.next();
+    let second = matches.next();
+
+    match (first, second) {
+        (Some(tool), None) => Ok(Some(tool)),
+        (Some(first_tool), Some(second_tool)) => {
+            let mut names = vec![first_tool.name.clone(), second_tool.name.clone()];
+            names.extend(matches.map(|candidate| candidate.name.clone()));
+            bail!(
+                "Ambiguous tool query '{}'. Matches: {}. Use the full tool name.",
+                normalized_query,
+                names.join(", ")
+            );
+        }
+        _ => Ok(None),
+    }
+}
+
+fn normalize_tool_query(value: &str) -> String {
+    value.trim().to_ascii_lowercase().replace(['-', ' '], "_")
 }
 
 fn render_tool_list_json(tools: Vec<ToolSpec>) -> Result<String> {
@@ -2756,6 +2810,33 @@ mod tests {
             .expect("describe-tool should work");
         assert!(rendered.contains("\"tool\""));
         assert!(rendered.contains("\"name\": \"hash_binary\""));
+    }
+
+    #[test]
+    fn describes_tool_with_hyphenated_name_alias() {
+        let rendered = run_describe_tool("hash-binary", IntrospectionFormat::Json)
+            .expect("describe-tool should support hyphenated aliases");
+        assert!(rendered.contains("\"tool\""));
+        assert!(rendered.contains("\"name\": \"hash_binary\""));
+    }
+
+    #[test]
+    fn describes_tool_with_unique_partial_query() {
+        let rendered = run_describe_tool("privilege", IntrospectionFormat::Json)
+            .expect("describe-tool should support unique partial matches");
+        assert!(rendered.contains("\"tool\""));
+        assert!(rendered.contains("\"name\": \"check_privilege_escalation_vectors\""));
+    }
+
+    #[test]
+    fn describe_tool_rejects_ambiguous_partial_query() {
+        let error = run_describe_tool("c", IntrospectionFormat::Text)
+            .expect_err("ambiguous partial query should fail");
+        assert!(error.to_string().contains("Ambiguous tool query 'c'"));
+        assert!(error.to_string().contains("scan_network"));
+        assert!(error
+            .to_string()
+            .contains("check_privilege_escalation_vectors"));
     }
 
     #[test]
