@@ -1,5 +1,32 @@
 # Upgrade Notes
 
+## v0.3.3
+
+### Breaking/visible changes
+
+- Added tool catalog introspection mode via `--list-tools`.
+- Added single-tool introspection mode via `--describe-tool <NAME>`.
+- Added JSON contract output support for `--describe-tool` with stable `tool` object shape.
+
+### Migration examples
+
+List all tools:
+
+```powershell
+.\wraithrun.exe --list-tools
+```
+
+Describe one tool as JSON:
+
+```powershell
+.\wraithrun.exe --describe-tool hash_binary --introspection-format json
+```
+
+### Recommended checks after upgrade
+
+- If you automate against introspection data, validate parsers for both `tools[]` (`--list-tools`) and `tool` (`--describe-tool`).
+- For operator runbooks, map critical workflows to specific tool names using `--describe-tool` output.
+
 ## v0.3.2
 
 ### Breaking/visible changes

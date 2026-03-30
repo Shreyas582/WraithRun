@@ -8,6 +8,20 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 0.3.3 - 2026-03-30
+
+### Added
+
 - CLI tool catalog mode via `--list-tools` with text/JSON introspection output.
 - CLI single-tool introspection via `--describe-tool <NAME>` with text/JSON output.
 
@@ -17,7 +31,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Fixed
 
-- (none yet)
+- CI follow-up fixes for strict lint/format gates after new introspection test coverage.
 
 ## 0.3.2 - 2026-03-30
 
