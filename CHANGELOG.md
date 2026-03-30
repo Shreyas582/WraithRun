@@ -8,6 +8,20 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 0.3.1 - 2026-03-30
+
+### Added
+
 - CLI integration tests for stdin-based task input (`--task-stdin` and `--task-file -`).
 - Introspection JSON schema reference in CLI documentation for automation users.
 - Dedicated CI job to run stdin integration tests on Linux and Windows.

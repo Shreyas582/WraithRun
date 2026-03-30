@@ -24,8 +24,8 @@ Until `1.0.0`, minor version bumps may include limited breaking changes if clear
 
 Examples:
 
-- `v0.2.0`
-- `v0.2.1`
+- `v0.3.0`
+- `v0.3.1`
 
 ## Cadence
 
@@ -66,17 +66,17 @@ Release should be blocked when:
 - Refresh roadmap in `README.md` if priorities changed.
 - Optionally create next milestone tracking issue.
 
-## Immediate Next Steps for v0.3.0
+## Immediate Next Steps for v0.4.0
 
 Use this runbook to execute the next release milestone end-to-end.
 
 1. Create a tracking issue from the Release Checklist template.
-2. Apply labels `release`, `milestone:v0.3.0` (or next milestone label), and priority labels as needed.
+2. Apply labels `release`, `milestone:v0.4.0` (or next milestone label), and priority labels as needed.
 3. Run milestone bootstrap workflow:
    - Workflow: `Milestone Bootstrap`
    - Inputs:
-     - `title`: `v0.3.0`
-     - `description`: `Usability and introspection expansion milestone`
+   - `title`: `v0.4.0`
+   - `description`: `Actionable findings and practical triage milestone`
      - `due_date`: optional (`YYYY-MM-DD`)
 4. Verify quality gates locally:
    - `cargo check`
@@ -84,11 +84,11 @@ Use this runbook to execute the next release milestone end-to-end.
    - `cargo check -p inference_bridge --features vitis`
 5. Verify GitHub Actions CI is green on latest `main`.
 6. Tag and publish:
-   - `git tag -a v0.3.0 -m "Release v0.3.0"`
-   - `git push origin v0.3.0`
+   - `git tag -a v0.4.0 -m "Release v0.4.0"`
+   - `git push origin v0.4.0`
 7. Confirm `Release` workflow completed and assets are attached.
 8. Close the milestone and open a follow-on milestone.
-9. Open planning issue for `v0.3.1` or `v0.4.0` scope.
+9. Open planning issue for `v0.4.1` or `v0.5.0` scope.
 
 ## Labels and Milestones
 

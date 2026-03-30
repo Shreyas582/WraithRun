@@ -1,5 +1,40 @@
 # Upgrade Notes
 
+## v0.3.1
+
+### Breaking/visible changes
+
+- Stdin-based task entry is now covered by dedicated integration tests in CI on Linux and Windows.
+- Release artifacts now include a checksum manifest (`SHA256SUMS`) for integrity verification.
+- `--task-file` now supports UTF-16 BOM encoded files commonly produced by Windows editors.
+
+### Migration examples
+
+Task from stdin:
+
+```powershell
+Get-Content .\incident-task.txt | .\wraithrun.exe --task-stdin --format summary
+```
+
+Task file with UTF-16 content:
+
+```powershell
+.\wraithrun.exe --task-file .\incident-task-utf16.txt --format summary
+```
+
+Checksum verification (PowerShell):
+
+```powershell
+Get-FileHash .\wraithrun-windows-x86_64.zip -Algorithm SHA256
+Get-Content .\SHA256SUMS
+```
+
+### Recommended checks after upgrade
+
+- Validate automation that reads introspection JSON still works with the documented schema contract.
+- Verify local wrappers/scripts can pass task input via stdin where desired.
+- For release consumers, verify downloaded artifact hashes against `SHA256SUMS`.
+
 ## v0.2.1
 
 ### Breaking/visible changes
