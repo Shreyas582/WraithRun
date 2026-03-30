@@ -30,6 +30,10 @@ This repository uses GitHub Actions for quality gates, release planning, and art
 - `milestones.yml`
   - Creates milestones from manual workflow dispatch input if they do not already exist.
 
+- `docs.yml`
+  - Builds MkDocs documentation in strict mode on docs/config changes.
+  - Prevents publishing broken docs navigation or markdown references.
+
 ## CI Expectations for Pull Requests
 
 Before merge, pull requests should satisfy:

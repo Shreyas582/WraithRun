@@ -1,0 +1,44 @@
+site_name: WraithRun
+site_description: Local-first cyber investigation runtime documentation
+site_url: https://wraithrun.readthedocs.io/en/latest/
+repo_url: https://github.com/Shreyas582/WraithRun
+repo_name: Shreyas582/WraithRun
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+    - search.suggest
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Usage Examples: USAGE_EXAMPLES.md
+  - CLI Reference: cli-reference.md
+  - Tool Reference: tool-reference.md
+  - Security and Sandbox: security-sandbox.md
+  - Troubleshooting: troubleshooting.md
+  - Release and Operations:
+      - Release Plan: RELEASE_PLAN.md
+      - CI/CD Overview: CI_CD.md
+      - Upgrade Notes: upgrades.md
+      - Read the Docs Setup: READTHEDOCS_SETUP.md

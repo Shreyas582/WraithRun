@@ -4,6 +4,11 @@ Local-first cyber investigation runtime you can run on your own machine.
 
 WraithRun is a Rust CLI for host-focused security triage. It runs an agent loop with sandboxed local tools, keeps telemetry local, and returns a structured JSON report that you can store, diff, or feed into your own pipelines.
 
+## Documentation
+
+- Hosted docs (Read the Docs): https://wraithrun.readthedocs.io/en/latest/
+- Docs setup and publishing runbook: [docs/READTHEDOCS_SETUP.md](docs/READTHEDOCS_SETUP.md)
+
 ## Start Here
 
 ### Option A: Use release binaries (fastest)

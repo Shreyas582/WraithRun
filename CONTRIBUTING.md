@@ -65,6 +65,29 @@ Release notes are assembled automatically from merged pull requests.
 4. Push the tag to trigger the release workflow.
 5. Verify generated release notes and attached binaries.
 
+## Documentation Workflow
+
+WraithRun docs are configured for Read the Docs with MkDocs.
+
+Relevant files:
+
+- `.readthedocs.yaml`
+- `mkdocs.yml`
+- `docs/requirements.txt`
+
+Local docs preview:
+
+```powershell
+python -m pip install -r docs/requirements.txt
+mkdocs serve
+```
+
+Validation build:
+
+```powershell
+mkdocs build --strict
+```
+
 ## Code Style
 
 - Follow idiomatic Rust style.

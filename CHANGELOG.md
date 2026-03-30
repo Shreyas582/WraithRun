@@ -8,7 +8,8 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- No user-facing changes recorded yet.
+- Read the Docs integration files (`.readthedocs.yaml`, `mkdocs.yml`, docs requirements).
+- Structured documentation set for public users (getting started, CLI/tool reference, sandbox, troubleshooting, upgrade notes).
 
 ## 0.2.1 - 2026-03-29
 
