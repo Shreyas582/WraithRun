@@ -8,6 +8,20 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 0.5.0 - 2026-03-31
+
+### Added
+
 - `--list-tools --tool-filter <QUERY>` now supports multi-term query matching for faster triage lookups.
 - First-class `findings` report layer with severity, confidence, evidence pointer, and recommended action fields.
 - New host coverage tools: `inspect_persistence_locations`, `audit_account_changes`, and `correlate_process_network`.

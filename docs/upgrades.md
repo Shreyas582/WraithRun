@@ -1,6 +1,6 @@
 # Upgrade Notes
 
-## v0.4.2
+## v0.5.0
 
 ### Breaking/visible changes
 
