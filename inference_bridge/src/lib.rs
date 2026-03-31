@@ -152,9 +152,21 @@ impl OnnxVitisEngine {
             && (task_lower.contains("change")
                 || task_lower.contains("admin")
                 || task_lower.contains("group")
-                || task_lower.contains("privilege"))
+                || task_lower.contains("privilege")
+                || task_lower.contains("baseline")
+                || task_lower.contains("drift"))
         {
             return r#"<call>{"tool":"audit_account_changes","args":{}}</call>"#.to_string();
+        }
+
+        if (task_lower.contains("baseline") || task_lower.contains("drift"))
+            && (task_lower.contains("network")
+                || task_lower.contains("listener")
+                || task_lower.contains("port")
+                || task_lower.contains("socket"))
+        {
+            return r#"<call>{"tool":"correlate_process_network","args":{"limit":64}}</call>"#
+                .to_string();
         }
 
         if (task_lower.contains("process")
@@ -259,6 +271,22 @@ mod tests {
         let output =
             engine.dry_run_response("Task: Correlate process and network listener exposure");
         assert!(output.contains("\"tool\":\"correlate_process_network\""));
+    }
+
+    #[test]
+    fn routes_network_drift_task_to_correlate_process_network() {
+        let engine = dry_run_engine();
+        let output =
+            engine.dry_run_response("Task: Detect baseline drift in externally exposed listeners");
+        assert!(output.contains("\"tool\":\"correlate_process_network\""));
+    }
+
+    #[test]
+    fn routes_account_drift_task_to_audit_account_changes() {
+        let engine = dry_run_engine();
+        let output =
+            engine.dry_run_response("Task: Compare account privilege drift against baseline");
+        assert!(output.contains("\"tool\":\"audit_account_changes\""));
     }
 
     #[test]

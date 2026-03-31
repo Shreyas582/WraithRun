@@ -128,12 +128,62 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             }
         }
 
-        if let Some(suspicious_entry_count) = observation
+        let actionable_persistence_count = observation
+            .get("actionable_suspicious_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let suspicious_entry_count = observation
             .get("suspicious_entry_count")
             .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let persistence_count = if actionable_persistence_count > 0 {
+            Some(actionable_persistence_count)
+        } else if suspicious_entry_count > 0 {
+            Some(suspicious_entry_count)
+        } else {
+            None
+        };
+
+        if let Some(persistence_count) = persistence_count {
+            let severity = if persistence_count >= 5 {
+                FindingSeverity::High
+            } else {
+                FindingSeverity::Medium
+            };
+
+            let (title, evidence_field) = if actionable_persistence_count > 0 {
+                (
+                    format!(
+                        "Actionable suspicious persistence entries detected ({persistence_count})"
+                    ),
+                    "observation.actionable_suspicious_count",
+                )
+            } else {
+                (
+                    format!("Suspicious persistence entries detected ({persistence_count})"),
+                    "observation.suspicious_entry_count",
+                )
+            };
+
+            findings.push(Finding {
+                title,
+                severity,
+                confidence: confidence_from_count(0.7, persistence_count, 0.05, 0.95),
+                evidence_pointer: EvidencePointer {
+                    turn: Some(idx + 1),
+                    tool: tool_name.clone(),
+                    field: evidence_field.to_string(),
+                },
+                recommended_action: "Review persistence entries for unauthorized startup references, remove unapproved autoruns, and preserve forensic artifacts before cleanup.".to_string(),
+            });
+        }
+
+        if let Some(baseline_new_count) = observation
+            .get("baseline_new_count")
+            .and_then(Value::as_u64)
         {
-            if suspicious_entry_count > 0 {
-                let severity = if suspicious_entry_count >= 5 {
+            if baseline_new_count > 0 {
+                let severity = if baseline_new_count >= 8 {
                     FindingSeverity::High
                 } else {
                     FindingSeverity::Medium
@@ -141,16 +191,16 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
 
                 findings.push(Finding {
                     title: format!(
-                        "Suspicious persistence entries detected ({suspicious_entry_count})"
+                        "Persistence baseline drift detected ({baseline_new_count} new entries)"
                     ),
                     severity,
-                    confidence: confidence_from_count(0.7, suspicious_entry_count, 0.05, 0.95),
+                    confidence: confidence_from_count(0.69, baseline_new_count, 0.04, 0.94),
                     evidence_pointer: EvidencePointer {
                         turn: Some(idx + 1),
                         tool: tool_name.clone(),
-                        field: "observation.suspicious_entry_count".to_string(),
+                        field: "observation.baseline_new_count".to_string(),
                     },
-                    recommended_action: "Review persistence entries for unsigned or user-profile startup references, then remove unauthorized autoruns and collect triage artifacts.".to_string(),
+                    recommended_action: "Compare baseline_new_entries against approved software changes and investigate unexpected startup additions for persistence abuse.".to_string(),
                 });
             }
         }
@@ -181,6 +231,62 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             }
         }
 
+        if let Some(newly_privileged_account_count) = observation
+            .get("newly_privileged_account_count")
+            .and_then(Value::as_u64)
+        {
+            if newly_privileged_account_count > 0 {
+                findings.push(Finding {
+                    title: format!(
+                        "Privileged account baseline drift detected ({newly_privileged_account_count} new account(s))"
+                    ),
+                    severity: if newly_privileged_account_count >= 3 {
+                        FindingSeverity::Critical
+                    } else {
+                        FindingSeverity::High
+                    },
+                    confidence: confidence_from_count(
+                        0.78,
+                        newly_privileged_account_count,
+                        0.04,
+                        0.97,
+                    ),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.newly_privileged_account_count".to_string(),
+                    },
+                    recommended_action: "Validate each newly privileged account against approved access changes, disable unauthorized grants, and rotate impacted credentials.".to_string(),
+                });
+            }
+        }
+
+        if let Some(unapproved_privileged_account_count) = observation
+            .get("unapproved_privileged_account_count")
+            .and_then(Value::as_u64)
+        {
+            if unapproved_privileged_account_count > 0 {
+                findings.push(Finding {
+                    title: format!(
+                        "Unapproved privileged accounts detected ({unapproved_privileged_account_count})"
+                    ),
+                    severity: FindingSeverity::Critical,
+                    confidence: confidence_from_count(
+                        0.8,
+                        unapproved_privileged_account_count,
+                        0.04,
+                        0.98,
+                    ),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.unapproved_privileged_account_count".to_string(),
+                    },
+                    recommended_action: "Escalate immediately: remove unapproved privileged memberships, confirm identity ownership, and collect IAM audit evidence.".to_string(),
+                });
+            }
+        }
+
         if let Some(externally_exposed_count) = observation
             .get("externally_exposed_count")
             .and_then(Value::as_u64)
@@ -204,6 +310,84 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                         field: "observation.externally_exposed_count".to_string(),
                     },
                     recommended_action: "Confirm process ownership and necessity of exposed listeners; close or firewall unnecessary bindings and monitor for reappearance.".to_string(),
+                });
+            }
+        }
+
+        if let Some(high_risk_exposed_count) = observation
+            .get("high_risk_exposed_count")
+            .and_then(Value::as_u64)
+        {
+            if high_risk_exposed_count > 0 {
+                findings.push(Finding {
+                    title: format!(
+                        "High-risk process listeners exposed externally ({high_risk_exposed_count})"
+                    ),
+                    severity: if high_risk_exposed_count >= 2 {
+                        FindingSeverity::Critical
+                    } else {
+                        FindingSeverity::High
+                    },
+                    confidence: confidence_from_count(0.76, high_risk_exposed_count, 0.04, 0.97),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.high_risk_exposed_count".to_string(),
+                    },
+                    recommended_action: "Prioritize containment for high-risk exposed processes, validate command-line lineage, and restrict inbound access immediately.".to_string(),
+                });
+            }
+        }
+
+        if let Some(unknown_exposed_process_count) = observation
+            .get("unknown_exposed_process_count")
+            .and_then(Value::as_u64)
+        {
+            if unknown_exposed_process_count > 0 {
+                findings.push(Finding {
+                    title: format!(
+                        "Unexpected exposed processes relative to expected allowlist ({unknown_exposed_process_count})"
+                    ),
+                    severity: FindingSeverity::High,
+                    confidence: confidence_from_count(
+                        0.72,
+                        unknown_exposed_process_count,
+                        0.04,
+                        0.95,
+                    ),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.unknown_exposed_process_count".to_string(),
+                    },
+                    recommended_action: "Reconcile unknown exposed processes against approved service inventory and close unapproved listeners through host firewall or service disablement.".to_string(),
+                });
+            }
+        }
+
+        if let Some(network_risk_score) = observation
+            .get("network_risk_score")
+            .and_then(Value::as_u64)
+        {
+            if network_risk_score >= 40 {
+                let severity = if network_risk_score >= 70 {
+                    FindingSeverity::Critical
+                } else {
+                    FindingSeverity::High
+                };
+
+                findings.push(Finding {
+                    title: format!(
+                        "Network exposure risk score exceeded threshold ({network_risk_score})"
+                    ),
+                    severity,
+                    confidence: confidence_from_count(0.7, network_risk_score, 0.002, 0.96),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.network_risk_score".to_string(),
+                    },
+                    recommended_action: "Escalate to incident triage: prioritize exposed services with highest risk contribution and verify baseline drift across process-network bindings.".to_string(),
                 });
             }
         }
@@ -425,7 +609,8 @@ mod tests {
             }),
             observation: Some(json!({
                 "entry_count": 12,
-                "suspicious_entry_count": 2
+                "suspicious_entry_count": 2,
+                "actionable_suspicious_count": 2
             })),
         }];
 
@@ -433,8 +618,54 @@ mod tests {
         assert!(findings.iter().any(|finding| {
             finding
                 .title
-                .contains("Suspicious persistence entries detected")
-                && finding.evidence_pointer.field == "observation.suspicious_entry_count"
+                .contains("Actionable suspicious persistence entries")
+                && finding.evidence_pointer.field == "observation.actionable_suspicious_count"
+        }));
+    }
+
+    #[test]
+    fn derives_privileged_account_drift_finding() {
+        let turns = vec![AgentTurn {
+            thought: "<call>{...}</call>".to_string(),
+            tool_call: Some(ToolCall {
+                tool: "audit_account_changes".to_string(),
+                args: json!({}),
+            }),
+            observation: Some(json!({
+                "newly_privileged_account_count": 1,
+                "newly_privileged_accounts": ["svc-backup"]
+            })),
+        }];
+
+        let findings = derive_findings(&turns, "final");
+        assert!(findings.iter().any(|finding| {
+            finding
+                .title
+                .contains("Privileged account baseline drift detected")
+                && finding.evidence_pointer.field == "observation.newly_privileged_account_count"
+        }));
+    }
+
+    #[test]
+    fn derives_critical_network_risk_finding() {
+        let turns = vec![AgentTurn {
+            thought: "<call>{...}</call>".to_string(),
+            tool_call: Some(ToolCall {
+                tool: "correlate_process_network".to_string(),
+                args: json!({}),
+            }),
+            observation: Some(json!({
+                "externally_exposed_count": 4,
+                "high_risk_exposed_count": 2,
+                "network_risk_score": 78
+            })),
+        }];
+
+        let findings = derive_findings(&turns, "final");
+        assert!(findings.iter().any(|finding| {
+            finding.title.contains("Network exposure risk score")
+                && finding.severity == FindingSeverity::Critical
+                && finding.evidence_pointer.field == "observation.network_risk_score"
         }));
     }
 }

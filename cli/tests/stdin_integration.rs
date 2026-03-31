@@ -314,6 +314,59 @@ fn tools_json_contract_includes_coverage_expansion_tools() {
 }
 
 #[test]
+fn describe_tool_json_contract_includes_baseline_and_allowlist_args() {
+    let cases: [(&str, &[&str]); 3] = [
+        (
+            "inspect_persistence_locations",
+            &["baseline_entries", "allowlist_terms"],
+        ),
+        (
+            "audit_account_changes",
+            &[
+                "baseline_privileged_accounts",
+                "approved_privileged_accounts",
+            ],
+        ),
+        (
+            "correlate_process_network",
+            &["baseline_exposed_bindings", "expected_processes"],
+        ),
+    ];
+
+    for (tool_name, expected_fields) in cases {
+        let output = run_capture(&[
+            "--describe-tool",
+            tool_name,
+            "--introspection-format",
+            "json",
+        ]);
+
+        assert!(
+            output.status.success(),
+            "process failed for {tool_name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let json = parse_stdout_json(&output);
+        let properties = json
+            .get("tool")
+            .and_then(Value::as_object)
+            .and_then(|tool| tool.get("args_schema"))
+            .and_then(Value::as_object)
+            .and_then(|schema| schema.get("properties"))
+            .and_then(Value::as_object)
+            .expect("args_schema.properties should be present");
+
+        for field in expected_fields {
+            assert!(
+                properties.contains_key(*field),
+                "expected field '{field}' in args schema for tool '{tool_name}'"
+            );
+        }
+    }
+}
+
+#[test]
 fn describe_tool_json_contract_contains_expected_fields() {
     let output = run_capture(&[
         "--describe-tool",

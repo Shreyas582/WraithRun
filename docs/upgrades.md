@@ -8,6 +8,7 @@
 - Summary and markdown output now render findings before turn-by-turn evidence.
 - `--list-tools --tool-filter <QUERY>` now supports multi-term, separator-normalized matching.
 - Added host coverage tools for persistence inventory, account/role snapshots, and process-network correlation.
+- Coverage tools now support optional baseline/allowlist argument sets and emit drift/risk metrics (`baseline_new_count`, `newly_privileged_account_count`, `network_risk_score`).
 
 ### Migration examples
 
@@ -35,6 +36,7 @@ Run process-network correlation task:
 - Validate analyst runbooks treat `evidence_pointer` as a jump target into `turns[]` observations.
 - Confirm triage dashboards can display severity/confidence and recommended action from findings.
 - Validate runbooks include the new persistence/account/process-network coverage tasks for baseline collection.
+- If your automation compares host state over time, feed baseline arrays into tool calls and alert on the new drift counters.
 
 ## v0.4.1
 

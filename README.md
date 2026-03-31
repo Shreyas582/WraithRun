@@ -6,6 +6,7 @@ It is a local-first command-line tool for defenders and security engineers that:
 
 - runs guided local checks (logs, network listeners, file hashes, privilege indicators),
 - expands host coverage with persistence inventory, account/role snapshots, and process-network correlation,
+- supports baseline-aware drift signals and process-network risk scoring for faster triage prioritization,
 - keeps evidence on your own machine by default,
 - returns a structured JSON report you can archive, diff, or automate around.
 
@@ -88,6 +89,12 @@ Top-level fields:
 - `findings`: normalized actionable findings with severity, confidence, evidence pointer, and recommended action.
 - `turns`: intermediate reasoning/tool interaction history.
 - `final_answer`: the model/runtime conclusion.
+
+Coverage-oriented observations commonly include drift and risk metrics such as:
+
+- `baseline_new_count` and `actionable_suspicious_count` from persistence checks,
+- `newly_privileged_account_count` and `unapproved_privileged_account_count` from account snapshots,
+- `network_risk_score` and `unknown_exposed_process_count` from process-network correlation.
 
 ## Use Live Model Inference (Optional)
 

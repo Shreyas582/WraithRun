@@ -371,6 +371,99 @@ fn parse_bounded_count(args: &Value, field: &str, default: usize, max: usize) ->
     value.clamp(1, max as u64) as usize
 }
 
+fn parse_string_list(args: &Value, field: &str, max_items: usize, max_chars: usize) -> Vec<String> {
+    let mut parsed = Vec::new();
+    let Some(values) = args.get(field).and_then(Value::as_array) else {
+        return parsed;
+    };
+
+    for value in values.iter().take(max_items) {
+        let Some(raw) = value.as_str() else {
+            continue;
+        };
+
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        parsed.push(trimmed.chars().take(max_chars).collect());
+    }
+
+    sort_dedup_case_insensitive(&mut parsed);
+    parsed
+}
+
+fn normalize_lookup_value(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn sort_dedup_case_insensitive(values: &mut Vec<String>) {
+    values.sort_by_cached_key(|value| value.to_ascii_lowercase());
+    values.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+}
+
+fn persistence_entry_matches_allowlist(
+    entry: &persistence_checker::PersistenceEntry,
+    allowlist_terms: &HashSet<String>,
+) -> bool {
+    if allowlist_terms.is_empty() {
+        return false;
+    }
+
+    let haystack =
+        format!("{} {} {}", entry.location, entry.kind, entry.entry).to_ascii_lowercase();
+    allowlist_terms
+        .iter()
+        .any(|term| !term.is_empty() && haystack.contains(term))
+}
+
+fn is_high_risk_process_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        "powershell",
+        "pwsh",
+        "cmd",
+        "wscript",
+        "cscript",
+        "mshta",
+        "rundll32",
+        "python",
+        "node",
+        "bash",
+        "sh",
+        "netcat",
+        "ncat",
+        "nc",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn calculate_network_risk_score(
+    externally_exposed_count: usize,
+    high_risk_exposed_count: usize,
+    unknown_exposed_process_count: usize,
+    new_exposed_binding_count: usize,
+    unresolved_count: usize,
+) -> u32 {
+    let weighted_score = (externally_exposed_count as u32)
+        + (high_risk_exposed_count as u32 * 22)
+        + (unknown_exposed_process_count as u32 * 12)
+        + (new_exposed_binding_count as u32 * 9)
+        + (unresolved_count as u32 * 2);
+    weighted_score.min(100)
+}
+
+fn network_risk_level(score: u32) -> &'static str {
+    match score {
+        0..=14 => "low",
+        15..=39 => "medium",
+        40..=69 => "high",
+        _ => "critical",
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn suspicious_windows_privilege_markers() -> &'static Vec<&'static str> {
     static MARKERS: OnceLock<Vec<&'static str>> = OnceLock::new();
@@ -595,7 +688,17 @@ impl Tool for InspectPersistenceLocationsTool {
             args_schema: json!({
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 512}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 512},
+                    "baseline_entries": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 512
+                    },
+                    "allowlist_terms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 128
+                    }
                 }
             }),
         }
@@ -603,12 +706,47 @@ impl Tool for InspectPersistenceLocationsTool {
 
     async fn run(&self, args: Value) -> Result<Value, ToolError> {
         let limit = parse_bounded_count(&args, "limit", 128, 512);
+        let baseline_entries = parse_string_list(&args, "baseline_entries", 512, 512);
+        let baseline_entry_set: HashSet<String> = baseline_entries
+            .iter()
+            .map(|entry| normalize_lookup_value(entry))
+            .collect();
+        let allowlist_terms = parse_string_list(&args, "allowlist_terms", 128, 128);
+        let allowlist_term_set: HashSet<String> = allowlist_terms
+            .iter()
+            .map(|entry| normalize_lookup_value(entry))
+            .collect();
+
         let entries = persistence_checker::collect_persistence_entries(limit).await?;
         let suspicious_entry_count = entries.iter().filter(|entry| entry.suspicious).count();
+        let actionable_suspicious_entries: Vec<persistence_checker::PersistenceEntry> = entries
+            .iter()
+            .filter(|entry| {
+                entry.suspicious && !persistence_entry_matches_allowlist(entry, &allowlist_term_set)
+            })
+            .cloned()
+            .collect();
+
+        let mut baseline_new_entries = Vec::new();
+        if !baseline_entry_set.is_empty() {
+            for entry in &entries {
+                let normalized = normalize_lookup_value(&entry.entry);
+                if !baseline_entry_set.contains(&normalized) {
+                    baseline_new_entries.push(entry.entry.clone());
+                }
+            }
+            sort_dedup_case_insensitive(&mut baseline_new_entries);
+        }
 
         Ok(json!({
             "entry_count": entries.len(),
             "suspicious_entry_count": suspicious_entry_count,
+            "actionable_suspicious_count": actionable_suspicious_entries.len(),
+            "actionable_suspicious_entries": actionable_suspicious_entries,
+            "baseline_reference_count": baseline_entry_set.len(),
+            "baseline_new_count": baseline_new_entries.len(),
+            "baseline_new_entries": baseline_new_entries,
+            "allowlist_term_count": allowlist_term_set.len(),
             "entries": entries,
         }))
     }
@@ -624,18 +762,91 @@ impl Tool for AuditAccountChangesTool {
             description:
                 "Captures privileged account and admin-group snapshot for change-focused triage."
                     .to_string(),
-            args_schema: json!({ "type": "object" }),
+            args_schema: json!({
+                "type": "object",
+                "properties": {
+                    "baseline_privileged_accounts": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 512
+                    },
+                    "approved_privileged_accounts": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 512
+                    }
+                }
+            }),
         }
     }
 
-    async fn run(&self, _args: Value) -> Result<Value, ToolError> {
+    async fn run(&self, args: Value) -> Result<Value, ToolError> {
+        let baseline_accounts = parse_string_list(&args, "baseline_privileged_accounts", 512, 256);
+        let approved_accounts = parse_string_list(&args, "approved_privileged_accounts", 512, 256);
+
+        let baseline_account_set: HashSet<String> = baseline_accounts
+            .iter()
+            .map(|account| normalize_lookup_value(account))
+            .collect();
+        let approved_account_set: HashSet<String> = approved_accounts
+            .iter()
+            .map(|account| normalize_lookup_value(account))
+            .collect();
+
         let snapshot = account_audit::collect_account_privilege_snapshot().await?;
+
+        let current_account_set: HashSet<String> = snapshot
+            .privileged_accounts
+            .iter()
+            .map(|account| normalize_lookup_value(account))
+            .collect();
+
+        let mut newly_privileged_accounts = Vec::new();
+        if !baseline_account_set.is_empty() {
+            for account in &snapshot.privileged_accounts {
+                let normalized = normalize_lookup_value(account);
+                if !baseline_account_set.contains(&normalized) {
+                    newly_privileged_accounts.push(account.clone());
+                }
+            }
+            sort_dedup_case_insensitive(&mut newly_privileged_accounts);
+        }
+
+        let mut removed_privileged_accounts = Vec::new();
+        if !baseline_account_set.is_empty() {
+            for account in &baseline_accounts {
+                let normalized = normalize_lookup_value(account);
+                if !current_account_set.contains(&normalized) {
+                    removed_privileged_accounts.push(account.clone());
+                }
+            }
+            sort_dedup_case_insensitive(&mut removed_privileged_accounts);
+        }
+
+        let mut unapproved_privileged_accounts = Vec::new();
+        if !approved_account_set.is_empty() {
+            for account in &snapshot.privileged_accounts {
+                let normalized = normalize_lookup_value(account);
+                if !approved_account_set.contains(&normalized) {
+                    unapproved_privileged_accounts.push(account.clone());
+                }
+            }
+            sort_dedup_case_insensitive(&mut unapproved_privileged_accounts);
+        }
 
         Ok(json!({
             "privileged_account_count": snapshot.privileged_accounts.len(),
             "non_default_privileged_account_count": snapshot.non_default_privileged_accounts.len(),
+            "baseline_reference_count": baseline_account_set.len(),
+            "newly_privileged_account_count": newly_privileged_accounts.len(),
+            "removed_privileged_account_count": removed_privileged_accounts.len(),
+            "approved_account_count": approved_account_set.len(),
+            "unapproved_privileged_account_count": unapproved_privileged_accounts.len(),
             "privileged_accounts": snapshot.privileged_accounts,
             "non_default_privileged_accounts": snapshot.non_default_privileged_accounts,
+            "newly_privileged_accounts": newly_privileged_accounts,
+            "removed_privileged_accounts": removed_privileged_accounts,
+            "unapproved_privileged_accounts": unapproved_privileged_accounts,
             "evidence": snapshot.evidence,
         }))
     }
@@ -654,7 +865,17 @@ impl Tool for CorrelateProcessNetworkTool {
             args_schema: json!({
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 512}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 512},
+                    "baseline_exposed_bindings": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 512
+                    },
+                    "expected_processes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 512
+                    }
                 }
             }),
         }
@@ -662,6 +883,18 @@ impl Tool for CorrelateProcessNetworkTool {
 
     async fn run(&self, args: Value) -> Result<Value, ToolError> {
         let limit = parse_bounded_count(&args, "limit", 128, 512);
+        let baseline_exposed_bindings =
+            parse_string_list(&args, "baseline_exposed_bindings", 512, 256);
+        let baseline_binding_set: HashSet<String> = baseline_exposed_bindings
+            .iter()
+            .map(|binding| normalize_lookup_value(binding))
+            .collect();
+        let expected_processes = parse_string_list(&args, "expected_processes", 512, 256);
+        let expected_process_set: HashSet<String> = expected_processes
+            .iter()
+            .map(|process| normalize_lookup_value(process))
+            .collect();
+
         let records = process_correlation::correlate_process_network(limit).await?;
         let correlated_count = records
             .iter()
@@ -671,12 +904,77 @@ impl Tool for CorrelateProcessNetworkTool {
             .iter()
             .filter(|record| record.externally_exposed)
             .count();
+        let unresolved_count = records.len().saturating_sub(correlated_count);
+
+        let high_risk_exposed_records: Vec<process_correlation::ProcessNetworkRecord> = records
+            .iter()
+            .filter(|record| {
+                record.externally_exposed
+                    && record
+                        .process_name
+                        .as_deref()
+                        .map(is_high_risk_process_name)
+                        .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+
+        let unknown_exposed_records: Vec<process_correlation::ProcessNetworkRecord> =
+            if expected_process_set.is_empty() {
+                Vec::new()
+            } else {
+                records
+                    .iter()
+                    .filter(|record| {
+                        record.externally_exposed
+                            && record
+                                .process_name
+                                .as_deref()
+                                .map(|name| {
+                                    let normalized = normalize_lookup_value(name);
+                                    !expected_process_set.contains(&normalized)
+                                })
+                                .unwrap_or(true)
+                    })
+                    .cloned()
+                    .collect()
+            };
+
+        let mut new_exposed_bindings = Vec::new();
+        if !baseline_binding_set.is_empty() {
+            for record in records.iter().filter(|record| record.externally_exposed) {
+                let normalized = normalize_lookup_value(&record.local_address);
+                if !baseline_binding_set.contains(&normalized) {
+                    new_exposed_bindings.push(record.local_address.clone());
+                }
+            }
+            sort_dedup_case_insensitive(&mut new_exposed_bindings);
+        }
+
+        let network_risk_score = calculate_network_risk_score(
+            externally_exposed_count,
+            high_risk_exposed_records.len(),
+            unknown_exposed_records.len(),
+            new_exposed_bindings.len(),
+            unresolved_count,
+        );
+        let network_risk_level = network_risk_level(network_risk_score);
 
         Ok(json!({
             "listener_count": records.len(),
             "correlated_count": correlated_count,
-            "unresolved_count": records.len().saturating_sub(correlated_count),
+            "unresolved_count": unresolved_count,
             "externally_exposed_count": externally_exposed_count,
+            "high_risk_exposed_count": high_risk_exposed_records.len(),
+            "high_risk_exposed_records": high_risk_exposed_records,
+            "expected_process_count": expected_process_set.len(),
+            "unknown_exposed_process_count": unknown_exposed_records.len(),
+            "unknown_exposed_records": unknown_exposed_records,
+            "baseline_binding_count": baseline_binding_set.len(),
+            "new_exposed_binding_count": new_exposed_bindings.len(),
+            "new_exposed_bindings": new_exposed_bindings,
+            "network_risk_score": network_risk_score,
+            "network_risk_level": network_risk_level,
             "records": records,
         }))
     }

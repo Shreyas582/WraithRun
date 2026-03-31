@@ -101,6 +101,12 @@ Behavior:
 
 Current built-in coverage includes log tailing, listener inventory, file hashing, privilege vectors, persistence inventory, account-role snapshots, and process-network correlation.
 
+Coverage tool argument highlights:
+
+- `inspect_persistence_locations`: supports `limit`, optional `baseline_entries[]`, and optional `allowlist_terms[]`.
+- `audit_account_changes`: supports optional `baseline_privileged_accounts[]` and `approved_privileged_accounts[]`.
+- `correlate_process_network`: supports `limit`, optional `baseline_exposed_bindings[]`, and optional `expected_processes[]`.
+
 When `--tool-filter` is used with `--list-tools`, only tools matching all query terms are returned.
 
 `--tool-filter` matching behavior:
@@ -259,6 +265,8 @@ Default run output (`--format json`) includes:
 - `findings`: actionable finding list synthesized from collected evidence.
 - `turns`: tool-thought-observation trace.
 - `final_answer`: model/runtime conclusion string.
+
+Coverage-oriented observations may also expose drift/risk metrics including `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
 
 `findings[]` object fields:
 
