@@ -4,6 +4,20 @@
 
 ### Breaking/visible changes
 
+- (none yet)
+
+### Migration examples
+
+- (none yet)
+
+### Recommended checks after upgrade
+
+- (none yet)
+
+## v0.6.2
+
+### Breaking/visible changes
+
 - Added optional `--evidence-bundle-archive` runtime output for deterministic single-file evidence bundle export (`.tar`).
 
 ### Migration examples

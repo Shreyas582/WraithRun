@@ -8,6 +8,20 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 0.6.2 - 2026-03-31
+
+### Added
+
 - Added `--evidence-bundle-archive <PATH>` for deterministic single-file tar export of evidence bundle artifacts.
 
 ### Changed
