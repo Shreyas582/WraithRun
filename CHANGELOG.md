@@ -10,11 +10,13 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - `--list-tools --tool-filter <QUERY>` now supports multi-term query matching for faster triage lookups.
 - First-class `findings` report layer with severity, confidence, evidence pointer, and recommended action fields.
+- New host coverage tools: `inspect_persistence_locations`, `audit_account_changes`, and `correlate_process_network`.
 
 ### Changed
 
 - `--tool-filter` matching now normalizes separators (spaces, hyphens, underscores, punctuation) and applies terms across tool names and descriptions.
 - Summary/markdown output now renders actionable findings before raw turn-by-turn observations.
+- Dry-run task routing now maps persistence/account-change/process-network prompts to specialized coverage tools.
 
 ### Fixed
 

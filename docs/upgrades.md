@@ -7,6 +7,7 @@
 - Run report JSON now includes a first-class `findings[]` layer with severity, confidence, evidence pointers, and recommended actions.
 - Summary and markdown output now render findings before turn-by-turn evidence.
 - `--list-tools --tool-filter <QUERY>` now supports multi-term, separator-normalized matching.
+- Added host coverage tools for persistence inventory, account/role snapshots, and process-network correlation.
 
 ### Migration examples
 
@@ -22,11 +23,18 @@ Filter tools using multiple terms:
 .\wraithrun.exe --list-tools --tool-filter "priv esc"
 ```
 
+Run process-network correlation task:
+
+```powershell
+.\wraithrun.exe --task "Correlate process and network listener exposure" --format summary
+```
+
 ### Recommended checks after upgrade
 
 - If automation consumes run output JSON, parse `findings[]` and ignore unknown future fields for forward compatibility.
 - Validate analyst runbooks treat `evidence_pointer` as a jump target into `turns[]` observations.
 - Confirm triage dashboards can display severity/confidence and recommended action from findings.
+- Validate runbooks include the new persistence/account/process-network coverage tasks for baseline collection.
 
 ## v0.4.1
 

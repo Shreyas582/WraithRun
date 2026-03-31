@@ -281,6 +281,39 @@ fn tools_json_contract_contains_expected_fields() {
 }
 
 #[test]
+fn tools_json_contract_includes_coverage_expansion_tools() {
+    let output = run_capture(&["--list-tools", "--introspection-format", "json"]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let tools = json
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("tools should be an array");
+
+    for expected in [
+        "inspect_persistence_locations",
+        "audit_account_changes",
+        "correlate_process_network",
+    ] {
+        assert!(
+            tools.iter().any(|tool| {
+                tool.get("name")
+                    .and_then(Value::as_str)
+                    .map(|name| name == expected)
+                    .unwrap_or(false)
+            }),
+            "expected tool '{expected}' to be present"
+        );
+    }
+}
+
+#[test]
 fn describe_tool_json_contract_contains_expected_fields() {
     let output = run_capture(&[
         "--describe-tool",

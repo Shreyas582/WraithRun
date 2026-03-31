@@ -5,6 +5,7 @@ WraithRun helps you investigate suspicious host activity quickly, without sendin
 It is a local-first command-line tool for defenders and security engineers that:
 
 - runs guided local checks (logs, network listeners, file hashes, privilege indicators),
+- expands host coverage with persistence inventory, account/role snapshots, and process-network correlation,
 - keeps evidence on your own machine by default,
 - returns a structured JSON report you can archive, diff, or automate around.
 
@@ -208,6 +209,24 @@ Filter tools with multi-word query terms:
 
 ```powershell
 cargo run -p wraithrun -- --list-tools --tool-filter "priv esc"
+```
+
+Run persistence coverage check:
+
+```powershell
+cargo run -p wraithrun -- --task "Inspect persistence locations for suspicious autoruns" --format summary
+```
+
+Run account/privileged-role snapshot:
+
+```powershell
+cargo run -p wraithrun -- --task "Audit account change activity in admin group membership" --format summary
+```
+
+Run process-network correlation:
+
+```powershell
+cargo run -p wraithrun -- --task "Correlate process and network listener exposure" --format summary
 ```
 
 Describe one tool:

@@ -99,6 +99,8 @@ Behavior:
 
 `--list-tools` output includes tool names, descriptions, and JSON argument schemas.
 
+Current built-in coverage includes log tailing, listener inventory, file hashing, privilege vectors, persistence inventory, account-role snapshots, and process-network correlation.
+
 When `--tool-filter` is used with `--list-tools`, only tools matching all query terms are returned.
 
 `--tool-filter` matching behavior:
@@ -300,6 +302,24 @@ Dry-run mode:
 
 ```powershell
 wraithrun --task "Check suspicious listener ports"
+```
+
+Persistence coverage:
+
+```powershell
+wraithrun --task "Inspect persistence locations for suspicious autoruns" --format summary
+```
+
+Account/role coverage:
+
+```powershell
+wraithrun --task "Audit account change activity in admin group membership" --format summary
+```
+
+Process-network correlation:
+
+```powershell
+wraithrun --task "Correlate process and network listener exposure" --format summary
 ```
 
 Task from stdin:

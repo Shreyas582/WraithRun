@@ -1,5 +1,8 @@
+pub mod account_audit;
 pub mod log_parser;
 pub mod network_scanner;
+pub mod persistence_checker;
+pub mod process_correlation;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -76,7 +79,7 @@ impl SandboxPolicy {
         }
 
         #[cfg(target_os = "windows")]
-        let command_allowlist: HashSet<String> = ["whoami", "netstat"]
+        let command_allowlist: HashSet<String> = ["whoami", "netstat", "net", "tasklist", "reg"]
             .into_iter()
             .map(|c| c.to_string())
             .collect();
@@ -259,6 +262,9 @@ impl ToolRegistry {
         registry.register(Arc::new(ScanNetworkTool));
         registry.register(Arc::new(CheckPrivilegeEscalationVectorsTool));
         registry.register(Arc::new(HashBinaryTool));
+        registry.register(Arc::new(InspectPersistenceLocationsTool));
+        registry.register(Arc::new(AuditAccountChangesTool));
+        registry.register(Arc::new(CorrelateProcessNetworkTool));
         registry
     }
 
@@ -302,6 +308,24 @@ impl ToolRegistry {
                     self.policy.ensure_command_allowed("sudo")?;
                 }
             }
+            "inspect_persistence_locations" => {
+                #[cfg(target_os = "windows")]
+                self.policy.ensure_command_allowed("reg")?;
+            }
+            "audit_account_changes" => {
+                #[cfg(target_os = "windows")]
+                self.policy.ensure_command_allowed("net")?;
+            }
+            "correlate_process_network" => {
+                #[cfg(target_os = "windows")]
+                {
+                    self.policy.ensure_command_allowed("netstat")?;
+                    self.policy.ensure_command_allowed("tasklist")?;
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                self.policy.ensure_command_allowed("ss")?;
+            }
             _ => {}
         }
 
@@ -336,11 +360,15 @@ impl ToolRegistry {
 }
 
 fn parse_max_lines(args: &Value, default: usize) -> usize {
+    parse_bounded_count(args, "max_lines", default, 1000)
+}
+
+fn parse_bounded_count(args: &Value, field: &str, default: usize, max: usize) -> usize {
     let value = args
-        .get("max_lines")
+        .get(field)
         .and_then(Value::as_u64)
         .unwrap_or(default as u64);
-    value.clamp(1, 1000) as usize
+    value.clamp(1, max as u64) as usize
 }
 
 #[cfg(target_os = "windows")]
@@ -551,5 +579,105 @@ impl Tool for CheckPrivilegeEscalationVectorsTool {
                 "sample": sample,
             }))
         }
+    }
+}
+
+pub struct InspectPersistenceLocationsTool;
+
+#[async_trait]
+impl Tool for InspectPersistenceLocationsTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "inspect_persistence_locations".to_string(),
+            description:
+                "Inventories common host persistence locations (startup paths, autoruns, cron/system units)."
+                    .to_string(),
+            args_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 512}
+                }
+            }),
+        }
+    }
+
+    async fn run(&self, args: Value) -> Result<Value, ToolError> {
+        let limit = parse_bounded_count(&args, "limit", 128, 512);
+        let entries = persistence_checker::collect_persistence_entries(limit).await?;
+        let suspicious_entry_count = entries.iter().filter(|entry| entry.suspicious).count();
+
+        Ok(json!({
+            "entry_count": entries.len(),
+            "suspicious_entry_count": suspicious_entry_count,
+            "entries": entries,
+        }))
+    }
+}
+
+pub struct AuditAccountChangesTool;
+
+#[async_trait]
+impl Tool for AuditAccountChangesTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "audit_account_changes".to_string(),
+            description:
+                "Captures privileged account and admin-group snapshot for change-focused triage."
+                    .to_string(),
+            args_schema: json!({ "type": "object" }),
+        }
+    }
+
+    async fn run(&self, _args: Value) -> Result<Value, ToolError> {
+        let snapshot = account_audit::collect_account_privilege_snapshot().await?;
+
+        Ok(json!({
+            "privileged_account_count": snapshot.privileged_accounts.len(),
+            "non_default_privileged_account_count": snapshot.non_default_privileged_accounts.len(),
+            "privileged_accounts": snapshot.privileged_accounts,
+            "non_default_privileged_accounts": snapshot.non_default_privileged_accounts,
+            "evidence": snapshot.evidence,
+        }))
+    }
+}
+
+pub struct CorrelateProcessNetworkTool;
+
+#[async_trait]
+impl Tool for CorrelateProcessNetworkTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "correlate_process_network".to_string(),
+            description:
+                "Correlates listening sockets with owning processes for faster containment triage."
+                    .to_string(),
+            args_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 512}
+                }
+            }),
+        }
+    }
+
+    async fn run(&self, args: Value) -> Result<Value, ToolError> {
+        let limit = parse_bounded_count(&args, "limit", 128, 512);
+        let records = process_correlation::correlate_process_network(limit).await?;
+        let correlated_count = records
+            .iter()
+            .filter(|record| record.process_name.is_some())
+            .count();
+        let externally_exposed_count = records
+            .iter()
+            .filter(|record| record.externally_exposed)
+            .count();
+
+        Ok(json!({
+            "listener_count": records.len(),
+            "correlated_count": correlated_count,
+            "unresolved_count": records.len().saturating_sub(correlated_count),
+            "externally_exposed_count": externally_exposed_count,
+            "records": records,
+        }))
     }
 }

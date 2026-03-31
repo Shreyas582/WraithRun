@@ -139,6 +139,35 @@ impl OnnxVitisEngine {
             );
         }
 
+        if task_lower.contains("persistence")
+            || task_lower.contains("startup")
+            || task_lower.contains("autorun")
+            || task_lower.contains("run key")
+        {
+            return r#"<call>{"tool":"inspect_persistence_locations","args":{"limit":200}}</call>"#
+                .to_string();
+        }
+
+        if task_lower.contains("account")
+            && (task_lower.contains("change")
+                || task_lower.contains("admin")
+                || task_lower.contains("group")
+                || task_lower.contains("privilege"))
+        {
+            return r#"<call>{"tool":"audit_account_changes","args":{}}</call>"#.to_string();
+        }
+
+        if (task_lower.contains("process")
+            && (task_lower.contains("network")
+                || task_lower.contains("listener")
+                || task_lower.contains("port")
+                || task_lower.contains("socket")))
+            || (task_lower.contains("correlat") && task_lower.contains("network"))
+        {
+            return r#"<call>{"tool":"correlate_process_network","args":{"limit":64}}</call>"#
+                .to_string();
+        }
+
         if task_lower.contains("network")
             || task_lower.contains("listener")
             || task_lower.contains("port")
@@ -206,6 +235,30 @@ mod tests {
         let output =
             engine.dry_run_response("Task: Check suspicious listener ports and summarize risk");
         assert!(output.contains("\"tool\":\"scan_network\""));
+    }
+
+    #[test]
+    fn routes_persistence_task_to_inspect_persistence_locations() {
+        let engine = dry_run_engine();
+        let output =
+            engine.dry_run_response("Task: Inspect persistence locations for suspicious autoruns");
+        assert!(output.contains("\"tool\":\"inspect_persistence_locations\""));
+    }
+
+    #[test]
+    fn routes_account_change_task_to_audit_account_changes() {
+        let engine = dry_run_engine();
+        let output = engine
+            .dry_run_response("Task: Audit account change activity in admin group membership");
+        assert!(output.contains("\"tool\":\"audit_account_changes\""));
+    }
+
+    #[test]
+    fn routes_process_network_task_to_correlate_process_network() {
+        let engine = dry_run_engine();
+        let output =
+            engine.dry_run_response("Task: Correlate process and network listener exposure");
+        assert!(output.contains("\"tool\":\"correlate_process_network\""));
     }
 
     #[test]

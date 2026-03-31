@@ -128,6 +128,86 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             }
         }
 
+        if let Some(suspicious_entry_count) = observation
+            .get("suspicious_entry_count")
+            .and_then(Value::as_u64)
+        {
+            if suspicious_entry_count > 0 {
+                let severity = if suspicious_entry_count >= 5 {
+                    FindingSeverity::High
+                } else {
+                    FindingSeverity::Medium
+                };
+
+                findings.push(Finding {
+                    title: format!(
+                        "Suspicious persistence entries detected ({suspicious_entry_count})"
+                    ),
+                    severity,
+                    confidence: confidence_from_count(0.7, suspicious_entry_count, 0.05, 0.95),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.suspicious_entry_count".to_string(),
+                    },
+                    recommended_action: "Review persistence entries for unsigned or user-profile startup references, then remove unauthorized autoruns and collect triage artifacts.".to_string(),
+                });
+            }
+        }
+
+        if let Some(non_default_privileged_account_count) = observation
+            .get("non_default_privileged_account_count")
+            .and_then(Value::as_u64)
+        {
+            if non_default_privileged_account_count > 0 {
+                findings.push(Finding {
+                    title: format!(
+                        "Non-default privileged accounts observed ({non_default_privileged_account_count})"
+                    ),
+                    severity: FindingSeverity::High,
+                    confidence: confidence_from_count(
+                        0.74,
+                        non_default_privileged_account_count,
+                        0.04,
+                        0.96,
+                    ),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.non_default_privileged_account_count".to_string(),
+                    },
+                    recommended_action: "Validate each non-default privileged account against approved access records; revoke unauthorized role grants and rotate exposed credentials.".to_string(),
+                });
+            }
+        }
+
+        if let Some(externally_exposed_count) = observation
+            .get("externally_exposed_count")
+            .and_then(Value::as_u64)
+        {
+            if externally_exposed_count > 0 {
+                let severity = if externally_exposed_count >= 10 {
+                    FindingSeverity::High
+                } else {
+                    FindingSeverity::Medium
+                };
+
+                findings.push(Finding {
+                    title: format!(
+                        "Externally exposed listening endpoints observed ({externally_exposed_count})"
+                    ),
+                    severity,
+                    confidence: confidence_from_count(0.66, externally_exposed_count, 0.03, 0.93),
+                    evidence_pointer: EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.externally_exposed_count".to_string(),
+                    },
+                    recommended_action: "Confirm process ownership and necessity of exposed listeners; close or firewall unnecessary bindings and monitor for reappearance.".to_string(),
+                });
+            }
+        }
+
         if let (Some(path), Some(_digest)) = (
             observation.get("path").and_then(Value::as_str),
             observation.get("sha256").and_then(Value::as_str),
@@ -333,5 +413,28 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, FindingSeverity::Info);
         assert_eq!(findings[0].evidence_pointer.field, "final_answer");
+    }
+
+    #[test]
+    fn derives_persistence_finding_from_suspicious_entries() {
+        let turns = vec![AgentTurn {
+            thought: "<call>{...}</call>".to_string(),
+            tool_call: Some(ToolCall {
+                tool: "inspect_persistence_locations".to_string(),
+                args: json!({}),
+            }),
+            observation: Some(json!({
+                "entry_count": 12,
+                "suspicious_entry_count": 2
+            })),
+        }];
+
+        let findings = derive_findings(&turns, "final");
+        assert!(findings.iter().any(|finding| {
+            finding
+                .title
+                .contains("Suspicious persistence entries detected")
+                && finding.evidence_pointer.field == "observation.suspicious_entry_count"
+        }));
     }
 }
