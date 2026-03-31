@@ -169,6 +169,7 @@ Common options:
 - `--output-file <PATH>` write rendered report to file and create directories if needed.
 - `--case-id <CASE_ID>` attach a case identifier to the run report (`A-Z a-z 0-9 - _ . :`, max 128 chars).
 - `--evidence-bundle-dir <PATH>` export `report.json`, `raw_observations.json`, and `SHA256SUMS` to a bundle directory.
+- `--baseline-bundle <PATH>` import baseline arrays from a prior evidence bundle directory (or `raw_observations.json`) and auto-populate drift-aware tool arguments.
 - `--quiet` suppress runtime logs.
 - `--verbose` enable debug-level runtime logs.
 
@@ -252,6 +253,12 @@ Capture reusable coverage baseline:
 
 ```powershell
 cargo run -p wraithrun -- --task "Capture host coverage baseline for persistence account and network" --format summary
+```
+
+Run a drift check with baseline arrays imported from a prior bundle:
+
+```powershell
+cargo run -p wraithrun -- --task "Audit account change activity in admin group membership" --baseline-bundle .\evidence\CASE-2026-IR-0042
 ```
 
 Describe one tool:

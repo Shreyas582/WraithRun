@@ -1,18 +1,20 @@
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{json, Map, Value};
 use tracing::info;
 
 use cyber_tools::ToolRegistry;
 use inference_bridge::InferenceEngine;
 
 use crate::{
-    derive_findings, extract_tag, format_system_prompt, parse_tool_call, AgentTurn, RunReport,
+    derive_findings, extract_tag, format_system_prompt, parse_tool_call, AgentTurn,
+    CoverageBaseline, RunReport, ToolCall,
 };
 
 pub struct Agent<B: InferenceEngine> {
     brain: B,
     tools: ToolRegistry,
     max_steps: usize,
+    coverage_baseline: Option<CoverageBaseline>,
 }
 
 impl<B: InferenceEngine> Agent<B> {
@@ -21,12 +23,71 @@ impl<B: InferenceEngine> Agent<B> {
             brain,
             tools,
             max_steps: 8,
+            coverage_baseline: None,
         }
     }
 
     pub fn with_max_steps(mut self, max_steps: usize) -> Self {
         self.max_steps = max_steps.max(1);
         self
+    }
+
+    pub fn with_coverage_baseline(mut self, coverage_baseline: CoverageBaseline) -> Self {
+        self.coverage_baseline = if coverage_baseline.is_empty() {
+            None
+        } else {
+            Some(coverage_baseline)
+        };
+        self
+    }
+
+    fn apply_coverage_baseline_to_call(&self, call: &mut ToolCall) {
+        let Some(coverage_baseline) = self.coverage_baseline.as_ref() else {
+            return;
+        };
+
+        if !call.args.is_object() {
+            call.args = Value::Object(Map::new());
+        }
+
+        let Some(args) = call.args.as_object_mut() else {
+            return;
+        };
+
+        match call.tool.as_str() {
+            "inspect_persistence_locations" => {
+                set_string_list_arg(
+                    args,
+                    "baseline_entries",
+                    &coverage_baseline.baseline_entries,
+                );
+            }
+            "audit_account_changes" => {
+                set_string_list_arg(
+                    args,
+                    "baseline_privileged_accounts",
+                    &coverage_baseline.baseline_privileged_accounts,
+                );
+                set_string_list_arg(
+                    args,
+                    "approved_privileged_accounts",
+                    &coverage_baseline.approved_privileged_accounts,
+                );
+            }
+            "correlate_process_network" => {
+                set_string_list_arg(
+                    args,
+                    "baseline_exposed_bindings",
+                    &coverage_baseline.baseline_exposed_bindings,
+                );
+                set_string_list_arg(
+                    args,
+                    "expected_processes",
+                    &coverage_baseline.expected_processes,
+                );
+            }
+            _ => {}
+        }
     }
 
     pub async fn run(&self, task: &str) -> Result<RunReport> {
@@ -56,7 +117,9 @@ impl<B: InferenceEngine> Agent<B> {
                 });
             }
 
-            if let Some(call) = parse_tool_call(&output) {
+            if let Some(mut call) = parse_tool_call(&output) {
+                self.apply_coverage_baseline_to_call(&mut call);
+
                 let observation = match self.tools.execute(&call.tool, call.args.clone()).await {
                     Ok(value) => value,
                     Err(err) => json!({ "error": err.to_string() }),
@@ -105,6 +168,18 @@ impl<B: InferenceEngine> Agent<B> {
     }
 }
 
+fn set_string_list_arg(args: &mut serde_json::Map<String, Value>, key: &str, values: &[String]) {
+    if args.contains_key(key) || values.is_empty() {
+        return;
+    }
+
+    let list = values
+        .iter()
+        .map(|value| Value::String(value.clone()))
+        .collect();
+    args.insert(key.to_string(), Value::Array(list));
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -114,15 +189,91 @@ mod tests {
 
     use anyhow::Result;
     use async_trait::async_trait;
+    use serde_json::{json, Value};
 
     use cyber_tools::ToolRegistry;
     use inference_bridge::InferenceEngine;
 
     use super::Agent;
+    use crate::{CoverageBaseline, ToolCall};
 
     #[derive(Clone)]
     struct MockEngine {
         responses: Arc<Mutex<VecDeque<String>>>,
+    }
+
+    #[test]
+    fn injects_baseline_arguments_for_supported_tools() {
+        let baseline = CoverageBaseline {
+            baseline_entries: vec!["autorun-a".to_string()],
+            baseline_privileged_accounts: vec!["svc-admin".to_string()],
+            approved_privileged_accounts: vec!["svc-admin".to_string()],
+            baseline_exposed_bindings: vec!["0.0.0.0:443".to_string()],
+            expected_processes: vec!["nginx".to_string()],
+        };
+
+        let agent = Agent::new(MockEngine::new(vec![]), ToolRegistry::new())
+            .with_coverage_baseline(baseline);
+
+        let mut persistence_call = ToolCall {
+            tool: "inspect_persistence_locations".to_string(),
+            args: json!({"limit": 32}),
+        };
+        agent.apply_coverage_baseline_to_call(&mut persistence_call);
+        assert_eq!(
+            persistence_call.args["baseline_entries"][0],
+            Value::String("autorun-a".to_string())
+        );
+
+        let mut account_call = ToolCall {
+            tool: "audit_account_changes".to_string(),
+            args: json!({}),
+        };
+        agent.apply_coverage_baseline_to_call(&mut account_call);
+        assert_eq!(
+            account_call.args["baseline_privileged_accounts"][0],
+            Value::String("svc-admin".to_string())
+        );
+        assert_eq!(
+            account_call.args["approved_privileged_accounts"][0],
+            Value::String("svc-admin".to_string())
+        );
+
+        let mut network_call = ToolCall {
+            tool: "correlate_process_network".to_string(),
+            args: json!({"limit": 16}),
+        };
+        agent.apply_coverage_baseline_to_call(&mut network_call);
+        assert_eq!(
+            network_call.args["baseline_exposed_bindings"][0],
+            Value::String("0.0.0.0:443".to_string())
+        );
+        assert_eq!(
+            network_call.args["expected_processes"][0],
+            Value::String("nginx".to_string())
+        );
+    }
+
+    #[test]
+    fn does_not_override_explicit_tool_args_with_baseline() {
+        let baseline = CoverageBaseline {
+            baseline_entries: vec!["autorun-a".to_string()],
+            ..CoverageBaseline::default()
+        };
+
+        let agent = Agent::new(MockEngine::new(vec![]), ToolRegistry::new())
+            .with_coverage_baseline(baseline);
+
+        let mut call = ToolCall {
+            tool: "inspect_persistence_locations".to_string(),
+            args: json!({"baseline_entries": ["manual-entry"]}),
+        };
+        agent.apply_coverage_baseline_to_call(&mut call);
+
+        assert_eq!(
+            call.args["baseline_entries"][0],
+            Value::String("manual-entry".to_string())
+        );
     }
 
     impl MockEngine {

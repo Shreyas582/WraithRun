@@ -4,15 +4,19 @@
 
 ### Breaking/visible changes
 
-- (none yet)
+- Added optional `--baseline-bundle` runtime input to import drift baseline arrays from prior evidence bundles.
 
 ### Migration examples
 
-- (none yet)
+Load prior baseline arrays while running account drift checks:
+
+```powershell
+.\wraithrun.exe --task "Audit account change activity in admin group membership" --baseline-bundle .\evidence\CASE-2026-IR-0042
+```
 
 ### Recommended checks after upgrade
 
-- (none yet)
+- Ensure baseline bundles retained for drift workflows include `raw_observations.json` with a `capture_coverage_baseline` tool observation.
 
 ## v0.6.0
 

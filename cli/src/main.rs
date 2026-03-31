@@ -6,7 +6,7 @@ use std::{fmt::Write as _, fs};
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use core_engine::agent::Agent;
-use core_engine::{EvidencePointer, FindingSeverity, RunReport};
+use core_engine::{CoverageBaseline, EvidencePointer, FindingSeverity, RunReport};
 use cyber_tools::{ToolRegistry, ToolSpec};
 use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
 use serde::{Deserialize, Serialize};
@@ -157,6 +157,9 @@ struct Cli {
     #[arg(long, value_name = "PATH")]
     evidence_bundle_dir: Option<PathBuf>,
 
+    #[arg(long, value_name = "PATH")]
+    baseline_bundle: Option<PathBuf>,
+
     #[arg(long, conflicts_with = "verbose")]
     quiet: bool,
 
@@ -186,6 +189,7 @@ struct SettingsFragment {
     output_file: Option<PathBuf>,
     case_id: Option<String>,
     evidence_bundle_dir: Option<PathBuf>,
+    baseline_bundle: Option<PathBuf>,
     log: Option<LogMode>,
     vitis_config: Option<String>,
     vitis_cache_dir: Option<String>,
@@ -213,6 +217,7 @@ struct RuntimeConfig {
     output_file: Option<PathBuf>,
     case_id: Option<String>,
     evidence_bundle_dir: Option<PathBuf>,
+    baseline_bundle: Option<PathBuf>,
     log_mode: LogMode,
     vitis_config: Option<String>,
     vitis_cache_dir: Option<String>,
@@ -233,6 +238,7 @@ struct RuntimeConfigView {
     output_file: Option<String>,
     case_id: Option<String>,
     evidence_bundle_dir: Option<String>,
+    baseline_bundle: Option<String>,
     log_mode: LogMode,
     vitis_config: Option<String>,
     vitis_cache_dir: Option<String>,
@@ -252,13 +258,14 @@ struct RuntimeConfigSources {
     output_file: String,
     case_id: String,
     evidence_bundle_dir: String,
+    baseline_bundle: String,
     log_mode: String,
     vitis_config: String,
     vitis_cache_dir: String,
     vitis_cache_key: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct RawObservationsBundle {
     task: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -266,7 +273,7 @@ struct RawObservationsBundle {
     turns: Vec<RawObservationTurn>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct RawObservationTurn {
     turn: usize,
     tool: Option<String>,
@@ -355,6 +362,7 @@ impl RuntimeConfig {
             output_file: None,
             case_id: None,
             evidence_bundle_dir: None,
+            baseline_bundle: None,
             log_mode: LogMode::Normal,
             vitis_config: None,
             vitis_cache_dir: None,
@@ -393,6 +401,9 @@ impl RuntimeConfig {
         if let Some(evidence_bundle_dir) = &fragment.evidence_bundle_dir {
             self.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
         }
+        if let Some(baseline_bundle) = &fragment.baseline_bundle {
+            self.baseline_bundle = Some(baseline_bundle.clone());
+        }
         if let Some(log_mode) = fragment.log {
             self.log_mode = log_mode;
         }
@@ -422,6 +433,7 @@ impl RuntimeConfigSources {
             output_file: "default".to_string(),
             case_id: "default".to_string(),
             evidence_bundle_dir: "default".to_string(),
+            baseline_bundle: "default".to_string(),
             log_mode: "default".to_string(),
             vitis_config: "default".to_string(),
             vitis_cache_dir: "default".to_string(),
@@ -585,7 +597,12 @@ async fn main() -> Result<()> {
 
     let brain = OnnxVitisEngine::new(model_config);
     let tools = ToolRegistry::with_default_tools();
-    let agent = Agent::new(brain, tools).with_max_steps(runtime.max_steps);
+    let mut agent = Agent::new(brain, tools).with_max_steps(runtime.max_steps);
+
+    if let Some(baseline_bundle) = runtime.baseline_bundle.as_deref() {
+        let coverage_baseline = load_coverage_baseline_from_bundle(baseline_bundle)?;
+        agent = agent.with_coverage_baseline(coverage_baseline);
+    }
 
     let mut report = agent.run(&runtime.task).await?;
     if let Some(case_id) = runtime.case_id.as_ref() {
@@ -1378,6 +1395,7 @@ fn env_settings_fragment() -> Result<SettingsFragment> {
         output_file: read_env_path("WRAITHRUN_OUTPUT_FILE")?,
         case_id: read_env_string("WRAITHRUN_CASE_ID")?,
         evidence_bundle_dir: read_env_path("WRAITHRUN_EVIDENCE_BUNDLE_DIR")?,
+        baseline_bundle: read_env_path("WRAITHRUN_BASELINE_BUNDLE")?,
         log: read_env_log_mode()?,
         vitis_config: read_env_string("WRAITHRUN_VITIS_CONFIG")?,
         vitis_cache_dir: read_env_string("WRAITHRUN_VITIS_CACHE_DIR")?,
@@ -1418,6 +1436,9 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     }
     if let Some(evidence_bundle_dir) = &cli.evidence_bundle_dir {
         runtime.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
+    }
+    if let Some(baseline_bundle) = &cli.baseline_bundle {
+        runtime.baseline_bundle = Some(baseline_bundle.clone());
     }
     if cli.quiet {
         runtime.log_mode = LogMode::Quiet;
@@ -1481,6 +1502,10 @@ fn apply_fragment_with_source(
     if let Some(evidence_bundle_dir) = &fragment.evidence_bundle_dir {
         runtime.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
         sources.evidence_bundle_dir = source.to_string();
+    }
+    if let Some(baseline_bundle) = &fragment.baseline_bundle {
+        runtime.baseline_bundle = Some(baseline_bundle.clone());
+        sources.baseline_bundle = source.to_string();
     }
     if let Some(log_mode) = fragment.log {
         runtime.log_mode = log_mode;
@@ -1549,6 +1574,10 @@ fn apply_cli_overrides_with_source(
         runtime.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
         sources.evidence_bundle_dir = "cli --evidence-bundle-dir".to_string();
     }
+    if let Some(baseline_bundle) = &cli.baseline_bundle {
+        runtime.baseline_bundle = Some(baseline_bundle.clone());
+        sources.baseline_bundle = "cli --baseline-bundle".to_string();
+    }
     if cli.quiet {
         runtime.log_mode = LogMode::Quiet;
         sources.log_mode = "cli --quiet".to_string();
@@ -1586,6 +1615,10 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Result<()> {
         validate_case_id(case_id)?;
     }
 
+    if let Some(path) = config.baseline_bundle.as_deref() {
+        validate_baseline_bundle_path(path)?;
+    }
+
     Ok(())
 }
 
@@ -1609,6 +1642,31 @@ fn validate_case_id(case_id: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn validate_baseline_bundle_path(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+
+    if path.is_file() {
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if file_name.eq_ignore_ascii_case("raw_observations.json") {
+            return Ok(());
+        }
+        bail!(
+            "baseline_bundle file must be named raw_observations.json (got '{}')",
+            path.display()
+        );
+    }
+
+    bail!(
+        "baseline_bundle path '{}' does not exist or is not accessible",
+        path.display()
+    )
 }
 
 fn read_env_string(name: &str) -> Result<Option<String>> {
@@ -1977,6 +2035,10 @@ impl RuntimeConfigView {
                 .evidence_bundle_dir
                 .as_ref()
                 .map(|path| path.display().to_string()),
+            baseline_bundle: runtime
+                .baseline_bundle
+                .as_ref()
+                .map(|path| path.display().to_string()),
             log_mode: runtime.log_mode,
             vitis_config: runtime.vitis_config.clone(),
             vitis_cache_dir: runtime.vitis_cache_dir.clone(),
@@ -2342,6 +2404,132 @@ fn build_raw_observations_bundle(report: &RunReport) -> RawObservationsBundle {
     }
 }
 
+fn load_coverage_baseline_from_bundle(path: &Path) -> Result<CoverageBaseline> {
+    let raw_path = if path.is_dir() {
+        path.join("raw_observations.json")
+    } else {
+        path.to_path_buf()
+    };
+
+    let raw_text = fs::read_to_string(&raw_path).with_context(|| {
+        format!(
+            "Failed reading raw observations bundle from {}",
+            raw_path.display()
+        )
+    })?;
+    let raw_bundle: RawObservationsBundle = serde_json::from_str(&raw_text).with_context(|| {
+        format!(
+            "Failed parsing raw observations bundle JSON from {}",
+            raw_path.display()
+        )
+    })?;
+
+    let baseline_observation = raw_bundle
+        .turns
+        .iter()
+        .rev()
+        .find_map(|turn| {
+            if turn.tool.as_deref() == Some("capture_coverage_baseline") {
+                Some(&turn.observation)
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| {
+            anyhow!(
+                "No capture_coverage_baseline observation found in {}",
+                raw_path.display()
+            )
+        })?;
+
+    let coverage_baseline = extract_coverage_baseline_from_observation(baseline_observation);
+    if coverage_baseline.is_empty() {
+        bail!(
+            "Coverage baseline observation in {} did not contain reusable baseline arrays",
+            raw_path.display()
+        );
+    }
+
+    Ok(coverage_baseline)
+}
+
+fn extract_coverage_baseline_from_observation(observation: &Value) -> CoverageBaseline {
+    let baseline_entries = extract_string_array(
+        observation
+            .pointer("/persistence/baseline_entries")
+            .or_else(|| observation.get("baseline_entries")),
+        512,
+        512,
+    );
+
+    let baseline_privileged_accounts = extract_string_array(
+        observation
+            .pointer("/accounts/baseline_privileged_accounts")
+            .or_else(|| observation.get("baseline_privileged_accounts")),
+        512,
+        256,
+    );
+
+    let mut approved_privileged_accounts = extract_string_array(
+        observation
+            .pointer("/accounts/approved_privileged_accounts")
+            .or_else(|| observation.get("approved_privileged_accounts")),
+        512,
+        256,
+    );
+    if approved_privileged_accounts.is_empty() {
+        approved_privileged_accounts = baseline_privileged_accounts.clone();
+    }
+
+    let baseline_exposed_bindings = extract_string_array(
+        observation
+            .pointer("/network/baseline_exposed_bindings")
+            .or_else(|| observation.get("baseline_exposed_bindings")),
+        512,
+        256,
+    );
+
+    let expected_processes = extract_string_array(
+        observation
+            .pointer("/network/expected_processes")
+            .or_else(|| observation.get("expected_processes")),
+        512,
+        256,
+    );
+
+    CoverageBaseline {
+        baseline_entries,
+        baseline_privileged_accounts,
+        approved_privileged_accounts,
+        baseline_exposed_bindings,
+        expected_processes,
+    }
+}
+
+fn extract_string_array(value: Option<&Value>, max_items: usize, max_chars: usize) -> Vec<String> {
+    let mut collected = Vec::new();
+    let Some(entries) = value.and_then(Value::as_array) else {
+        return collected;
+    };
+
+    for entry in entries.iter().take(max_items) {
+        let Some(raw) = entry.as_str() else {
+            continue;
+        };
+
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        collected.push(trimmed.chars().take(max_chars).collect());
+    }
+
+    collected.sort_by_cached_key(|entry| entry.to_ascii_lowercase());
+    collected.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    collected
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -2576,8 +2764,8 @@ mod tests {
     use core_engine::{AgentTurn, EvidencePointer, Finding, FindingSeverity, RunReport, ToolCall};
 
     use super::{
-        ensure_introspection_format_usage, merge_sources, render_doctor_report,
-        render_doctor_report_json, render_effective_config_explanation_json,
+        ensure_introspection_format_usage, load_coverage_baseline_from_bundle, merge_sources,
+        render_doctor_report, render_doctor_report_json, render_effective_config_explanation_json,
         render_effective_config_json, render_profile_list, render_profile_list_json, render_report,
         render_task_template_list, render_task_template_list_json, render_tool_detail,
         render_tool_detail_json, render_tool_list, render_tool_list_json,
@@ -2620,6 +2808,7 @@ mod tests {
             output_file: None,
             case_id: None,
             evidence_bundle_dir: None,
+            baseline_bundle: None,
             quiet: false,
             verbose: false,
             vitis_config: None,
@@ -2729,6 +2918,80 @@ mod tests {
         assert!(sums.contains("raw_observations.json"));
 
         let _ = fs::remove_dir_all(&bundle_dir);
+    }
+
+    #[test]
+    fn loads_coverage_baseline_from_raw_bundle() {
+        let bundle_dir = unique_temp_dir("wraithrun-baseline-import");
+        fs::create_dir_all(&bundle_dir).expect("bundle directory should be created");
+
+        let raw_content = r#"{
+    "task": "Capture baseline",
+    "case_id": "CASE-2026-BASE-1",
+    "turns": [
+        {
+            "turn": 1,
+            "tool": "capture_coverage_baseline",
+            "args": {"persistence_limit": 128},
+            "observation": {
+                "persistence": {
+                    "baseline_entries": ["A-entry", "a-entry", "B-entry"]
+                },
+                "accounts": {
+                    "baseline_privileged_accounts": ["svc-admin"],
+                    "approved_privileged_accounts": ["svc-admin"]
+                },
+                "network": {
+                    "baseline_exposed_bindings": ["0.0.0.0:443"],
+                    "expected_processes": ["nginx"]
+                }
+            }
+        }
+    ]
+}"#;
+
+        let raw_path = bundle_dir.join("raw_observations.json");
+        fs::write(&raw_path, raw_content).expect("raw bundle fixture should be written");
+
+        let baseline =
+            load_coverage_baseline_from_bundle(&bundle_dir).expect("baseline import should work");
+
+        assert_eq!(baseline.baseline_entries.len(), 2);
+        assert!(baseline
+            .baseline_entries
+            .iter()
+            .any(|entry| entry.eq_ignore_ascii_case("A-entry")));
+        assert_eq!(
+            baseline.baseline_privileged_accounts,
+            vec!["svc-admin".to_string()]
+        );
+        assert_eq!(baseline.expected_processes, vec!["nginx".to_string()]);
+
+        let _ = fs::remove_dir_all(&bundle_dir);
+    }
+
+    #[test]
+    fn baseline_bundle_requires_raw_observations_filename_for_file_path() {
+        let mut cli = base_cli();
+        let invalid_path = unique_temp_file("wraithrun-invalid-baseline");
+        fs::write(&invalid_path, "{}").expect("invalid baseline fixture should be created");
+        cli.baseline_bundle = Some(invalid_path.clone());
+
+        let err = merge_sources(
+            &cli,
+            "test-task".to_string(),
+            None,
+            None,
+            None,
+            &SettingsFragment::default(),
+        )
+        .expect_err("invalid baseline file name should fail validation");
+
+        assert!(err
+            .to_string()
+            .contains("baseline_bundle file must be named raw_observations.json"));
+
+        let _ = fs::remove_file(&invalid_path);
     }
 
     #[test]

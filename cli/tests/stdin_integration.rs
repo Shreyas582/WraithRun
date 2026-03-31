@@ -190,6 +190,77 @@ fn evidence_bundle_export_writes_expected_files() {
 }
 
 #[test]
+fn baseline_bundle_import_populates_drift_tool_arguments() {
+    let baseline_dir = unique_temp_dir("wraithrun-baseline-import");
+    fs::create_dir_all(&baseline_dir).expect("baseline directory should be created");
+
+    let raw_path = baseline_dir.join("raw_observations.json");
+    let raw_content = r#"{
+    "task": "Capture baseline",
+    "turns": [
+        {
+            "turn": 1,
+            "tool": "capture_coverage_baseline",
+            "args": {},
+            "observation": {
+                "persistence": {"baseline_entries": ["entry-a"]},
+                "accounts": {
+                    "baseline_privileged_accounts": ["svc-admin"],
+                    "approved_privileged_accounts": ["svc-admin"]
+                },
+                "network": {
+                    "baseline_exposed_bindings": ["0.0.0.0:443"],
+                    "expected_processes": ["nginx"]
+                }
+            }
+        }
+    ]
+}"#;
+    fs::write(&raw_path, raw_content).expect("baseline fixture should be written");
+
+    let baseline_path_text = baseline_dir.to_string_lossy().to_string();
+    let args = vec![
+        "--task",
+        "Audit account change activity in admin group membership",
+        "--baseline-bundle",
+        baseline_path_text.as_str(),
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let turns = json
+        .get("turns")
+        .and_then(Value::as_array)
+        .expect("turns should be an array");
+    let first_args = turns
+        .first()
+        .and_then(|turn| turn.get("tool_call"))
+        .and_then(|call| call.get("args"))
+        .and_then(Value::as_object)
+        .expect("first tool call args should be an object");
+
+    let baseline_accounts = first_args
+        .get("baseline_privileged_accounts")
+        .and_then(Value::as_array)
+        .expect("baseline_privileged_accounts should be present");
+    assert!(baseline_accounts.iter().any(|entry| entry == "svc-admin"));
+
+    let approved_accounts = first_args
+        .get("approved_privileged_accounts")
+        .and_then(Value::as_array)
+        .expect("approved_privileged_accounts should be present");
+    assert!(approved_accounts.iter().any(|entry| entry == "svc-admin"));
+
+    let _ = fs::remove_dir_all(&baseline_dir);
+}
+
+#[test]
 fn rejects_empty_stdin_task() {
     let output = Command::new(env!("CARGO_BIN_EXE_wraithrun"))
         .args(["--task-stdin", "--format", "summary"])

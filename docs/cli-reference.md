@@ -54,6 +54,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--output-file <OUTPUT_FILE>`: write rendered output to file.
 - `--case-id <CASE_ID>`: optional investigation case identifier. Allowed chars: alphanumeric plus `- _ . :`.
 - `--evidence-bundle-dir <PATH>`: optional bundle export directory for `report.json`, `raw_observations.json`, and `SHA256SUMS`.
+- `--baseline-bundle <PATH>`: optional path to a prior evidence bundle directory (or `raw_observations.json`) used to import drift baseline arrays.
 - `--quiet`: suppress runtime logs.
 - `--verbose`: enable debug runtime logs.
 - `--vitis-config <VITIS_CONFIG>`: Vitis provider config file path.
@@ -277,6 +278,12 @@ When `--evidence-bundle-dir` is set, the CLI also writes:
 - `SHA256SUMS`: SHA-256 checksum manifest for bundle file integrity verification.
 
 Coverage-oriented observations may also expose drift/risk metrics including `baseline_version`, `baseline_entries_count`, `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
+
+When `--baseline-bundle` is set, the runtime imports the latest `capture_coverage_baseline` observation from the referenced bundle and auto-injects arrays into drift-aware tool calls:
+
+- `inspect_persistence_locations`: `baseline_entries`
+- `audit_account_changes`: `baseline_privileged_accounts`, `approved_privileged_accounts`
+- `correlate_process_network`: `baseline_exposed_bindings`, `expected_processes`
 
 `findings[]` object fields:
 

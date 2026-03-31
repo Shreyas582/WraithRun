@@ -8,7 +8,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+ - `--baseline-bundle <PATH>` runtime option to import baseline arrays from prior evidence bundles and auto-populate drift-aware tool arguments.
 
 ### Changed
 

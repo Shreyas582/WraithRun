@@ -10,6 +10,30 @@ pub struct ToolCall {
     pub args: Value,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CoverageBaseline {
+    #[serde(default)]
+    pub baseline_entries: Vec<String>,
+    #[serde(default)]
+    pub baseline_privileged_accounts: Vec<String>,
+    #[serde(default)]
+    pub approved_privileged_accounts: Vec<String>,
+    #[serde(default)]
+    pub baseline_exposed_bindings: Vec<String>,
+    #[serde(default)]
+    pub expected_processes: Vec<String>,
+}
+
+impl CoverageBaseline {
+    pub fn is_empty(&self) -> bool {
+        self.baseline_entries.is_empty()
+            && self.baseline_privileged_accounts.is_empty()
+            && self.approved_privileged_accounts.is_empty()
+            && self.baseline_exposed_bindings.is_empty()
+            && self.expected_processes.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentTurn {
     pub thought: String,
