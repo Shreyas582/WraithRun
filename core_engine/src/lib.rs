@@ -46,6 +46,8 @@ pub struct Finding {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunReport {
     pub task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_id: Option<String>,
     pub turns: Vec<AgentTurn>,
     pub final_answer: String,
     #[serde(default)]

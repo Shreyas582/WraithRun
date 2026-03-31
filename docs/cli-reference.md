@@ -52,6 +52,8 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--dry-run`: force dry-run mode.
 - `--format <FORMAT>`: output format. Values: `json`, `summary`, `markdown`. Default: `json`.
 - `--output-file <OUTPUT_FILE>`: write rendered output to file.
+- `--case-id <CASE_ID>`: optional investigation case identifier. Allowed chars: alphanumeric plus `- _ . :`.
+- `--evidence-bundle-dir <PATH>`: optional bundle export directory for `report.json`, `raw_observations.json`, and `SHA256SUMS`.
 - `--quiet`: suppress runtime logs.
 - `--verbose`: enable debug runtime logs.
 - `--vitis-config <VITIS_CONFIG>`: Vitis provider config file path.
@@ -263,9 +265,16 @@ Schema compatibility policy:
 Default run output (`--format json`) includes:
 
 - `task`: original task text.
+- `case_id`: optional case identifier when set via runtime settings.
 - `findings`: actionable finding list synthesized from collected evidence.
 - `turns`: tool-thought-observation trace.
 - `final_answer`: model/runtime conclusion string.
+
+When `--evidence-bundle-dir` is set, the CLI also writes:
+
+- `report.json`: full run report JSON.
+- `raw_observations.json`: extracted turn-level observations for evidence sharing.
+- `SHA256SUMS`: SHA-256 checksum manifest for bundle file integrity verification.
 
 Coverage-oriented observations may also expose drift/risk metrics including `baseline_version`, `baseline_entries_count`, `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
 
@@ -329,6 +338,12 @@ Process-network correlation:
 
 ```powershell
 wraithrun --task "Correlate process and network listener exposure" --format summary
+```
+
+Case-tagged bundle export:
+
+```powershell
+wraithrun --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-dir .\evidence\CASE-2026-IR-0042
 ```
 
 Capture reusable coverage baseline:

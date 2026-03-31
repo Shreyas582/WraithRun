@@ -49,6 +49,7 @@ impl<B: InferenceEngine> Agent<B> {
                 let findings = derive_findings(&turns, &final_answer);
                 return Ok(RunReport {
                     task: task.to_string(),
+                    case_id: None,
                     turns,
                     final_answer,
                     findings,
@@ -84,6 +85,7 @@ impl<B: InferenceEngine> Agent<B> {
 
             return Ok(RunReport {
                 task: task.to_string(),
+                case_id: None,
                 turns,
                 final_answer: output,
                 findings,
@@ -95,6 +97,7 @@ impl<B: InferenceEngine> Agent<B> {
 
         Ok(RunReport {
             task: task.to_string(),
+            case_id: None,
             turns,
             final_answer,
             findings,

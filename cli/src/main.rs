@@ -11,6 +11,7 @@ use cyber_tools::{ToolRegistry, ToolSpec};
 use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_CONFIG_FILE: &str = "wraithrun.toml";
@@ -150,6 +151,12 @@ struct Cli {
     #[arg(long)]
     output_file: Option<PathBuf>,
 
+    #[arg(long, value_name = "CASE_ID")]
+    case_id: Option<String>,
+
+    #[arg(long, value_name = "PATH")]
+    evidence_bundle_dir: Option<PathBuf>,
+
     #[arg(long, conflicts_with = "verbose")]
     quiet: bool,
 
@@ -177,6 +184,8 @@ struct SettingsFragment {
     live: Option<bool>,
     format: Option<OutputFormat>,
     output_file: Option<PathBuf>,
+    case_id: Option<String>,
+    evidence_bundle_dir: Option<PathBuf>,
     log: Option<LogMode>,
     vitis_config: Option<String>,
     vitis_cache_dir: Option<String>,
@@ -202,6 +211,8 @@ struct RuntimeConfig {
     live: bool,
     format: OutputFormat,
     output_file: Option<PathBuf>,
+    case_id: Option<String>,
+    evidence_bundle_dir: Option<PathBuf>,
     log_mode: LogMode,
     vitis_config: Option<String>,
     vitis_cache_dir: Option<String>,
@@ -220,6 +231,8 @@ struct RuntimeConfigView {
     temperature: f32,
     format: OutputFormat,
     output_file: Option<String>,
+    case_id: Option<String>,
+    evidence_bundle_dir: Option<String>,
     log_mode: LogMode,
     vitis_config: Option<String>,
     vitis_cache_dir: Option<String>,
@@ -237,10 +250,29 @@ struct RuntimeConfigSources {
     temperature: String,
     format: String,
     output_file: String,
+    case_id: String,
+    evidence_bundle_dir: String,
     log_mode: String,
     vitis_config: String,
     vitis_cache_dir: String,
     vitis_cache_key: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RawObservationsBundle {
+    task: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    case_id: Option<String>,
+    turns: Vec<RawObservationTurn>,
+}
+
+#[derive(Debug, Serialize)]
+struct RawObservationTurn {
+    turn: usize,
+    tool: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    args: Option<Value>,
+    observation: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -321,6 +353,8 @@ impl RuntimeConfig {
             live: false,
             format: OutputFormat::Json,
             output_file: None,
+            case_id: None,
+            evidence_bundle_dir: None,
             log_mode: LogMode::Normal,
             vitis_config: None,
             vitis_cache_dir: None,
@@ -353,6 +387,12 @@ impl RuntimeConfig {
         if let Some(output_file) = &fragment.output_file {
             self.output_file = Some(output_file.clone());
         }
+        if let Some(case_id) = &fragment.case_id {
+            self.case_id = Some(case_id.clone());
+        }
+        if let Some(evidence_bundle_dir) = &fragment.evidence_bundle_dir {
+            self.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
+        }
         if let Some(log_mode) = fragment.log {
             self.log_mode = log_mode;
         }
@@ -380,6 +420,8 @@ impl RuntimeConfigSources {
             temperature: "default".to_string(),
             format: "default".to_string(),
             output_file: "default".to_string(),
+            case_id: "default".to_string(),
+            evidence_bundle_dir: "default".to_string(),
             log_mode: "default".to_string(),
             vitis_config: "default".to_string(),
             vitis_cache_dir: "default".to_string(),
@@ -545,7 +587,15 @@ async fn main() -> Result<()> {
     let tools = ToolRegistry::with_default_tools();
     let agent = Agent::new(brain, tools).with_max_steps(runtime.max_steps);
 
-    let report = agent.run(&runtime.task).await?;
+    let mut report = agent.run(&runtime.task).await?;
+    if let Some(case_id) = runtime.case_id.as_ref() {
+        report.case_id = Some(case_id.trim().to_string());
+    }
+
+    if let Some(bundle_dir) = &runtime.evidence_bundle_dir {
+        write_evidence_bundle(bundle_dir, &report)?;
+    }
+
     let rendered = render_report(&report, runtime.format)?;
     if let Some(path) = &runtime.output_file {
         write_report_file(path, &rendered)?;
@@ -1326,6 +1376,8 @@ fn env_settings_fragment() -> Result<SettingsFragment> {
         live: read_env_bool("WRAITHRUN_LIVE")?,
         format: read_env_output_format("WRAITHRUN_FORMAT")?,
         output_file: read_env_path("WRAITHRUN_OUTPUT_FILE")?,
+        case_id: read_env_string("WRAITHRUN_CASE_ID")?,
+        evidence_bundle_dir: read_env_path("WRAITHRUN_EVIDENCE_BUNDLE_DIR")?,
         log: read_env_log_mode()?,
         vitis_config: read_env_string("WRAITHRUN_VITIS_CONFIG")?,
         vitis_cache_dir: read_env_string("WRAITHRUN_VITIS_CACHE_DIR")?,
@@ -1360,6 +1412,12 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     }
     if let Some(output_file) = &cli.output_file {
         runtime.output_file = Some(output_file.clone());
+    }
+    if let Some(case_id) = &cli.case_id {
+        runtime.case_id = Some(case_id.clone());
+    }
+    if let Some(evidence_bundle_dir) = &cli.evidence_bundle_dir {
+        runtime.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
     }
     if cli.quiet {
         runtime.log_mode = LogMode::Quiet;
@@ -1415,6 +1473,14 @@ fn apply_fragment_with_source(
     if let Some(output_file) = &fragment.output_file {
         runtime.output_file = Some(output_file.clone());
         sources.output_file = source.to_string();
+    }
+    if let Some(case_id) = &fragment.case_id {
+        runtime.case_id = Some(case_id.clone());
+        sources.case_id = source.to_string();
+    }
+    if let Some(evidence_bundle_dir) = &fragment.evidence_bundle_dir {
+        runtime.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
+        sources.evidence_bundle_dir = source.to_string();
     }
     if let Some(log_mode) = fragment.log {
         runtime.log_mode = log_mode;
@@ -1475,6 +1541,14 @@ fn apply_cli_overrides_with_source(
         runtime.output_file = Some(output_file.clone());
         sources.output_file = "cli --output-file".to_string();
     }
+    if let Some(case_id) = &cli.case_id {
+        runtime.case_id = Some(case_id.clone());
+        sources.case_id = "cli --case-id".to_string();
+    }
+    if let Some(evidence_bundle_dir) = &cli.evidence_bundle_dir {
+        runtime.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
+        sources.evidence_bundle_dir = "cli --evidence-bundle-dir".to_string();
+    }
     if cli.quiet {
         runtime.log_mode = LogMode::Quiet;
         sources.log_mode = "cli --quiet".to_string();
@@ -1506,6 +1580,32 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Result<()> {
     }
     if config.temperature.is_nan() || !(0.0..=2.0).contains(&config.temperature) {
         bail!("temperature must be between 0.0 and 2.0");
+    }
+
+    if let Some(case_id) = config.case_id.as_deref() {
+        validate_case_id(case_id)?;
+    }
+
+    Ok(())
+}
+
+fn validate_case_id(case_id: &str) -> Result<()> {
+    let trimmed = case_id.trim();
+    if trimmed.is_empty() {
+        bail!("case_id cannot be empty");
+    }
+
+    if trimmed.len() > 128 {
+        bail!("case_id must be 128 characters or fewer");
+    }
+
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'))
+    {
+        bail!(
+            "case_id may only contain ASCII letters, digits, and the characters '-', '_', '.', ':'"
+        );
     }
 
     Ok(())
@@ -1872,6 +1972,11 @@ impl RuntimeConfigView {
                 .output_file
                 .as_ref()
                 .map(|path| path.display().to_string()),
+            case_id: runtime.case_id.clone(),
+            evidence_bundle_dir: runtime
+                .evidence_bundle_dir
+                .as_ref()
+                .map(|path| path.display().to_string()),
             log_mode: runtime.log_mode,
             vitis_config: runtime.vitis_config.clone(),
             vitis_cache_dir: runtime.vitis_cache_dir.clone(),
@@ -2173,10 +2278,83 @@ fn write_report_file(path: &Path, report: &str) -> Result<()> {
     Ok(())
 }
 
+fn write_evidence_bundle(bundle_dir: &Path, report: &RunReport) -> Result<()> {
+    fs::create_dir_all(bundle_dir).with_context(|| {
+        format!(
+            "Failed creating evidence bundle directory {}",
+            bundle_dir.display()
+        )
+    })?;
+
+    let report_json = serde_json::to_string_pretty(report)?;
+    let report_path = bundle_dir.join("report.json");
+    fs::write(&report_path, report_json.as_bytes())
+        .with_context(|| format!("Failed writing evidence report {}", report_path.display()))?;
+
+    let raw_bundle = build_raw_observations_bundle(report);
+    let raw_json = serde_json::to_string_pretty(&raw_bundle)?;
+    let raw_path = bundle_dir.join("raw_observations.json");
+    fs::write(&raw_path, raw_json.as_bytes())
+        .with_context(|| format!("Failed writing raw observations {}", raw_path.display()))?;
+
+    let checksums_path = bundle_dir.join("SHA256SUMS");
+    let mut checksums = String::new();
+    let _ = writeln!(
+        checksums,
+        "{}  report.json",
+        sha256_hex(report_json.as_bytes())
+    );
+    let _ = writeln!(
+        checksums,
+        "{}  raw_observations.json",
+        sha256_hex(raw_json.as_bytes())
+    );
+    fs::write(&checksums_path, checksums.as_bytes()).with_context(|| {
+        format!(
+            "Failed writing evidence bundle checksums {}",
+            checksums_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
+fn build_raw_observations_bundle(report: &RunReport) -> RawObservationsBundle {
+    let turns = report
+        .turns
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, turn)| {
+            let observation = turn.observation.clone()?;
+            Some(RawObservationTurn {
+                turn: idx + 1,
+                tool: turn.tool_call.as_ref().map(|call| call.tool.clone()),
+                args: turn.tool_call.as_ref().map(|call| call.args.clone()),
+                observation,
+            })
+        })
+        .collect();
+
+    RawObservationsBundle {
+        task: report.task.clone(),
+        case_id: report.case_id.clone(),
+        turns,
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
 fn render_summary(report: &RunReport) -> String {
     let mut output = String::new();
 
     let _ = writeln!(output, "Task: {}", report.task);
+    if let Some(case_id) = report.case_id.as_deref() {
+        let _ = writeln!(output, "Case ID: {case_id}");
+    }
     let _ = writeln!(output, "Turns: {}", report.turns.len());
     let _ = writeln!(output, "Findings: {}", report.findings.len());
     let _ = writeln!(output, "Final Answer: {}", report.final_answer);
@@ -2240,6 +2418,9 @@ fn render_markdown(report: &RunReport) -> String {
     let _ = writeln!(output, "# WraithRun Report");
     let _ = writeln!(output);
     let _ = writeln!(output, "- Task: {}", report.task);
+    if let Some(case_id) = report.case_id.as_deref() {
+        let _ = writeln!(output, "- Case ID: {case_id}");
+    }
     let _ = writeln!(output, "- Turns: {}", report.turns.len());
     let _ = writeln!(output, "- Findings: {}", report.findings.len());
     let _ = writeln!(output, "- Final Answer: {}", report.final_answer);
@@ -2401,9 +2582,9 @@ mod tests {
         render_task_template_list, render_task_template_list_json, render_tool_detail,
         render_tool_detail_json, render_tool_list, render_tool_list_json,
         resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
-        resolve_task_for_run, run_describe_tool, run_init_config, run_list_tools, Cli,
-        DoctorReport, DoctorStatus, FileConfig, IntrospectionFormat, OutputFormat,
-        SettingsFragment, TaskTemplate, ToolRegistry,
+        resolve_task_for_run, run_describe_tool, run_init_config, run_list_tools,
+        write_evidence_bundle, Cli, DoctorReport, DoctorStatus, FileConfig, IntrospectionFormat,
+        OutputFormat, SettingsFragment, TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -2437,6 +2618,8 @@ mod tests {
             dry_run: false,
             format: None,
             output_file: None,
+            case_id: None,
+            evidence_bundle_dir: None,
             quiet: false,
             verbose: false,
             vitis_config: None,
@@ -2448,6 +2631,7 @@ mod tests {
     fn sample_report() -> RunReport {
         RunReport {
             task: "Check suspicious listener ports and summarize risk".to_string(),
+            case_id: Some("CASE-2026-0001".to_string()),
             turns: vec![AgentTurn {
                 thought: "<call>{...}</call>".to_string(),
                 tool_call: Some(ToolCall {
@@ -2487,6 +2671,7 @@ mod tests {
         let rendered =
             render_report(&report, OutputFormat::Summary).expect("summary render should work");
         assert!(rendered.contains("Task:"));
+        assert!(rendered.contains("Case ID: CASE-2026-0001"));
         assert!(rendered.contains("Findings:"));
         assert!(rendered.contains("tool: scan_network"));
         assert!(rendered.contains("Final Answer:"));
@@ -2498,9 +2683,52 @@ mod tests {
         let rendered =
             render_report(&report, OutputFormat::Markdown).expect("markdown render should work");
         assert!(rendered.contains("# WraithRun Report"));
+        assert!(rendered.contains("- Case ID: CASE-2026-0001"));
         assert!(rendered.contains("## Findings"));
         assert!(rendered.contains("## Turns"));
         assert!(rendered.contains("```json"));
+    }
+
+    #[test]
+    fn case_id_with_spaces_is_rejected() {
+        let mut cli = base_cli();
+        cli.case_id = Some("CASE 2026 INVALID".to_string());
+
+        let err = merge_sources(
+            &cli,
+            "test-task".to_string(),
+            None,
+            None,
+            None,
+            &SettingsFragment::default(),
+        )
+        .expect_err("invalid case id should fail validation");
+
+        assert!(err
+            .to_string()
+            .contains("case_id may only contain ASCII letters"));
+    }
+
+    #[test]
+    fn writes_evidence_bundle_files() {
+        let report = sample_report();
+        let bundle_dir = unique_temp_dir("wraithrun-evidence-bundle");
+
+        write_evidence_bundle(&bundle_dir, &report).expect("bundle write should succeed");
+
+        let report_path = bundle_dir.join("report.json");
+        let raw_path = bundle_dir.join("raw_observations.json");
+        let sums_path = bundle_dir.join("SHA256SUMS");
+
+        assert!(report_path.is_file(), "report.json should exist");
+        assert!(raw_path.is_file(), "raw_observations.json should exist");
+        assert!(sums_path.is_file(), "SHA256SUMS should exist");
+
+        let sums = fs::read_to_string(&sums_path).expect("checksums should be readable");
+        assert!(sums.contains("report.json"));
+        assert!(sums.contains("raw_observations.json"));
+
+        let _ = fs::remove_dir_all(&bundle_dir);
     }
 
     #[test]
@@ -3081,5 +3309,13 @@ mod tests {
             .expect("system time should be valid")
             .as_nanos();
         env::temp_dir().join(format!("{prefix}-{}-{stamp}.toml", std::process::id()))
+    }
+
+    fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be valid")
+            .as_nanos();
+        env::temp_dir().join(format!("{prefix}-{}-{stamp}", std::process::id()))
     }
 }

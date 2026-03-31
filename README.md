@@ -8,6 +8,7 @@ It is a local-first command-line tool for defenders and security engineers that:
 - expands host coverage with persistence inventory, account/role snapshots, and process-network correlation,
 - captures reusable coverage baselines so drift-aware checks can compare current host state against known-good snapshots,
 - supports baseline-aware drift signals and process-network risk scoring for faster triage prioritization,
+- supports case-tagged investigations and evidence bundle export (report, raw observations, checksums),
 - keeps evidence on your own machine by default,
 - returns a structured JSON report you can archive, diff, or automate around.
 
@@ -87,6 +88,7 @@ Each run prints a JSON report:
 Top-level fields:
 
 - `task`: your input task string.
+- `case_id`: optional investigation identifier when provided via CLI/config/env.
 - `findings`: normalized actionable findings with severity, confidence, evidence pointer, and recommended action.
 - `turns`: intermediate reasoning/tool interaction history.
 - `final_answer`: the model/runtime conclusion.
@@ -165,6 +167,8 @@ Common options:
 - `--temperature <F>` generation temperature (default `0.2`).
 - `--format <json|summary|markdown>` output format (default `json`).
 - `--output-file <PATH>` write rendered report to file and create directories if needed.
+- `--case-id <CASE_ID>` attach a case identifier to the run report (`A-Z a-z 0-9 - _ . :`, max 128 chars).
+- `--evidence-bundle-dir <PATH>` export `report.json`, `raw_observations.json`, and `SHA256SUMS` to a bundle directory.
 - `--quiet` suppress runtime logs.
 - `--verbose` enable debug-level runtime logs.
 
@@ -236,6 +240,12 @@ Run process-network correlation:
 
 ```powershell
 cargo run -p wraithrun -- --task "Correlate process and network listener exposure" --format summary
+```
+
+Run a case-tagged investigation and export an evidence bundle:
+
+```powershell
+cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-dir .\evidence\CASE-2026-IR-0042
 ```
 
 Capture reusable coverage baseline:

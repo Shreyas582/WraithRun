@@ -1,5 +1,7 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{env, fs};
 
 use serde_json::Value;
 
@@ -120,6 +122,71 @@ fn report_json_contract_contains_findings_layer() {
         evidence.get("field").and_then(Value::as_str).is_some(),
         "evidence_pointer.field should be present"
     );
+}
+
+#[test]
+fn report_json_contract_includes_case_id_when_provided() {
+    let output = run_capture(&[
+        "--task",
+        "Investigate unauthorized SSH keys",
+        "--case-id",
+        "CASE-2026-IR-0001",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    assert_eq!(
+        json.get("case_id").and_then(Value::as_str),
+        Some("CASE-2026-IR-0001")
+    );
+}
+
+#[test]
+fn evidence_bundle_export_writes_expected_files() {
+    let bundle_dir = unique_temp_dir("wraithrun-evidence-bundle");
+    let bundle_dir_text = bundle_dir.to_string_lossy().to_string();
+    let args = vec![
+        "--task",
+        "Investigate unauthorized SSH keys",
+        "--case-id",
+        "CASE-2026-IR-0002",
+        "--evidence-bundle-dir",
+        bundle_dir_text.as_str(),
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report_path = bundle_dir.join("report.json");
+    let raw_path = bundle_dir.join("raw_observations.json");
+    let sums_path = bundle_dir.join("SHA256SUMS");
+
+    assert!(report_path.is_file(), "report.json should exist");
+    assert!(raw_path.is_file(), "raw_observations.json should exist");
+    assert!(sums_path.is_file(), "SHA256SUMS should exist");
+
+    let report_json = fs::read_to_string(&report_path).expect("report.json should be readable");
+    let report_value: Value =
+        serde_json::from_str(&report_json).expect("report.json should be valid JSON");
+    assert_eq!(
+        report_value.get("case_id").and_then(Value::as_str),
+        Some("CASE-2026-IR-0002")
+    );
+
+    let checksums = fs::read_to_string(&sums_path).expect("SHA256SUMS should be readable");
+    assert!(checksums.contains("report.json"));
+    assert!(checksums.contains("raw_observations.json"));
+
+    let _ = fs::remove_dir_all(&bundle_dir);
 }
 
 #[test]
@@ -535,4 +602,12 @@ fn list_tools_filter_rejects_separator_only_query() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("at least one alphanumeric term"));
+}
+
+fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be valid")
+        .as_nanos();
+    env::temp_dir().join(format!("{prefix}-{}-{stamp}", std::process::id()))
 }

@@ -1,5 +1,27 @@
 # Upgrade Notes
 
+## Next (in progress toward v0.6.0)
+
+### Breaking/visible changes
+
+- Added optional `--case-id` for case-tagged run reports.
+- Added optional `--evidence-bundle-dir` to export auditable investigation artifacts (`report.json`, `raw_observations.json`, `SHA256SUMS`).
+- Run report JSON now includes optional `case_id` when set.
+
+### Migration examples
+
+Run with case metadata and evidence export:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-dir .\evidence\CASE-2026-IR-0042
+```
+
+### Recommended checks after upgrade
+
+- Validate downstream automation tolerates optional `case_id` in JSON output.
+- Confirm evidence bundle storage permissions and retention controls for exported artifacts.
+- Verify checksum verification procedure is documented in incident-response runbooks.
+
 ## v0.5.0
 
 ### Breaking/visible changes

@@ -31,6 +31,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate release documentation coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if ! echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid release tag format: $tag"
+            exit 1
+          fi
+
+          version="${tag#v}"
+
+          if ! grep -Eq "^## ${version} - " CHANGELOG.md; then
+            echo "CHANGELOG.md is missing a section for ${version}"
+            exit 1
+          fi
+
+          if ! grep -Eq "^## v${version}$" docs/upgrades.md; then
+            echo "docs/upgrades.md is missing a section header for v${version}"
+            exit 1
+          fi
+
+          for file in README.md docs/cli-reference.md docs/tool-reference.md; do
+            if [ ! -f "$file" ]; then
+              echo "Required release doc file is missing: $file"
+              exit 1
+            fi
+          done
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

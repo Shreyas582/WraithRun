@@ -38,7 +38,13 @@ Examples:
 
 1. Confirm all required CI jobs are green on `main`.
 2. Ensure high-priority security findings are triaged.
-3. Update `CHANGELOG.md` and verify release notes labels on merged PRs.
+3. Update release docs for shipped behavior:
+   - `CHANGELOG.md`
+   - `docs/upgrades.md`
+   - `README.md`
+   - `docs/cli-reference.md`
+   - `docs/tool-reference.md`
+   Then verify release notes labels on merged PRs.
 4. Validate core commands locally:
    - `cargo check`
    - `cargo test -p core_engine`
@@ -54,7 +60,7 @@ Release can proceed when:
 
 - CI passes on latest `main` commit.
 - No unresolved critical vulnerabilities in direct dependencies.
-- Release notes and changelog are coherent and accurate.
+- Release notes and docs (`CHANGELOG.md` + `docs/upgrades.md` + user-facing CLI docs) are coherent and accurate.
 
 Release should be blocked when:
 
