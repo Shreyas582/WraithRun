@@ -8,7 +8,21 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
- - `--baseline-bundle <PATH>` runtime option to import baseline arrays from prior evidence bundles and auto-populate drift-aware tool arguments.
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 0.6.1 - 2026-03-31
+
+### Added
+
+- `--baseline-bundle <PATH>` runtime option to import baseline arrays from prior evidence bundles and auto-populate drift-aware tool arguments.
 - `--verify-bundle <PATH>` mode for validating evidence bundle integrity against the recorded `SHA256SUMS` manifest.
 
 ### Changed

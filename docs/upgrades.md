@@ -4,6 +4,20 @@
 
 ### Breaking/visible changes
 
+- (none yet)
+
+### Migration examples
+
+- (none yet)
+
+### Recommended checks after upgrade
+
+- (none yet)
+
+## v0.6.1
+
+### Breaking/visible changes
+
 - Added optional `--baseline-bundle` runtime input to import drift baseline arrays from prior evidence bundles.
 - Added `--verify-bundle` mode to validate evidence bundle file integrity against `SHA256SUMS`.
 

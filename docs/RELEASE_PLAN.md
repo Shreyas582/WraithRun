@@ -90,7 +90,7 @@ Release should be blocked when:
 Use this runbook to execute the next release milestone end-to-end.
 
 1. Create a tracking issue from the Release Checklist template.
-2. Apply labels `release`, `milestone:v0.6.0` (or next milestone label), and priority labels as needed.
+2. Apply labels `release`, `milestone:v0.7.0` (or next milestone label), and priority labels as needed.
 3. Run milestone bootstrap workflow:
    - Workflow: `Milestone Bootstrap`
    - Inputs:
