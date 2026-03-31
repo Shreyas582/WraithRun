@@ -16,6 +16,7 @@ wraithrun --list-task-templates
 wraithrun --list-tools [OPTIONS]
 wraithrun --describe-tool <NAME> [OPTIONS]
 wraithrun --list-profiles [OPTIONS]
+wraithrun --verify-bundle <PATH> [OPTIONS]
 wraithrun --print-effective-config [OPTIONS]
 wraithrun --explain-effective-config [OPTIONS]
 wraithrun --init-config [--init-config-path <PATH>] [--force]
@@ -35,6 +36,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--tool-filter <QUERY>`: filter `--list-tools` results by name/description terms (case-insensitive, punctuation-normalized, multi-term support).
 - `--describe-tool <NAME>`: render details for one tool and exit. Accepts case-insensitive full names plus unique partial or hyphenated queries.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
+- `--verify-bundle <PATH>`: verify evidence bundle file integrity from a bundle directory or direct `SHA256SUMS` path.
 - `--introspection-format <INTROSPECTION_FORMAT>`: format for introspection modes. Values: `text`, `json`. Default: `text`.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
 - `--explain-effective-config`: print resolved runtime settings and per-field source attribution as JSON.
@@ -97,6 +99,7 @@ Behavior:
 - `--list-tools`
 - `--describe-tool`
 - `--list-profiles`
+- `--verify-bundle`
 
 `--list-task-templates` output includes built-in task template names and their prompt text.
 
@@ -145,7 +148,7 @@ When `--tool-filter` is used with `--list-tools`, only tools matching all query 
 
 `--init-config` output includes the target path and suggested follow-up commands.
 
-These modes are mutually exclusive with each other and with `--doctor`.
+These modes are mutually exclusive with each other and with task execution modes.
 
 ### Introspection JSON Schema
 
@@ -248,6 +251,27 @@ When `--introspection-format json` is used, the output shape is stable per mode.
 }
 ```
 
+`--verify-bundle ./evidence/CASE-2026-IR-0042 --introspection-format json`:
+
+```json
+{
+	"bundle_dir": "./evidence/CASE-2026-IR-0042",
+	"checksums_path": "./evidence/CASE-2026-IR-0042/SHA256SUMS",
+	"summary": {
+		"pass": 2,
+		"fail": 0
+	},
+	"entries": [
+		{
+			"file": "report.json",
+			"expected_sha256": "...",
+			"actual_sha256": "...",
+			"status": "pass"
+		}
+	]
+}
+```
+
 `selected_profile.source` values:
 
 - `built-in`
@@ -276,6 +300,8 @@ When `--evidence-bundle-dir` is set, the CLI also writes:
 - `report.json`: full run report JSON.
 - `raw_observations.json`: extracted turn-level observations for evidence sharing.
 - `SHA256SUMS`: SHA-256 checksum manifest for bundle file integrity verification.
+
+When `--verify-bundle` is set, the CLI validates `SHA256SUMS` entries against current bundle files and exits non-zero if any mismatches or missing files are detected.
 
 Coverage-oriented observations may also expose drift/risk metrics including `baseline_version`, `baseline_entries_count`, `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
 
@@ -351,6 +377,12 @@ Case-tagged bundle export:
 
 ```powershell
 wraithrun --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-dir .\evidence\CASE-2026-IR-0042
+```
+
+Evidence bundle integrity verification:
+
+```powershell
+wraithrun --verify-bundle .\evidence\CASE-2026-IR-0042 --introspection-format json
 ```
 
 Capture reusable coverage baseline:

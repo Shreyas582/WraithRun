@@ -64,7 +64,7 @@ enum TaskTemplate {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates"])]
+    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates", "verify_bundle"])]
     task: Option<String>,
 
     #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_stdin", "task_template"])]
@@ -159,6 +159,9 @@ struct Cli {
 
     #[arg(long, value_name = "PATH")]
     baseline_bundle: Option<PathBuf>,
+
+    #[arg(long, value_name = "PATH")]
+    verify_bundle: Option<PathBuf>,
 
     #[arg(long, conflicts_with = "verbose")]
     quiet: bool,
@@ -280,6 +283,42 @@ struct RawObservationTurn {
     #[serde(skip_serializing_if = "Option::is_none")]
     args: Option<Value>,
     observation: Value,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum BundleVerificationStatus {
+    Pass,
+    Missing,
+    Mismatch,
+    Unreadable,
+}
+
+#[derive(Debug, Serialize)]
+struct BundleVerificationEntry {
+    file: String,
+    expected_sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actual_sha256: Option<String>,
+    status: BundleVerificationStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BundleVerificationSummary {
+    pass: usize,
+    fail: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct BundleVerificationReport {
+    bundle_dir: String,
+    checksums_path: String,
+    summary: BundleVerificationSummary,
+    entries: Vec<BundleVerificationEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    parse_errors: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -578,6 +617,21 @@ async fn main() -> Result<()> {
         if report.has_failures() {
             bail!("doctor checks reported failures");
         }
+        return Ok(());
+    }
+
+    if let Some(path) = cli.verify_bundle.as_deref() {
+        let report = verify_evidence_bundle(path)?;
+        let rendered = match cli.introspection_format {
+            IntrospectionFormat::Text => render_bundle_verification_report(&report),
+            IntrospectionFormat::Json => render_bundle_verification_report_json(&report)?,
+        };
+        println!("{rendered}");
+
+        if report.summary.fail > 0 {
+            bail!("evidence bundle verification failed");
+        }
+
         return Ok(());
     }
 
@@ -1796,6 +1850,9 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     if cli.init_config {
         selected.push("--init-config");
     }
+    if cli.verify_bundle.is_some() {
+        selected.push("--verify-bundle");
+    }
 
     if selected.len() > 1 {
         bail!(
@@ -1813,10 +1870,11 @@ fn ensure_introspection_format_usage(cli: &Cli) -> Result<()> {
             || cli.list_task_templates
             || cli.list_tools
             || cli.describe_tool.is_some()
-            || cli.list_profiles)
+            || cli.list_profiles
+            || cli.verify_bundle.is_some())
     {
         bail!(
-            "--introspection-format only applies to --doctor, --list-task-templates, --list-tools, --describe-tool, or --list-profiles"
+            "--introspection-format only applies to --doctor, --list-task-templates, --list-tools, --describe-tool, --list-profiles, or --verify-bundle"
         );
     }
 
@@ -2453,6 +2511,215 @@ fn load_coverage_baseline_from_bundle(path: &Path) -> Result<CoverageBaseline> {
     Ok(coverage_baseline)
 }
 
+fn verify_evidence_bundle(path: &Path) -> Result<BundleVerificationReport> {
+    let checksums_path = resolve_checksums_path(path)?;
+    let bundle_dir = checksums_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+
+    let checksums_text = fs::read_to_string(&checksums_path).with_context(|| {
+        format!(
+            "Failed reading checksum manifest {}",
+            checksums_path.display()
+        )
+    })?;
+
+    let (entries, mut parse_errors) = verify_checksums_entries(&bundle_dir, &checksums_text);
+    if entries.is_empty() && parse_errors.is_empty() {
+        parse_errors.push("No checksum entries found in SHA256SUMS".to_string());
+    }
+
+    let pass_count = entries
+        .iter()
+        .filter(|entry| entry.status == BundleVerificationStatus::Pass)
+        .count();
+    let fail_count = entries
+        .iter()
+        .filter(|entry| entry.status != BundleVerificationStatus::Pass)
+        .count()
+        + parse_errors.len();
+
+    Ok(BundleVerificationReport {
+        bundle_dir: bundle_dir.display().to_string(),
+        checksums_path: checksums_path.display().to_string(),
+        summary: BundleVerificationSummary {
+            pass: pass_count,
+            fail: fail_count,
+        },
+        entries,
+        parse_errors,
+    })
+}
+
+fn resolve_checksums_path(path: &Path) -> Result<PathBuf> {
+    if path.is_dir() {
+        return Ok(path.join("SHA256SUMS"));
+    }
+
+    if path.is_file()
+        && path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|name| name.eq_ignore_ascii_case("SHA256SUMS"))
+            .unwrap_or(false)
+    {
+        return Ok(path.to_path_buf());
+    }
+
+    bail!(
+        "--verify-bundle must point to an evidence bundle directory or a SHA256SUMS file (got '{}')",
+        path.display()
+    )
+}
+
+fn verify_checksums_entries(
+    bundle_dir: &Path,
+    checksums_text: &str,
+) -> (Vec<BundleVerificationEntry>, Vec<String>) {
+    let mut entries = Vec::new();
+    let mut parse_errors = Vec::new();
+
+    for (idx, line) in checksums_text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let Some((expected_sha256, relative_path)) = parse_checksum_line(trimmed) else {
+            parse_errors.push(format!(
+                "Line {} is not a valid '<sha256>  <filename>' entry: {}",
+                idx + 1,
+                trimmed
+            ));
+            continue;
+        };
+
+        if !is_valid_sha256_hex(expected_sha256) {
+            parse_errors.push(format!(
+                "Line {} has invalid SHA-256 digest '{}': expected 64 hex characters",
+                idx + 1,
+                expected_sha256
+            ));
+            continue;
+        }
+
+        if relative_path.is_empty() {
+            parse_errors.push(format!("Line {} is missing a filename", idx + 1));
+            continue;
+        }
+
+        let file_path = bundle_dir.join(relative_path);
+        if !file_path.is_file() {
+            entries.push(BundleVerificationEntry {
+                file: relative_path.to_string(),
+                expected_sha256: expected_sha256.to_ascii_lowercase(),
+                actual_sha256: None,
+                status: BundleVerificationStatus::Missing,
+                detail: Some(format!("Missing file: {}", file_path.display())),
+            });
+            continue;
+        }
+
+        match fs::read(&file_path) {
+            Ok(bytes) => {
+                let actual_sha256 = sha256_hex(&bytes);
+                let status = if actual_sha256.eq_ignore_ascii_case(expected_sha256) {
+                    BundleVerificationStatus::Pass
+                } else {
+                    BundleVerificationStatus::Mismatch
+                };
+
+                entries.push(BundleVerificationEntry {
+                    file: relative_path.to_string(),
+                    expected_sha256: expected_sha256.to_ascii_lowercase(),
+                    actual_sha256: Some(actual_sha256),
+                    status,
+                    detail: None,
+                });
+            }
+            Err(err) => {
+                entries.push(BundleVerificationEntry {
+                    file: relative_path.to_string(),
+                    expected_sha256: expected_sha256.to_ascii_lowercase(),
+                    actual_sha256: None,
+                    status: BundleVerificationStatus::Unreadable,
+                    detail: Some(err.to_string()),
+                });
+            }
+        }
+    }
+
+    (entries, parse_errors)
+}
+
+fn parse_checksum_line(line: &str) -> Option<(&str, &str)> {
+    let split_idx = line
+        .char_indices()
+        .find(|(_, ch)| ch.is_ascii_whitespace())
+        .map(|(idx, _)| idx)?;
+
+    let (expected, remainder) = line.split_at(split_idx);
+    Some((expected, remainder.trim_start()))
+}
+
+fn is_valid_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn render_bundle_verification_report_json(report: &BundleVerificationReport) -> Result<String> {
+    serde_json::to_string_pretty(report).map_err(|err| anyhow!(err))
+}
+
+fn render_bundle_verification_report(report: &BundleVerificationReport) -> String {
+    let mut output = String::new();
+
+    let _ = writeln!(output, "WraithRun Evidence Bundle Verification");
+    let _ = writeln!(output, "Bundle: {}", report.bundle_dir);
+    let _ = writeln!(output, "Checksums: {}", report.checksums_path);
+    let _ = writeln!(
+        output,
+        "Summary: {} pass, {} fail",
+        report.summary.pass, report.summary.fail
+    );
+
+    if report.entries.is_empty() {
+        let _ = writeln!(output, "\nChecks: none");
+    } else {
+        let _ = writeln!(output, "\nChecks:");
+        for entry in &report.entries {
+            let status = match entry.status {
+                BundleVerificationStatus::Pass => "PASS",
+                BundleVerificationStatus::Missing => "FAIL",
+                BundleVerificationStatus::Mismatch => "FAIL",
+                BundleVerificationStatus::Unreadable => "FAIL",
+            };
+
+            let _ = writeln!(output, "- [{status}] {}", entry.file);
+            if entry.status != BundleVerificationStatus::Pass {
+                let _ = writeln!(output, "  expected: {}", entry.expected_sha256);
+                let _ = writeln!(
+                    output,
+                    "  actual: {}",
+                    entry.actual_sha256.as_deref().unwrap_or("(unavailable)")
+                );
+                if let Some(detail) = entry.detail.as_deref() {
+                    let _ = writeln!(output, "  detail: {detail}");
+                }
+            }
+        }
+    }
+
+    if !report.parse_errors.is_empty() {
+        let _ = writeln!(output, "\nParse Errors:");
+        for error in &report.parse_errors {
+            let _ = writeln!(output, "- [FAIL] {error}");
+        }
+    }
+
+    output.trim_end().to_string()
+}
+
 fn extract_coverage_baseline_from_observation(observation: &Value) -> CoverageBaseline {
     let baseline_entries = extract_string_array(
         observation
@@ -2765,14 +3032,15 @@ mod tests {
 
     use super::{
         ensure_introspection_format_usage, load_coverage_baseline_from_bundle, merge_sources,
-        render_doctor_report, render_doctor_report_json, render_effective_config_explanation_json,
-        render_effective_config_json, render_profile_list, render_profile_list_json, render_report,
-        render_task_template_list, render_task_template_list_json, render_tool_detail,
-        render_tool_detail_json, render_tool_list, render_tool_list_json,
-        resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
-        resolve_task_for_run, run_describe_tool, run_init_config, run_list_tools,
-        write_evidence_bundle, Cli, DoctorReport, DoctorStatus, FileConfig, IntrospectionFormat,
-        OutputFormat, SettingsFragment, TaskTemplate, ToolRegistry,
+        render_bundle_verification_report, render_doctor_report, render_doctor_report_json,
+        render_effective_config_explanation_json, render_effective_config_json,
+        render_profile_list, render_profile_list_json, render_report, render_task_template_list,
+        render_task_template_list_json, render_tool_detail, render_tool_detail_json,
+        render_tool_list, render_tool_list_json, resolve_effective_config_explanation,
+        resolve_init_config_path, resolve_task_for_mode, resolve_task_for_run, run_describe_tool,
+        run_init_config, run_list_tools, verify_evidence_bundle, write_evidence_bundle, Cli,
+        DoctorReport, DoctorStatus, FileConfig, IntrospectionFormat, OutputFormat,
+        SettingsFragment, TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -2809,6 +3077,7 @@ mod tests {
             case_id: None,
             evidence_bundle_dir: None,
             baseline_bundle: None,
+            verify_bundle: None,
             quiet: false,
             verbose: false,
             vitis_config: None,
@@ -2992,6 +3261,31 @@ mod tests {
             .contains("baseline_bundle file must be named raw_observations.json"));
 
         let _ = fs::remove_file(&invalid_path);
+    }
+
+    #[test]
+    fn verifies_evidence_bundle_and_reports_mismatch() {
+        let report = sample_report();
+        let bundle_dir = unique_temp_dir("wraithrun-verify-bundle");
+
+        write_evidence_bundle(&bundle_dir, &report).expect("bundle write should succeed");
+
+        let report_path = bundle_dir.join("report.json");
+        fs::write(&report_path, "{\"tampered\":true}\n").expect("tamper write should succeed");
+
+        let verification = verify_evidence_bundle(&bundle_dir).expect("verification should run");
+        assert_eq!(verification.summary.fail, 1);
+        assert!(verification
+            .entries
+            .iter()
+            .any(|entry| entry.file == "report.json"
+                && entry.status == super::BundleVerificationStatus::Mismatch));
+
+        let rendered = render_bundle_verification_report(&verification);
+        assert!(rendered.contains("Summary: 1 pass, 1 fail"));
+        assert!(rendered.contains("[FAIL] report.json"));
+
+        let _ = fs::remove_dir_all(&bundle_dir);
     }
 
     #[test]
@@ -3527,6 +3821,17 @@ mod tests {
 
         ensure_introspection_format_usage(&cli)
             .expect("json introspection should be allowed for describe-tool");
+    }
+
+    #[test]
+    fn allows_json_introspection_format_for_verify_bundle_mode() {
+        let mut cli = base_cli();
+        cli.task = None;
+        cli.verify_bundle = Some(Path::new(".").to_path_buf());
+        cli.introspection_format = IntrospectionFormat::Json;
+
+        ensure_introspection_format_usage(&cli)
+            .expect("json introspection should be allowed for verify-bundle");
     }
 
     #[test]

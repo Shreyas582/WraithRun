@@ -9,6 +9,7 @@ It is a local-first command-line tool for defenders and security engineers that:
 - captures reusable coverage baselines so drift-aware checks can compare current host state against known-good snapshots,
 - supports baseline-aware drift signals and process-network risk scoring for faster triage prioritization,
 - supports case-tagged investigations and evidence bundle export (report, raw observations, checksums),
+- verifies evidence bundle integrity against `SHA256SUMS` for auditable evidence handling,
 - keeps evidence on your own machine by default,
 - returns a structured JSON report you can archive, diff, or automate around.
 
@@ -150,7 +151,7 @@ Common options:
 - `--tool-filter <QUERY>` filter `--list-tools` output by tool name or description terms (case-insensitive, punctuation-normalized, supports multi-word queries).
 - `--describe-tool <NAME>` show details for one tool (name, description, argument schema). Accepts case-insensitive full names plus unique partial or hyphenated queries.
 - `--list-profiles` list built-in and config-defined profiles.
-- `--introspection-format <text|json>` output format for `--doctor`, `--list-task-templates`, `--list-tools`, `--describe-tool`, and `--list-profiles` (default `text`).
+- `--introspection-format <text|json>` output format for `--doctor`, `--list-task-templates`, `--list-tools`, `--describe-tool`, `--list-profiles`, and `--verify-bundle` (default `text`).
 - `--print-effective-config` render the resolved runtime settings as JSON and exit.
 - `--explain-effective-config` render resolved runtime settings plus per-field source attribution.
 - `--init-config` write a starter TOML config file and exit.
@@ -170,6 +171,7 @@ Common options:
 - `--case-id <CASE_ID>` attach a case identifier to the run report (`A-Z a-z 0-9 - _ . :`, max 128 chars).
 - `--evidence-bundle-dir <PATH>` export `report.json`, `raw_observations.json`, and `SHA256SUMS` to a bundle directory.
 - `--baseline-bundle <PATH>` import baseline arrays from a prior evidence bundle directory (or `raw_observations.json`) and auto-populate drift-aware tool arguments.
+- `--verify-bundle <PATH>` verify an evidence bundle directory (or direct `SHA256SUMS` path) against recorded checksums.
 - `--quiet` suppress runtime logs.
 - `--verbose` enable debug-level runtime logs.
 
@@ -259,6 +261,12 @@ Run a drift check with baseline arrays imported from a prior bundle:
 
 ```powershell
 cargo run -p wraithrun -- --task "Audit account change activity in admin group membership" --baseline-bundle .\evidence\CASE-2026-IR-0042
+```
+
+Verify evidence bundle integrity before sharing artifacts:
+
+```powershell
+cargo run -p wraithrun -- --verify-bundle .\evidence\CASE-2026-IR-0042 --introspection-format json
 ```
 
 Describe one tool:

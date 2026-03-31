@@ -9,10 +9,11 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 ### Added
 
  - `--baseline-bundle <PATH>` runtime option to import baseline arrays from prior evidence bundles and auto-populate drift-aware tool arguments.
+- `--verify-bundle <PATH>` mode for validating evidence bundle integrity against the recorded `SHA256SUMS` manifest.
 
 ### Changed
 
-- (none yet)
+- `--introspection-format json` now supports `--verify-bundle` output for automation-friendly integrity checks.
 
 ### Fixed
 

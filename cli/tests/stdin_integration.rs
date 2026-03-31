@@ -190,6 +190,103 @@ fn evidence_bundle_export_writes_expected_files() {
 }
 
 #[test]
+fn verify_bundle_mode_reports_success_as_json() {
+    let bundle_dir = unique_temp_dir("wraithrun-verify-mode-success");
+    let bundle_dir_text = bundle_dir.to_string_lossy().to_string();
+    let create_args = vec![
+        "--task",
+        "Investigate unauthorized SSH keys",
+        "--evidence-bundle-dir",
+        bundle_dir_text.as_str(),
+    ];
+    let create_output = run_capture(&create_args);
+
+    assert!(
+        create_output.status.success(),
+        "bundle create process failed: {}",
+        String::from_utf8_lossy(&create_output.stderr)
+    );
+
+    let verify_args = vec![
+        "--verify-bundle",
+        bundle_dir_text.as_str(),
+        "--introspection-format",
+        "json",
+    ];
+    let verify_output = run_capture(&verify_args);
+
+    assert!(
+        verify_output.status.success(),
+        "verify process failed: {}",
+        String::from_utf8_lossy(&verify_output.stderr)
+    );
+
+    let json = parse_stdout_json(&verify_output);
+    let summary = json
+        .get("summary")
+        .and_then(Value::as_object)
+        .expect("summary should be an object");
+    assert_eq!(summary.get("fail").and_then(Value::as_u64), Some(0));
+    assert!(
+        summary
+            .get("pass")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            >= 2,
+        "expected at least two verified files"
+    );
+
+    let entries = json
+        .get("entries")
+        .and_then(Value::as_array)
+        .expect("entries should be an array");
+    assert!(entries.iter().any(|entry| {
+        entry.get("file") == Some(&Value::String("report.json".to_string()))
+            && entry.get("status") == Some(&Value::String("pass".to_string()))
+    }));
+
+    let _ = fs::remove_dir_all(&bundle_dir);
+}
+
+#[test]
+fn verify_bundle_mode_fails_when_bundle_is_tampered() {
+    let bundle_dir = unique_temp_dir("wraithrun-verify-mode-fail");
+    let bundle_dir_text = bundle_dir.to_string_lossy().to_string();
+    let create_args = vec![
+        "--task",
+        "Investigate unauthorized SSH keys",
+        "--evidence-bundle-dir",
+        bundle_dir_text.as_str(),
+    ];
+    let create_output = run_capture(&create_args);
+
+    assert!(
+        create_output.status.success(),
+        "bundle create process failed: {}",
+        String::from_utf8_lossy(&create_output.stderr)
+    );
+
+    let report_path = bundle_dir.join("report.json");
+    fs::write(&report_path, "{\"tampered\":true}\n").expect("tamper write should succeed");
+
+    let verify_args = vec!["--verify-bundle", bundle_dir_text.as_str()];
+    let verify_output = run_capture(&verify_args);
+
+    assert!(
+        !verify_output.status.success(),
+        "verify process should fail for tampered bundle"
+    );
+
+    let stdout = String::from_utf8_lossy(&verify_output.stdout);
+    assert!(stdout.contains("[FAIL] report.json"));
+
+    let stderr = String::from_utf8_lossy(&verify_output.stderr);
+    assert!(stderr.contains("verification failed"));
+
+    let _ = fs::remove_dir_all(&bundle_dir);
+}
+
+#[test]
 fn baseline_bundle_import_populates_drift_tool_arguments() {
     let baseline_dir = unique_temp_dir("wraithrun-baseline-import");
     fs::create_dir_all(&baseline_dir).expect("baseline directory should be created");

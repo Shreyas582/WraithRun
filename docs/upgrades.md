@@ -5,6 +5,7 @@
 ### Breaking/visible changes
 
 - Added optional `--baseline-bundle` runtime input to import drift baseline arrays from prior evidence bundles.
+- Added `--verify-bundle` mode to validate evidence bundle file integrity against `SHA256SUMS`.
 
 ### Migration examples
 
@@ -14,9 +15,16 @@ Load prior baseline arrays while running account drift checks:
 .\wraithrun.exe --task "Audit account change activity in admin group membership" --baseline-bundle .\evidence\CASE-2026-IR-0042
 ```
 
+Verify evidence bundle integrity before sharing:
+
+```powershell
+.\wraithrun.exe --verify-bundle .\evidence\CASE-2026-IR-0042 --introspection-format json
+```
+
 ### Recommended checks after upgrade
 
 - Ensure baseline bundles retained for drift workflows include `raw_observations.json` with a `capture_coverage_baseline` tool observation.
+- Gate evidence sharing steps on successful `--verify-bundle` checks to avoid distributing tampered or incomplete bundles.
 
 ## v0.6.0
 
