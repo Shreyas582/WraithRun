@@ -73,3 +73,19 @@
 - name: milestone:v0.4.2
   description: Planned scope for v0.4.2
   color: "6F42C1"
+
+- name: milestone:v0.5.0
+  description: Planned scope for v0.5.0
+  color: "6F42C1"
+
+- name: milestone:v0.6.0
+  description: Planned scope for v0.6.0
+  color: "6F42C1"
+
+- name: milestone:v0.7.0
+  description: Planned scope for v0.7.0
+  color: "6F42C1"
+
+- name: milestone:v0.8.0
+  description: Planned scope for v0.8.0
+  color: "6F42C1"

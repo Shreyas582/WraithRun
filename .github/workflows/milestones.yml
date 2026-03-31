@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       title:
-        description: "Milestone title (example: v0.2.0)"
-        required: true
+        description: "Milestone title (example: v0.5.0). Optional when seed_roadmap=true."
+        required: false
         type: string
       description:
         description: "Milestone description"
@@ -15,6 +15,11 @@ on:
         description: "Due date in YYYY-MM-DD (optional)"
         required: false
         type: string
+      seed_roadmap:
+        description: "Upsert the canonical roadmap milestones (v0.5.0-v0.8.0)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -22,7 +27,7 @@ permissions:
 
 jobs:
   upsert-milestone:
-    name: Create milestone if missing
+    name: Upsert milestone(s)
     runs-on: ubuntu-latest
     steps:
       - name: Upsert milestone
@@ -32,17 +37,41 @@ jobs:
             const title = core.getInput("title").trim();
             const description = core.getInput("description");
             const dueDate = core.getInput("due_date").trim();
+            const seedRoadmap = core.getBooleanInput("seed_roadmap");
             const { owner, repo } = context.repo;
-
-            if (!title) {
-              core.setFailed("Milestone title is required.");
-              return;
-            }
 
             if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
               core.setFailed("due_date must match YYYY-MM-DD.");
               return;
             }
+
+            if (!title && !seedRoadmap) {
+              core.setFailed("Provide title or set seed_roadmap=true.");
+              return;
+            }
+
+            const roadmapMilestones = [
+              {
+                title: "v0.5.0",
+                description:
+                  "Coverage Expansion: add high-value host checks beyond current four tools, starting with persistence locations, account/privilege changes, and process-network correlation.",
+              },
+              {
+                title: "v0.6.0",
+                description:
+                  "Case Workflow: add case-id and evidence bundle export (report + raw observations + checksums) so runs are investigation-ready, shareable, and auditable.",
+              },
+              {
+                title: "v0.7.0",
+                description:
+                  "Automation Integration: version the output contract and add machine-consumable adapters and exit-code policy for CI/SIEM pipelines.",
+              },
+              {
+                title: "v0.8.0",
+                description:
+                  "Live-Mode Practicality: add model-pack doctor checks and predictable fallback behavior so live mode is easy to run in real environments, not just labs.",
+              },
+            ];
 
             const milestones = await github.paginate(github.rest.issues.listMilestones, {
               owner,
@@ -51,18 +80,71 @@ jobs:
               per_page: 100,
             });
 
-            const existing = milestones.find((m) => m.title === title);
-            if (existing) {
-              core.notice(`Milestone '${title}' already exists (state: ${existing.state}).`);
-              return;
+            const targetMap = new Map();
+            if (seedRoadmap) {
+              for (const roadmapMilestone of roadmapMilestones) {
+                targetMap.set(roadmapMilestone.title, roadmapMilestone);
+              }
             }
 
-            await github.rest.issues.createMilestone({
-              owner,
-              repo,
-              title,
-              description: description || undefined,
-              due_on: dueDate ? new Date(`${dueDate}T00:00:00Z`).toISOString() : undefined,
-            });
+            if (title) {
+              targetMap.set(title, {
+                title,
+                description,
+                dueDate,
+              });
+            }
 
-            core.notice(`Created milestone '${title}'.`);
+            const targets = Array.from(targetMap.values());
+
+            const resolveDueOn = (dateText) => {
+              if (!dateText) {
+                return undefined;
+              }
+
+              return new Date(`${dateText}T00:00:00Z`).toISOString();
+            };
+
+            for (const target of targets) {
+              const existing = milestones.find((m) => m.title === target.title);
+              const dueOn = resolveDueOn(target.dueDate);
+              const descriptionValue = target.description || undefined;
+
+              if (existing) {
+                const existingDescription = existing.description || "";
+                const hasDescriptionChange =
+                  !!descriptionValue && descriptionValue !== existingDescription;
+                const hasDueDateChange =
+                  !!dueOn && !(existing.due_on || "").startsWith(target.dueDate);
+
+                if (!hasDescriptionChange && !hasDueDateChange) {
+                  core.notice(
+                    `Milestone '${target.title}' already exists (state: ${existing.state}).`
+                  );
+                  continue;
+                }
+
+                await github.rest.issues.updateMilestone({
+                  owner,
+                  repo,
+                  milestone_number: existing.number,
+                  title: target.title,
+                  description: descriptionValue || existing.description || undefined,
+                  due_on: dueOn || existing.due_on || undefined,
+                  state: existing.state,
+                });
+
+                core.notice(`Updated milestone '${target.title}'.`);
+                continue;
+              }
+
+              await github.rest.issues.createMilestone({
+                owner,
+                repo,
+                title: target.title,
+                description: descriptionValue,
+                due_on: dueOn,
+              });
+
+              core.notice(`Created milestone '${target.title}'.`);
+            }

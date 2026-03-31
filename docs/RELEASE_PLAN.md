@@ -68,17 +68,29 @@ Release should be blocked when:
 - Refresh roadmap in `README.md` if priorities changed.
 - Optionally create next milestone tracking issue.
 
-## Immediate Next Steps for v0.4.2
+## Roadmap Milestones (v0.5.0-v0.8.0)
+
+- `v0.5.0` Coverage Expansion:
+   Add high-value host checks beyond current four tools, starting with persistence locations, account/privilege changes, and process-network correlation.
+- `v0.6.0` Case Workflow:
+   Add case-id and evidence bundle export (report + raw observations + checksums) so runs are investigation-ready, shareable, and auditable.
+- `v0.7.0` Automation Integration:
+   Version the output contract and add machine-consumable adapters and exit-code policy for CI/SIEM pipelines.
+- `v0.8.0` Live-Mode Practicality:
+   Add model-pack doctor checks and predictable fallback behavior so live mode is easy to run in real environments, not just labs.
+
+## Immediate Next Steps for v0.5.0
 
 Use this runbook to execute the next release milestone end-to-end.
 
 1. Create a tracking issue from the Release Checklist template.
-2. Apply labels `release`, `milestone:v0.4.2` (or next milestone label), and priority labels as needed.
+2. Apply labels `release`, `milestone:v0.5.0` (or next milestone label), and priority labels as needed.
 3. Run milestone bootstrap workflow:
    - Workflow: `Milestone Bootstrap`
    - Inputs:
-   - `title`: `v0.4.2`
-   - `description`: `Post-v0.4.1 refinements and automation hardening`
+   - `seed_roadmap`: `true` (upserts canonical milestones `v0.5.0` through `v0.8.0`)
+   - `title`: `v0.5.0`
+   - `description`: `Coverage Expansion: add high-value host checks beyond current four tools, starting with persistence locations, account/privilege changes, and process-network correlation.`
      - `due_date`: optional (`YYYY-MM-DD`)
 4. Verify quality gates locally:
    - `cargo check`
@@ -86,11 +98,11 @@ Use this runbook to execute the next release milestone end-to-end.
    - `cargo check -p inference_bridge --features vitis`
 5. Verify GitHub Actions CI is green on latest `main`.
 6. Tag and publish:
-   - `git tag -a v0.4.2 -m "Release v0.4.2"`
-   - `git push origin v0.4.2`
+   - `git tag -a v0.5.0 -m "Release v0.5.0"`
+   - `git push origin v0.5.0`
 7. Confirm `Release` workflow completed and assets are attached.
 8. Close the milestone and open a follow-on milestone.
-9. Open planning issue for `v0.4.2` scope.
+9. Open planning issue for `v0.5.0` scope.
 
 ## Labels and Milestones
 
