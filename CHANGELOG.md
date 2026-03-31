@@ -8,6 +8,20 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 0.6.0 - 2026-03-31
+
+### Added
+
 - Optional case workflow fields via `--case-id` and `--evidence-bundle-dir`.
 - Evidence bundle export artifacts: `report.json`, `raw_observations.json`, and `SHA256SUMS`.
 

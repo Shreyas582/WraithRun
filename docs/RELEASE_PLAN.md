@@ -85,7 +85,7 @@ Release should be blocked when:
 - `v0.8.0` Live-Mode Practicality:
    Add model-pack doctor checks and predictable fallback behavior so live mode is easy to run in real environments, not just labs.
 
-## Immediate Next Steps for v0.6.0
+## Immediate Next Steps for v0.7.0
 
 Use this runbook to execute the next release milestone end-to-end.
 
@@ -95,8 +95,8 @@ Use this runbook to execute the next release milestone end-to-end.
    - Workflow: `Milestone Bootstrap`
    - Inputs:
    - `seed_roadmap`: `true` (upserts canonical milestones `v0.5.0` through `v0.8.0`)
-   - `title`: `v0.6.0`
-   - `description`: `Case Workflow: add case-id and evidence bundle export (report + raw observations + checksums) so runs are investigation-ready, shareable, and auditable.`
+   - `title`: `v0.7.0`
+   - `description`: `Automation Integration: version the output contract and add machine-consumable adapters and exit-code policy for CI/SIEM pipelines.`
      - `due_date`: optional (`YYYY-MM-DD`)
 4. Verify quality gates locally:
    - `cargo check`
@@ -104,11 +104,11 @@ Use this runbook to execute the next release milestone end-to-end.
    - `cargo check -p inference_bridge --features vitis`
 5. Verify GitHub Actions CI is green on latest `main`.
 6. Tag and publish:
-   - `git tag -a v0.6.0 -m "Release v0.6.0"`
-   - `git push origin v0.6.0`
+   - `git tag -a v0.7.0 -m "Release v0.7.0"`
+   - `git push origin v0.7.0`
 7. Confirm `Release` workflow completed and assets are attached.
 8. Close the milestone and open a follow-on milestone.
-9. Open planning issue for `v0.6.0` scope.
+9. Open planning issue for `v0.7.0` scope.
 
 ## Labels and Milestones
 

@@ -1,6 +1,20 @@
 # Upgrade Notes
 
-## Next (in progress toward v0.6.0)
+## Next (in progress toward v0.7.0)
+
+### Breaking/visible changes
+
+- (none yet)
+
+### Migration examples
+
+- (none yet)
+
+### Recommended checks after upgrade
+
+- (none yet)
+
+## v0.6.0
 
 ### Breaking/visible changes
 
