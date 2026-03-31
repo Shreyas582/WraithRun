@@ -190,6 +190,58 @@ fn evidence_bundle_export_writes_expected_files() {
 }
 
 #[test]
+fn evidence_bundle_archive_export_writes_expected_artifact() {
+    let bundle_dir = unique_temp_dir("wraithrun-evidence-archive");
+    fs::create_dir_all(&bundle_dir).expect("archive directory should be created");
+
+    let archive_path = bundle_dir.join("CASE-2026-IR-0003.tar");
+    let archive_path_text = archive_path.to_string_lossy().to_string();
+    let args = vec![
+        "--task",
+        "Investigate unauthorized SSH keys",
+        "--case-id",
+        "CASE-2026-IR-0003",
+        "--evidence-bundle-archive",
+        archive_path_text.as_str(),
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(archive_path.is_file(), "archive should be created");
+
+    let archive_file = fs::File::open(&archive_path).expect("archive should be readable");
+    let mut archive = tar::Archive::new(archive_file);
+    let mut entries = Vec::new();
+
+    for entry in archive.entries().expect("archive entries should load") {
+        let entry = entry.expect("archive entry should parse");
+        entries.push(
+            entry
+                .path()
+                .expect("entry path should resolve")
+                .to_string_lossy()
+                .to_string(),
+        );
+    }
+
+    assert_eq!(
+        entries,
+        vec![
+            "report.json".to_string(),
+            "raw_observations.json".to_string(),
+            "SHA256SUMS".to_string(),
+        ]
+    );
+
+    let _ = fs::remove_dir_all(&bundle_dir);
+}
+
+#[test]
 fn verify_bundle_mode_reports_success_as_json() {
     let bundle_dir = unique_temp_dir("wraithrun-verify-mode-success");
     let bundle_dir_text = bundle_dir.to_string_lossy().to_string();

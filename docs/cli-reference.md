@@ -56,6 +56,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--output-file <OUTPUT_FILE>`: write rendered output to file.
 - `--case-id <CASE_ID>`: optional investigation case identifier. Allowed chars: alphanumeric plus `- _ . :`.
 - `--evidence-bundle-dir <PATH>`: optional bundle export directory for `report.json`, `raw_observations.json`, and `SHA256SUMS`.
+- `--evidence-bundle-archive <PATH>`: optional deterministic tar archive export path containing `report.json`, `raw_observations.json`, and `SHA256SUMS`.
 - `--baseline-bundle <PATH>`: optional path to a prior evidence bundle directory (or `raw_observations.json`) used to import drift baseline arrays.
 - `--quiet`: suppress runtime logs.
 - `--verbose`: enable debug runtime logs.
@@ -301,6 +302,8 @@ When `--evidence-bundle-dir` is set, the CLI also writes:
 - `raw_observations.json`: extracted turn-level observations for evidence sharing.
 - `SHA256SUMS`: SHA-256 checksum manifest for bundle file integrity verification.
 
+When `--evidence-bundle-archive` is set, the CLI writes a deterministic tar archive that contains the same three files in fixed order: `report.json`, `raw_observations.json`, then `SHA256SUMS`.
+
 When `--verify-bundle` is set, the CLI validates `SHA256SUMS` entries against current bundle files and exits non-zero if any mismatches or missing files are detected.
 
 Coverage-oriented observations may also expose drift/risk metrics including `baseline_version`, `baseline_entries_count`, `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
@@ -377,6 +380,12 @@ Case-tagged bundle export:
 
 ```powershell
 wraithrun --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-dir .\evidence\CASE-2026-IR-0042
+```
+
+Case-tagged deterministic archive export:
+
+```powershell
+wraithrun --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-archive .\evidence\CASE-2026-IR-0042.tar
 ```
 
 Evidence bundle integrity verification:

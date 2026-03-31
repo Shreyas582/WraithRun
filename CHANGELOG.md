@@ -8,7 +8,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- Added `--evidence-bundle-archive <PATH>` for deterministic single-file tar export of evidence bundle artifacts.
 
 ### Changed
 

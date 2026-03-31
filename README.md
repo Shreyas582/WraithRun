@@ -170,6 +170,7 @@ Common options:
 - `--output-file <PATH>` write rendered report to file and create directories if needed.
 - `--case-id <CASE_ID>` attach a case identifier to the run report (`A-Z a-z 0-9 - _ . :`, max 128 chars).
 - `--evidence-bundle-dir <PATH>` export `report.json`, `raw_observations.json`, and `SHA256SUMS` to a bundle directory.
+- `--evidence-bundle-archive <PATH>` export a deterministic tar archive containing `report.json`, `raw_observations.json`, and `SHA256SUMS`.
 - `--baseline-bundle <PATH>` import baseline arrays from a prior evidence bundle directory (or `raw_observations.json`) and auto-populate drift-aware tool arguments.
 - `--verify-bundle <PATH>` verify an evidence bundle directory (or direct `SHA256SUMS` path) against recorded checksums.
 - `--quiet` suppress runtime logs.
@@ -249,6 +250,12 @@ Run a case-tagged investigation and export an evidence bundle:
 
 ```powershell
 cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-dir .\evidence\CASE-2026-IR-0042
+```
+
+Export a deterministic single-file evidence bundle archive:
+
+```powershell
+cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-archive .\evidence\CASE-2026-IR-0042.tar
 ```
 
 Capture reusable coverage baseline:

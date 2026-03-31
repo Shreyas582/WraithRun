@@ -14,6 +14,7 @@ sha2.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tar.workspace = true
 core_engine = { path = "../core_engine" }
 cyber_tools = { path = "../cyber_tools" }
 inference_bridge = { path = "../inference_bridge" }

@@ -24,3 +24,4 @@ thiserror = "1.0"
 tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "process", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tar = "0.4"

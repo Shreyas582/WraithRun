@@ -17,6 +17,7 @@ format = "json"
 log = "normal"
 # case_id = "CASE-2026-0001"
 # evidence_bundle_dir = "./evidence/CASE-2026-0001"
+# evidence_bundle_archive = "./evidence/CASE-2026-0001.tar"
 # baseline_bundle = "./evidence/CASE-2026-0001"
 
 [profiles.local-lab]

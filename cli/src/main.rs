@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{IsTerminal, Read};
+use std::io::{Cursor, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::{fmt::Write as _, fs};
 
@@ -158,6 +158,9 @@ struct Cli {
     evidence_bundle_dir: Option<PathBuf>,
 
     #[arg(long, value_name = "PATH")]
+    evidence_bundle_archive: Option<PathBuf>,
+
+    #[arg(long, value_name = "PATH")]
     baseline_bundle: Option<PathBuf>,
 
     #[arg(long, value_name = "PATH")]
@@ -192,6 +195,7 @@ struct SettingsFragment {
     output_file: Option<PathBuf>,
     case_id: Option<String>,
     evidence_bundle_dir: Option<PathBuf>,
+    evidence_bundle_archive: Option<PathBuf>,
     baseline_bundle: Option<PathBuf>,
     log: Option<LogMode>,
     vitis_config: Option<String>,
@@ -220,6 +224,7 @@ struct RuntimeConfig {
     output_file: Option<PathBuf>,
     case_id: Option<String>,
     evidence_bundle_dir: Option<PathBuf>,
+    evidence_bundle_archive: Option<PathBuf>,
     baseline_bundle: Option<PathBuf>,
     log_mode: LogMode,
     vitis_config: Option<String>,
@@ -241,6 +246,7 @@ struct RuntimeConfigView {
     output_file: Option<String>,
     case_id: Option<String>,
     evidence_bundle_dir: Option<String>,
+    evidence_bundle_archive: Option<String>,
     baseline_bundle: Option<String>,
     log_mode: LogMode,
     vitis_config: Option<String>,
@@ -261,6 +267,7 @@ struct RuntimeConfigSources {
     output_file: String,
     case_id: String,
     evidence_bundle_dir: String,
+    evidence_bundle_archive: String,
     baseline_bundle: String,
     log_mode: String,
     vitis_config: String,
@@ -283,6 +290,12 @@ struct RawObservationTurn {
     #[serde(skip_serializing_if = "Option::is_none")]
     args: Option<Value>,
     observation: Value,
+}
+
+#[derive(Debug)]
+struct EvidenceBundleArtifact {
+    relative_path: &'static str,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -401,6 +414,7 @@ impl RuntimeConfig {
             output_file: None,
             case_id: None,
             evidence_bundle_dir: None,
+            evidence_bundle_archive: None,
             baseline_bundle: None,
             log_mode: LogMode::Normal,
             vitis_config: None,
@@ -440,6 +454,9 @@ impl RuntimeConfig {
         if let Some(evidence_bundle_dir) = &fragment.evidence_bundle_dir {
             self.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
         }
+        if let Some(evidence_bundle_archive) = &fragment.evidence_bundle_archive {
+            self.evidence_bundle_archive = Some(evidence_bundle_archive.clone());
+        }
         if let Some(baseline_bundle) = &fragment.baseline_bundle {
             self.baseline_bundle = Some(baseline_bundle.clone());
         }
@@ -472,6 +489,7 @@ impl RuntimeConfigSources {
             output_file: "default".to_string(),
             case_id: "default".to_string(),
             evidence_bundle_dir: "default".to_string(),
+            evidence_bundle_archive: "default".to_string(),
             baseline_bundle: "default".to_string(),
             log_mode: "default".to_string(),
             vitis_config: "default".to_string(),
@@ -665,6 +683,10 @@ async fn main() -> Result<()> {
 
     if let Some(bundle_dir) = &runtime.evidence_bundle_dir {
         write_evidence_bundle(bundle_dir, &report)?;
+    }
+
+    if let Some(archive_path) = &runtime.evidence_bundle_archive {
+        write_evidence_bundle_archive(archive_path, &report)?;
     }
 
     let rendered = render_report(&report, runtime.format)?;
@@ -1449,6 +1471,7 @@ fn env_settings_fragment() -> Result<SettingsFragment> {
         output_file: read_env_path("WRAITHRUN_OUTPUT_FILE")?,
         case_id: read_env_string("WRAITHRUN_CASE_ID")?,
         evidence_bundle_dir: read_env_path("WRAITHRUN_EVIDENCE_BUNDLE_DIR")?,
+        evidence_bundle_archive: read_env_path("WRAITHRUN_EVIDENCE_BUNDLE_ARCHIVE")?,
         baseline_bundle: read_env_path("WRAITHRUN_BASELINE_BUNDLE")?,
         log: read_env_log_mode()?,
         vitis_config: read_env_string("WRAITHRUN_VITIS_CONFIG")?,
@@ -1490,6 +1513,9 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     }
     if let Some(evidence_bundle_dir) = &cli.evidence_bundle_dir {
         runtime.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
+    }
+    if let Some(evidence_bundle_archive) = &cli.evidence_bundle_archive {
+        runtime.evidence_bundle_archive = Some(evidence_bundle_archive.clone());
     }
     if let Some(baseline_bundle) = &cli.baseline_bundle {
         runtime.baseline_bundle = Some(baseline_bundle.clone());
@@ -1556,6 +1582,10 @@ fn apply_fragment_with_source(
     if let Some(evidence_bundle_dir) = &fragment.evidence_bundle_dir {
         runtime.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
         sources.evidence_bundle_dir = source.to_string();
+    }
+    if let Some(evidence_bundle_archive) = &fragment.evidence_bundle_archive {
+        runtime.evidence_bundle_archive = Some(evidence_bundle_archive.clone());
+        sources.evidence_bundle_archive = source.to_string();
     }
     if let Some(baseline_bundle) = &fragment.baseline_bundle {
         runtime.baseline_bundle = Some(baseline_bundle.clone());
@@ -1627,6 +1657,10 @@ fn apply_cli_overrides_with_source(
     if let Some(evidence_bundle_dir) = &cli.evidence_bundle_dir {
         runtime.evidence_bundle_dir = Some(evidence_bundle_dir.clone());
         sources.evidence_bundle_dir = "cli --evidence-bundle-dir".to_string();
+    }
+    if let Some(evidence_bundle_archive) = &cli.evidence_bundle_archive {
+        runtime.evidence_bundle_archive = Some(evidence_bundle_archive.clone());
+        sources.evidence_bundle_archive = "cli --evidence-bundle-archive".to_string();
     }
     if let Some(baseline_bundle) = &cli.baseline_bundle {
         runtime.baseline_bundle = Some(baseline_bundle.clone());
@@ -2093,6 +2127,10 @@ impl RuntimeConfigView {
                 .evidence_bundle_dir
                 .as_ref()
                 .map(|path| path.display().to_string()),
+            evidence_bundle_archive: runtime
+                .evidence_bundle_archive
+                .as_ref()
+                .map(|path| path.display().to_string()),
             baseline_bundle: runtime
                 .baseline_bundle
                 .as_ref()
@@ -2406,18 +2444,45 @@ fn write_evidence_bundle(bundle_dir: &Path, report: &RunReport) -> Result<()> {
         )
     })?;
 
-    let report_json = serde_json::to_string_pretty(report)?;
-    let report_path = bundle_dir.join("report.json");
-    fs::write(&report_path, report_json.as_bytes())
-        .with_context(|| format!("Failed writing evidence report {}", report_path.display()))?;
+    let artifacts = build_evidence_bundle_artifacts(report)?;
+    for artifact in artifacts {
+        let artifact_path = bundle_dir.join(artifact.relative_path);
+        fs::write(&artifact_path, &artifact.bytes)
+            .with_context(|| format!("Failed writing {}", artifact_path.display()))?;
+    }
 
+    Ok(())
+}
+
+fn write_evidence_bundle_archive(archive_path: &Path, report: &RunReport) -> Result<()> {
+    if let Some(parent) = archive_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed creating directory {}", parent.display()))?;
+        }
+    }
+
+    let artifacts = build_evidence_bundle_artifacts(report)?;
+    let archive_file = fs::File::create(archive_path)
+        .with_context(|| format!("Failed creating archive {}", archive_path.display()))?;
+    let mut builder = tar::Builder::new(archive_file);
+
+    for artifact in &artifacts {
+        append_deterministic_tar_entry(&mut builder, artifact.relative_path, &artifact.bytes)?;
+    }
+
+    builder
+        .finish()
+        .with_context(|| format!("Failed finalizing archive {}", archive_path.display()))?;
+
+    Ok(())
+}
+
+fn build_evidence_bundle_artifacts(report: &RunReport) -> Result<Vec<EvidenceBundleArtifact>> {
+    let report_json = serde_json::to_string_pretty(report)?;
     let raw_bundle = build_raw_observations_bundle(report);
     let raw_json = serde_json::to_string_pretty(&raw_bundle)?;
-    let raw_path = bundle_dir.join("raw_observations.json");
-    fs::write(&raw_path, raw_json.as_bytes())
-        .with_context(|| format!("Failed writing raw observations {}", raw_path.display()))?;
 
-    let checksums_path = bundle_dir.join("SHA256SUMS");
     let mut checksums = String::new();
     let _ = writeln!(
         checksums,
@@ -2429,12 +2494,39 @@ fn write_evidence_bundle(bundle_dir: &Path, report: &RunReport) -> Result<()> {
         "{}  raw_observations.json",
         sha256_hex(raw_json.as_bytes())
     );
-    fs::write(&checksums_path, checksums.as_bytes()).with_context(|| {
-        format!(
-            "Failed writing evidence bundle checksums {}",
-            checksums_path.display()
-        )
-    })?;
+
+    Ok(vec![
+        EvidenceBundleArtifact {
+            relative_path: "report.json",
+            bytes: report_json.into_bytes(),
+        },
+        EvidenceBundleArtifact {
+            relative_path: "raw_observations.json",
+            bytes: raw_json.into_bytes(),
+        },
+        EvidenceBundleArtifact {
+            relative_path: "SHA256SUMS",
+            bytes: checksums.into_bytes(),
+        },
+    ])
+}
+
+fn append_deterministic_tar_entry<W: std::io::Write>(
+    builder: &mut tar::Builder<W>,
+    relative_path: &str,
+    bytes: &[u8],
+) -> Result<()> {
+    let mut header = tar::Header::new_gnu();
+    header.set_size(bytes.len() as u64);
+    header.set_mode(0o644);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    header.set_cksum();
+
+    builder
+        .append_data(&mut header, relative_path, Cursor::new(bytes))
+        .with_context(|| format!("Failed appending archive entry {relative_path}"))?;
 
     Ok(())
 }
@@ -3022,6 +3114,7 @@ fn init_tracing(log_mode: LogMode) {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::io::Read;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
     use std::{env, fs};
@@ -3038,9 +3131,9 @@ mod tests {
         render_task_template_list_json, render_tool_detail, render_tool_detail_json,
         render_tool_list, render_tool_list_json, resolve_effective_config_explanation,
         resolve_init_config_path, resolve_task_for_mode, resolve_task_for_run, run_describe_tool,
-        run_init_config, run_list_tools, verify_evidence_bundle, write_evidence_bundle, Cli,
-        DoctorReport, DoctorStatus, FileConfig, IntrospectionFormat, OutputFormat,
-        SettingsFragment, TaskTemplate, ToolRegistry,
+        run_init_config, run_list_tools, verify_evidence_bundle, write_evidence_bundle,
+        write_evidence_bundle_archive, Cli, DoctorReport, DoctorStatus, FileConfig,
+        IntrospectionFormat, OutputFormat, SettingsFragment, TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -3076,6 +3169,7 @@ mod tests {
             output_file: None,
             case_id: None,
             evidence_bundle_dir: None,
+            evidence_bundle_archive: None,
             baseline_bundle: None,
             verify_bundle: None,
             quiet: false,
@@ -3187,6 +3281,66 @@ mod tests {
         assert!(sums.contains("raw_observations.json"));
 
         let _ = fs::remove_dir_all(&bundle_dir);
+    }
+
+    #[test]
+    fn writes_deterministic_evidence_bundle_archive() {
+        let report = sample_report();
+        let archive_dir = unique_temp_dir("wraithrun-evidence-bundle-archive");
+        fs::create_dir_all(&archive_dir).expect("archive directory should be created");
+
+        let archive_a = archive_dir.join("bundle-a.tar");
+        let archive_b = archive_dir.join("bundle-b.tar");
+
+        write_evidence_bundle_archive(&archive_a, &report)
+            .expect("first archive write should succeed");
+        write_evidence_bundle_archive(&archive_b, &report)
+            .expect("second archive write should succeed");
+
+        let bytes_a = fs::read(&archive_a).expect("first archive should be readable");
+        let bytes_b = fs::read(&archive_b).expect("second archive should be readable");
+        assert_eq!(
+            bytes_a, bytes_b,
+            "archive bytes should be deterministic for identical report input"
+        );
+
+        let archive_file = fs::File::open(&archive_a).expect("archive should be openable");
+        let mut archive = tar::Archive::new(archive_file);
+        let mut entry_names = Vec::new();
+        let mut checksums_text = String::new();
+
+        for entry in archive
+            .entries()
+            .expect("archive entries should be readable")
+        {
+            let mut entry = entry.expect("archive entry should be readable");
+            let entry_path = entry
+                .path()
+                .expect("archive entry path should be available")
+                .to_string_lossy()
+                .to_string();
+
+            if entry_path == "SHA256SUMS" {
+                entry
+                    .read_to_string(&mut checksums_text)
+                    .expect("checksums entry should be readable");
+            }
+
+            entry_names.push(entry_path);
+        }
+
+        assert_eq!(
+            entry_names,
+            vec![
+                "report.json".to_string(),
+                "raw_observations.json".to_string(),
+                "SHA256SUMS".to_string(),
+            ]
+        );
+        assert!(checksums_text.contains("report.json"));
+        assert!(checksums_text.contains("raw_observations.json"));
+
+        let _ = fs::remove_dir_all(&archive_dir);
     }
 
     #[test]

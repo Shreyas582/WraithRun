@@ -4,15 +4,20 @@
 
 ### Breaking/visible changes
 
-- (none yet)
+- Added optional `--evidence-bundle-archive` runtime output for deterministic single-file evidence bundle export (`.tar`).
 
 ### Migration examples
 
-- (none yet)
+Export a deterministic evidence bundle archive during a case-tagged run:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-archive .\evidence\CASE-2026-IR-0042.tar
+```
 
 ### Recommended checks after upgrade
 
-- (none yet)
+- Confirm receiving workflows can ingest `.tar` evidence bundles and still validate contents with `--verify-bundle` after extraction.
+- If you generate archives in CI, ensure archive paths are unique per case to avoid accidental overwrite.
 
 ## v0.6.1
 
