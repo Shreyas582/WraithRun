@@ -6,6 +6,7 @@ It is a local-first command-line tool for defenders and security engineers that:
 
 - runs guided local checks (logs, network listeners, file hashes, privilege indicators),
 - expands host coverage with persistence inventory, account/role snapshots, and process-network correlation,
+- captures reusable coverage baselines so drift-aware checks can compare current host state against known-good snapshots,
 - supports baseline-aware drift signals and process-network risk scoring for faster triage prioritization,
 - keeps evidence on your own machine by default,
 - returns a structured JSON report you can archive, diff, or automate around.
@@ -92,6 +93,7 @@ Top-level fields:
 
 Coverage-oriented observations commonly include drift and risk metrics such as:
 
+- `baseline_version`, `baseline_entries_count`, and `baseline_exposed_binding_count` from baseline capture,
 - `baseline_new_count` and `actionable_suspicious_count` from persistence checks,
 - `newly_privileged_account_count` and `unapproved_privileged_account_count` from account snapshots,
 - `network_risk_score` and `unknown_exposed_process_count` from process-network correlation.
@@ -234,6 +236,12 @@ Run process-network correlation:
 
 ```powershell
 cargo run -p wraithrun -- --task "Correlate process and network listener exposure" --format summary
+```
+
+Capture reusable coverage baseline:
+
+```powershell
+cargo run -p wraithrun -- --task "Capture host coverage baseline for persistence account and network" --format summary
 ```
 
 Describe one tool:

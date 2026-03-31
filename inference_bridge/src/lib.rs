@@ -118,6 +118,20 @@ impl OnnxVitisEngine {
             return "<final>Dry-run cycle complete. Review the latest tool observations and escalate manually if indicators persist.</final>".to_string();
         }
 
+        if (task_lower.contains("baseline") || task_lower.contains("golden"))
+            && (task_lower.contains("capture")
+                || task_lower.contains("snapshot")
+                || task_lower.contains("collect")
+                || task_lower.contains("build"))
+            && (task_lower.contains("coverage")
+                || task_lower.contains("persistence")
+                || task_lower.contains("account")
+                || task_lower.contains("network")
+                || task_lower.contains("host"))
+        {
+            return r#"<call>{"tool":"capture_coverage_baseline","args":{"persistence_limit":256,"listener_limit":128}}</call>"#.to_string();
+        }
+
         if task_lower.contains("hash")
             || task_lower.contains("sha256")
             || task_lower.contains("checksum")
@@ -271,6 +285,16 @@ mod tests {
         let output =
             engine.dry_run_response("Task: Correlate process and network listener exposure");
         assert!(output.contains("\"tool\":\"correlate_process_network\""));
+    }
+
+    #[test]
+    fn routes_baseline_capture_task_to_capture_coverage_baseline() {
+        let engine = dry_run_engine();
+        let output = engine.dry_run_response(
+            "Task: Capture host coverage baseline for persistence account and network",
+        );
+        assert!(output.contains("\"tool\":\"capture_coverage_baseline\""));
+        assert!(output.contains("\"persistence_limit\":256"));
     }
 
     #[test]

@@ -9,6 +9,7 @@
 - `--list-tools --tool-filter <QUERY>` now supports multi-term, separator-normalized matching.
 - Added host coverage tools for persistence inventory, account/role snapshots, and process-network correlation.
 - Coverage tools now support optional baseline/allowlist argument sets and emit drift/risk metrics (`baseline_new_count`, `newly_privileged_account_count`, `network_risk_score`).
+- Added `capture_coverage_baseline` tool to generate reusable baseline arrays for persistence, account, and network drift workflows.
 
 ### Migration examples
 
@@ -37,6 +38,7 @@ Run process-network correlation task:
 - Confirm triage dashboards can display severity/confidence and recommended action from findings.
 - Validate runbooks include the new persistence/account/process-network coverage tasks for baseline collection.
 - If your automation compares host state over time, feed baseline arrays into tool calls and alert on the new drift counters.
+- Capture and store baseline snapshots periodically so drift-aware tool arguments can be refreshed from recent known-good host states.
 
 ## v0.4.1
 

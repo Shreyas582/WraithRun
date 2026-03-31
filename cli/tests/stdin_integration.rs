@@ -300,6 +300,7 @@ fn tools_json_contract_includes_coverage_expansion_tools() {
         "inspect_persistence_locations",
         "audit_account_changes",
         "correlate_process_network",
+        "capture_coverage_baseline",
     ] {
         assert!(
             tools.iter().any(|tool| {
@@ -315,7 +316,7 @@ fn tools_json_contract_includes_coverage_expansion_tools() {
 
 #[test]
 fn describe_tool_json_contract_includes_baseline_and_allowlist_args() {
-    let cases: [(&str, &[&str]); 3] = [
+    let cases: [(&str, &[&str]); 4] = [
         (
             "inspect_persistence_locations",
             &["baseline_entries", "allowlist_terms"],
@@ -330,6 +331,10 @@ fn describe_tool_json_contract_includes_baseline_and_allowlist_args() {
         (
             "correlate_process_network",
             &["baseline_exposed_bindings", "expected_processes"],
+        ),
+        (
+            "capture_coverage_baseline",
+            &["persistence_limit", "listener_limit"],
         ),
     ];
 

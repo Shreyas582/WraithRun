@@ -12,6 +12,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - First-class `findings` report layer with severity, confidence, evidence pointer, and recommended action fields.
 - New host coverage tools: `inspect_persistence_locations`, `audit_account_changes`, and `correlate_process_network`.
 - Baseline-aware coverage arguments for persistence, account, and process-network tools (baseline/allowlist and expected-process inputs).
+- New `capture_coverage_baseline` tool for generating reusable baseline arrays used by drift-aware coverage checks.
 
 ### Changed
 
@@ -19,6 +20,8 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Summary/markdown output now renders actionable findings before raw turn-by-turn observations.
 - Dry-run task routing now maps persistence/account-change/process-network prompts to specialized coverage tools.
 - Findings derivation now surfaces baseline drift and network risk-score signals from expanded coverage tool observations.
+- Dry-run task routing now maps baseline capture prompts to `capture_coverage_baseline`.
+- Findings derivation now emits a baseline-capture info finding when baseline snapshot observations are returned.
 
 ### Fixed
 

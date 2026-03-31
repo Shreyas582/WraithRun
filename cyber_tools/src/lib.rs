@@ -9,6 +9,7 @@ use std::{
     env,
     path::{Path, PathBuf},
     sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(target_os = "windows")]
@@ -265,6 +266,7 @@ impl ToolRegistry {
         registry.register(Arc::new(InspectPersistenceLocationsTool));
         registry.register(Arc::new(AuditAccountChangesTool));
         registry.register(Arc::new(CorrelateProcessNetworkTool));
+        registry.register(Arc::new(CaptureCoverageBaselineTool));
         registry
     }
 
@@ -319,6 +321,18 @@ impl ToolRegistry {
             "correlate_process_network" => {
                 #[cfg(target_os = "windows")]
                 {
+                    self.policy.ensure_command_allowed("netstat")?;
+                    self.policy.ensure_command_allowed("tasklist")?;
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                self.policy.ensure_command_allowed("ss")?;
+            }
+            "capture_coverage_baseline" => {
+                #[cfg(target_os = "windows")]
+                {
+                    self.policy.ensure_command_allowed("reg")?;
+                    self.policy.ensure_command_allowed("net")?;
                     self.policy.ensure_command_allowed("netstat")?;
                     self.policy.ensure_command_allowed("tasklist")?;
                 }
@@ -462,6 +476,13 @@ fn network_risk_level(score: u32) -> &'static str {
         40..=69 => "high",
         _ => "critical",
     }
+}
+
+fn unix_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(target_os = "windows")]
@@ -976,6 +997,102 @@ impl Tool for CorrelateProcessNetworkTool {
             "network_risk_score": network_risk_score,
             "network_risk_level": network_risk_level,
             "records": records,
+        }))
+    }
+}
+
+pub struct CaptureCoverageBaselineTool;
+
+#[async_trait]
+impl Tool for CaptureCoverageBaselineTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "capture_coverage_baseline".to_string(),
+            description:
+                "Captures reusable baseline arrays for persistence, privileged accounts, and exposed process-network bindings."
+                    .to_string(),
+            args_schema: json!({
+                "type": "object",
+                "properties": {
+                    "persistence_limit": {"type": "integer", "minimum": 1, "maximum": 512},
+                    "listener_limit": {"type": "integer", "minimum": 1, "maximum": 512}
+                }
+            }),
+        }
+    }
+
+    async fn run(&self, args: Value) -> Result<Value, ToolError> {
+        let persistence_limit = parse_bounded_count(&args, "persistence_limit", 256, 512);
+        let listener_limit = parse_bounded_count(&args, "listener_limit", 128, 512);
+
+        let persistence_entries =
+            persistence_checker::collect_persistence_entries(persistence_limit).await?;
+        let suspicious_entry_count = persistence_entries
+            .iter()
+            .filter(|entry| entry.suspicious)
+            .count();
+
+        let mut baseline_entries: Vec<String> = persistence_entries
+            .iter()
+            .map(|entry| entry.entry.clone())
+            .collect();
+        sort_dedup_case_insensitive(&mut baseline_entries);
+
+        let account_snapshot = account_audit::collect_account_privilege_snapshot().await?;
+        let mut baseline_privileged_accounts = account_snapshot.privileged_accounts.clone();
+        sort_dedup_case_insensitive(&mut baseline_privileged_accounts);
+
+        let mut approved_privileged_accounts = baseline_privileged_accounts.clone();
+        sort_dedup_case_insensitive(&mut approved_privileged_accounts);
+
+        let records = process_correlation::correlate_process_network(listener_limit).await?;
+        let externally_exposed_records: Vec<&process_correlation::ProcessNetworkRecord> = records
+            .iter()
+            .filter(|record| record.externally_exposed)
+            .collect();
+
+        let mut baseline_exposed_bindings: Vec<String> = externally_exposed_records
+            .iter()
+            .map(|record| record.local_address.clone())
+            .collect();
+        sort_dedup_case_insensitive(&mut baseline_exposed_bindings);
+
+        let mut expected_processes: Vec<String> = externally_exposed_records
+            .iter()
+            .filter_map(|record| record.process_name.clone())
+            .collect();
+        sort_dedup_case_insensitive(&mut expected_processes);
+
+        Ok(json!({
+            "baseline_version": "coverage-v1",
+            "captured_epoch_seconds": unix_epoch_seconds(),
+            "persistence_limit": persistence_limit,
+            "listener_limit": listener_limit,
+            "baseline_entries_count": baseline_entries.len(),
+            "baseline_privileged_account_count": baseline_privileged_accounts.len(),
+            "baseline_exposed_binding_count": baseline_exposed_bindings.len(),
+            "expected_process_count": expected_processes.len(),
+            "persistence": {
+                "entry_count": persistence_entries.len(),
+                "suspicious_entry_count": suspicious_entry_count,
+                "baseline_entries": baseline_entries,
+            },
+            "accounts": {
+                "privileged_account_count": baseline_privileged_accounts.len(),
+                "non_default_privileged_account_count": account_snapshot
+                    .non_default_privileged_accounts
+                    .len(),
+                "baseline_privileged_accounts": baseline_privileged_accounts,
+                "approved_privileged_accounts": approved_privileged_accounts,
+                "non_default_privileged_accounts": account_snapshot.non_default_privileged_accounts,
+                "evidence": account_snapshot.evidence,
+            },
+            "network": {
+                "listener_count": records.len(),
+                "externally_exposed_count": externally_exposed_records.len(),
+                "baseline_exposed_bindings": baseline_exposed_bindings,
+                "expected_processes": expected_processes,
+            },
         }))
     }
 }

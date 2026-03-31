@@ -128,6 +128,38 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             }
         }
 
+        if let Some(baseline_version) = observation.get("baseline_version").and_then(Value::as_str)
+        {
+            let baseline_entries_count = observation
+                .get("baseline_entries_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let baseline_privileged_account_count = observation
+                .get("baseline_privileged_account_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let baseline_exposed_binding_count = observation
+                .get("baseline_exposed_binding_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+
+            findings.push(Finding {
+                title: format!(
+                    "Coverage baseline captured ({baseline_entries_count} persistence entries, {baseline_privileged_account_count} privileged accounts, {baseline_exposed_binding_count} exposed bindings)"
+                ),
+                severity: FindingSeverity::Info,
+                confidence: 0.9,
+                evidence_pointer: EvidencePointer {
+                    turn: Some(idx + 1),
+                    tool: tool_name.clone(),
+                    field: "observation.baseline_version".to_string(),
+                },
+                recommended_action: format!(
+                    "Store baseline arrays from this {baseline_version} snapshot and supply them to coverage tools in subsequent runs to detect drift."
+                ),
+            });
+        }
+
         let actionable_persistence_count = observation
             .get("actionable_suspicious_count")
             .and_then(Value::as_u64)
@@ -666,6 +698,30 @@ mod tests {
             finding.title.contains("Network exposure risk score")
                 && finding.severity == FindingSeverity::Critical
                 && finding.evidence_pointer.field == "observation.network_risk_score"
+        }));
+    }
+
+    #[test]
+    fn derives_baseline_capture_finding() {
+        let turns = vec![AgentTurn {
+            thought: "<call>{...}</call>".to_string(),
+            tool_call: Some(ToolCall {
+                tool: "capture_coverage_baseline".to_string(),
+                args: json!({}),
+            }),
+            observation: Some(json!({
+                "baseline_version": "coverage-v1",
+                "baseline_entries_count": 24,
+                "baseline_privileged_account_count": 3,
+                "baseline_exposed_binding_count": 5
+            })),
+        }];
+
+        let findings = derive_findings(&turns, "final");
+        assert!(findings.iter().any(|finding| {
+            finding.title.contains("Coverage baseline captured")
+                && finding.severity == FindingSeverity::Info
+                && finding.evidence_pointer.field == "observation.baseline_version"
         }));
     }
 }

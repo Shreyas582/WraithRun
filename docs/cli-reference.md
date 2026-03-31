@@ -99,13 +99,14 @@ Behavior:
 
 `--list-tools` output includes tool names, descriptions, and JSON argument schemas.
 
-Current built-in coverage includes log tailing, listener inventory, file hashing, privilege vectors, persistence inventory, account-role snapshots, and process-network correlation.
+Current built-in coverage includes log tailing, listener inventory, file hashing, privilege vectors, persistence inventory, account-role snapshots, process-network correlation, and baseline capture for drift workflows.
 
 Coverage tool argument highlights:
 
 - `inspect_persistence_locations`: supports `limit`, optional `baseline_entries[]`, and optional `allowlist_terms[]`.
 - `audit_account_changes`: supports optional `baseline_privileged_accounts[]` and `approved_privileged_accounts[]`.
 - `correlate_process_network`: supports `limit`, optional `baseline_exposed_bindings[]`, and optional `expected_processes[]`.
+- `capture_coverage_baseline`: supports optional `persistence_limit` and `listener_limit` and emits reusable baseline arrays.
 
 When `--tool-filter` is used with `--list-tools`, only tools matching all query terms are returned.
 
@@ -266,7 +267,7 @@ Default run output (`--format json`) includes:
 - `turns`: tool-thought-observation trace.
 - `final_answer`: model/runtime conclusion string.
 
-Coverage-oriented observations may also expose drift/risk metrics including `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
+Coverage-oriented observations may also expose drift/risk metrics including `baseline_version`, `baseline_entries_count`, `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
 
 `findings[]` object fields:
 
@@ -328,6 +329,12 @@ Process-network correlation:
 
 ```powershell
 wraithrun --task "Correlate process and network listener exposure" --format summary
+```
+
+Capture reusable coverage baseline:
+
+```powershell
+wraithrun --task "Capture host coverage baseline for persistence account and network" --format summary
 ```
 
 Task from stdin:
