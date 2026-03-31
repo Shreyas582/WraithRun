@@ -370,10 +370,22 @@ Account/role coverage:
 wraithrun --task "Audit account change activity in admin group membership" --format summary
 ```
 
-Process-network correlation:
+Verify bundle integrity:
 
 ```powershell
-wraithrun --task "Correlate process and network listener exposure" --format summary
+wraithrun --verify-bundle .\evidence\CASE-2026-IR-0042 --introspection-format json
+```
+
+Verify using a direct checksum-manifest path (including paths with spaces):
+
+```powershell
+wraithrun --verify-bundle ".\evidence\CASE-2026-IR-0042\run 01\SHA256SUMS"
+```
+
+Import baseline arrays from a direct raw-observations file path:
+
+```powershell
+wraithrun --task "Audit account change activity in admin group membership" --baseline-bundle ".\evidence\CASE-2026-IR-0042\baseline\raw_observations.json"
 ```
 
 Case-tagged bundle export:
@@ -388,10 +400,10 @@ Case-tagged deterministic archive export:
 wraithrun --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --evidence-bundle-archive .\evidence\CASE-2026-IR-0042.tar
 ```
 
-Evidence bundle integrity verification:
+Process-network correlation:
 
 ```powershell
-wraithrun --verify-bundle .\evidence\CASE-2026-IR-0042 --introspection-format json
+wraithrun --task "Correlate process and network listener exposure" --format summary
 ```
 
 Capture reusable coverage baseline:

@@ -145,6 +145,47 @@ $env:WRAITHRUN_CONFIG = ".\wraithrun.example.toml"
 .\wraithrun.exe --task "Check suspicious listener ports" --profile production-triage
 ```
 
+## Case Workflow Runbook (Collection, Verification, Retention)
+
+Collection step 1: capture a reusable host baseline for later drift checks.
+
+```powershell
+.\wraithrun.exe --task "Capture host coverage baseline for persistence account and network" --case-id CASE-2026-IR-0100 --evidence-bundle-dir .\evidence\CASE-2026-IR-0100\baseline
+```
+
+Collection step 2: run investigation and export both directory bundle and deterministic archive.
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0100 --baseline-bundle .\evidence\CASE-2026-IR-0100\baseline --evidence-bundle-dir .\evidence\CASE-2026-IR-0100\run-01 --evidence-bundle-archive .\evidence\CASE-2026-IR-0100\run-01.tar
+```
+
+Verification step 1: verify using bundle directory path.
+
+```powershell
+.\wraithrun.exe --verify-bundle .\evidence\CASE-2026-IR-0100\run-01 --introspection-format json
+```
+
+Verification step 2: verify using direct checksum-manifest path (works for paths with spaces).
+
+```powershell
+.\wraithrun.exe --verify-bundle ".\evidence\CASE-2026-IR-0100\run 01\SHA256SUMS"
+```
+
+Retention step 1: store immutable archive, keep baseline bundle, and track integrity metadata.
+
+```powershell
+New-Item -ItemType Directory -Path .\retention\CASE-2026-IR-0100 -Force | Out-Null
+Copy-Item .\evidence\CASE-2026-IR-0100\run-01.tar .\retention\CASE-2026-IR-0100\
+Copy-Item .\evidence\CASE-2026-IR-0100\baseline\raw_observations.json .\retention\CASE-2026-IR-0100\baseline.raw_observations.json
+Get-FileHash .\retention\CASE-2026-IR-0100\run-01.tar -Algorithm SHA256
+```
+
+Retention step 2: use case-scoped folder naming convention to simplify audit retrieval.
+
+- `retention/<CASE-ID>/run-<NN>.tar`
+- `retention/<CASE-ID>/baseline.raw_observations.json`
+- `retention/<CASE-ID>/integrity-notes.txt`
+
 ## Resolution Order Example
 
 This command chain demonstrates `CLI > env > config > defaults`.

@@ -8,15 +8,15 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- Operator case-workflow runbook examples covering collection, verification, and retention sequences.
 
 ### Changed
 
-- (none yet)
+- Expanded CLI examples with direct `SHA256SUMS` verification and baseline import via `raw_observations.json` path.
 
 ### Fixed
 
-- (none yet)
+- Added regression coverage for evidence-bundle path edge cases (paths with spaces and direct checksum-manifest inputs).
 
 ## 0.6.2 - 2026-03-31
 

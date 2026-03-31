@@ -4,15 +4,27 @@
 
 ### Breaking/visible changes
 
-- (none yet)
+- Added case-workflow runbook examples for evidence collection, integrity verification, and retention operations.
+- Expanded evidence-bundle path handling coverage to include direct `SHA256SUMS` verification and path-with-spaces workflows.
 
 ### Migration examples
 
-- (none yet)
+Verify bundle integrity via direct checksum-manifest path:
+
+```powershell
+.\wraithrun.exe --verify-bundle ".\evidence\CASE-2026-IR-0042\run 01\SHA256SUMS"
+```
+
+Import baseline arrays directly from a `raw_observations.json` file path:
+
+```powershell
+.\wraithrun.exe --task "Audit account change activity in admin group membership" --baseline-bundle ".\evidence\CASE-2026-IR-0042\baseline\raw_observations.json"
+```
 
 ### Recommended checks after upgrade
 
-- (none yet)
+- Validate your incident-response runbook uses the documented collection, verify, and retention sequence for case workflows.
+- Add test coverage in downstream wrappers for bundle paths that include spaces or direct checksum-manifest references.
 
 ## v0.6.2
 
