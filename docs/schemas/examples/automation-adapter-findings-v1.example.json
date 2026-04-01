@@ -4,6 +4,12 @@
   "summary": {
     "task": "Investigate unauthorized SSH keys",
     "case_id": "CASE-2026-IR-0042",
+    "live_fallback_decision": {
+      "policy": "dry-run-on-error",
+      "reason": "live inference failed and runtime fell back to dry-run",
+      "live_error": "failed to initialize live inference session",
+      "fallback_mode": "dry-run"
+    },
     "finding_count": 2,
     "highest_severity": "high",
     "severity_counts": {

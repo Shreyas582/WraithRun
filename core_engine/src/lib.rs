@@ -67,11 +67,21 @@ pub struct Finding {
     pub recommended_action: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveFallbackDecision {
+    pub policy: String,
+    pub reason: String,
+    pub live_error: String,
+    pub fallback_mode: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunReport {
     pub task: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub case_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_fallback_decision: Option<LiveFallbackDecision>,
     pub turns: Vec<AgentTurn>,
     pub final_answer: String,
     #[serde(default)]

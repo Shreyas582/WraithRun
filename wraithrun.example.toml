@@ -14,6 +14,7 @@ max_steps = 8
 max_new_tokens = 256
 temperature = 0.2
 format = "json"
+# live_fallback_policy = "dry-run-on-error"
 # automation_adapter = "findings-v1"
 # exit_policy = "severity-threshold"
 # exit_threshold = "high"

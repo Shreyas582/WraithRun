@@ -1,5 +1,33 @@
 # Upgrade Notes
 
+## v0.8.0 (in progress)
+
+### Breaking/visible changes
+
+- Added live-mode model-pack doctor checks for model and tokenizer readiness (`live-model-format`, `live-model-size`, `live-tokenizer-size`, `live-tokenizer-json`, `live-tokenizer-shape`).
+- Added `--live-fallback-policy <none|dry-run-on-error>` for deterministic live-mode fallback behavior.
+- Run report and findings adapter outputs now include optional `live_fallback_decision` metadata when fallback is triggered.
+
+### Migration examples
+
+Run live mode with deterministic dry-run fallback:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --live --model C:/models/llm.onnx --live-fallback-policy dry-run-on-error
+```
+
+Validate live model-pack readiness before deployment:
+
+```powershell
+.\wraithrun.exe --doctor --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --introspection-format json
+```
+
+### Recommended checks after upgrade
+
+- Confirm automation parsers tolerate optional `live_fallback_decision` in run and adapter payloads.
+- Keep `--doctor --live` in preflight runbooks for model-pack readiness checks.
+- Decide whether pipelines should use fallback (`dry-run-on-error`) or fail-fast (`none`) based on incident handling policy.
+
 ## v0.7.0
 
 ### Breaking/visible changes

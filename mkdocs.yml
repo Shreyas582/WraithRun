@@ -36,6 +36,7 @@ nav:
   - CLI Reference: cli-reference.md
   - Automation Contracts: automation-contracts.md
   - Automation Workflows: automation-workflows.md
+  - Live-Mode Operations: live-mode-operations.md
   - Tool Reference: tool-reference.md
   - Security and Sandbox: security-sandbox.md
   - Troubleshooting: troubleshooting.md

@@ -1,7 +1,7 @@
 {
   "contract_version": "1.0.0",
   "summary": {
-    "pass": 2,
+    "pass": 5,
     "warn": 1,
     "fail": 0
   },
@@ -12,9 +12,29 @@
       "detail": "Loaded config: ./wraithrun.toml"
     },
     {
-      "status": "warn",
+      "status": "pass",
       "name": "live-model-path",
-      "detail": "Live mode disabled, skipping model path checks"
+      "detail": "Model file found: ./models/llm.onnx"
+    },
+    {
+      "status": "pass",
+      "name": "live-model-format",
+      "detail": "Model extension is .onnx: ./models/llm.onnx"
+    },
+    {
+      "status": "pass",
+      "name": "live-model-size",
+      "detail": "Model file size: 73400320 bytes"
+    },
+    {
+      "status": "pass",
+      "name": "live-tokenizer-json",
+      "detail": "Tokenizer JSON parsed successfully: ./models/tokenizer.json"
+    },
+    {
+      "status": "warn",
+      "name": "vitis-config",
+      "detail": "Vitis config is set but file was not found: ./models/vitis_ep.json"
     }
   ]
 }

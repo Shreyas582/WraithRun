@@ -4,6 +4,7 @@ WraithRun supports CI and SIEM integrations through two controls:
 
 - `--automation-adapter findings-v1`: emits a findings-only JSON envelope for pipeline ingestion.
 - `--exit-policy severity-threshold --exit-threshold <severity>`: enforces deterministic non-zero exits when findings meet the selected severity threshold.
+- `--live-fallback-policy dry-run-on-error`: keeps live-mode runs deterministic by retrying in dry-run mode when live inference fails.
 
 ## CI Gating Example
 
@@ -26,6 +27,9 @@ jobs:
         run: |
           ./target/debug/wraithrun \
             --task "Investigate unauthorized SSH keys" \
+            --live \
+            --model ./models/llm.onnx \
+            --live-fallback-policy dry-run-on-error \
             --automation-adapter findings-v1 \
             --exit-policy severity-threshold \
             --exit-threshold high \
@@ -61,6 +65,7 @@ Example adapter payload fields for forwarding:
 - `findings[].severity`
 - `findings[].recommended_action`
 - `findings[].evidence_pointer`
+- `summary.live_fallback_decision` (when fallback is triggered)
 
 ## Migration Notes
 

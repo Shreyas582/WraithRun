@@ -11,6 +11,8 @@ It is a local-first command-line tool for defenders and security engineers that:
 - supports case-tagged investigations and evidence bundle export (report, raw observations, checksums),
 - verifies evidence bundle integrity against `SHA256SUMS` for auditable evidence handling,
 - includes automation adapter output plus severity-threshold exit policy for CI/SIEM pipelines,
+- validates live-mode model-pack readiness in `--doctor` (model extension/size, tokenizer JSON parse/shape),
+- applies configurable live fallback policy (`dry-run-on-error`) for predictable live-mode recovery,
 - keeps evidence on your own machine by default,
 - returns a structured JSON report you can archive, diff, or automate around.
 
@@ -21,6 +23,7 @@ If you need fast, repeatable endpoint triage with auditable output, WraithRun is
 - Hosted docs (Read the Docs): https://wraithrun.readthedocs.io/en/latest/
 - Docs setup and publishing runbook: [docs/READTHEDOCS_SETUP.md](docs/READTHEDOCS_SETUP.md)
 - Automation contract schemas and examples: [docs/automation-contracts.md](docs/automation-contracts.md)
+- Live-mode operations guide: [docs/live-mode-operations.md](docs/live-mode-operations.md)
 
 ## Start Here
 
@@ -94,6 +97,7 @@ Top-level fields:
 - `contract_version`: machine-readable JSON contract version for automation compatibility checks.
 - `task`: your input task string.
 - `case_id`: optional investigation identifier when provided via CLI/config/env.
+- `live_fallback_decision`: optional fallback metadata when live mode errors and policy reroutes execution to dry-run.
 - `findings`: normalized actionable findings with severity, confidence, evidence pointer, and recommended action.
 - `turns`: intermediate reasoning/tool interaction history.
 - `final_answer`: the model/runtime conclusion.
@@ -165,6 +169,7 @@ Common options:
 - `--profile <PROFILE>` apply a named profile from built-ins or config file.
 - `--live` enables model inference mode (default is dry-run).
 - `--dry-run` forces dry-run mode (overrides profile/config live mode).
+- `--live-fallback-policy <none|dry-run-on-error>` controls deterministic fallback behavior when live inference fails.
 - `--model <MODEL>` model path (default `./models/llm.onnx`, unless overridden by config/env).
 - `--tokenizer <TOKENIZER>` tokenizer path for live mode.
 - `--max-steps <N>` max agent turns (default `8`).
@@ -275,6 +280,12 @@ Run a drift check with baseline arrays imported from a prior bundle:
 
 ```powershell
 cargo run -p wraithrun -- --task "Audit account change activity in admin group membership" --baseline-bundle .\evidence\CASE-2026-IR-0042
+```
+
+Run live mode with deterministic dry-run fallback:
+
+```powershell
+cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --live --model C:/models/llm.onnx --live-fallback-policy dry-run-on-error
 ```
 
 Verify evidence bundle integrity before sharing artifacts:

@@ -52,6 +52,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--temperature <TEMPERATURE>`: generation temperature. Default fallback: `0.2`.
 - `--live`: enable ONNX/Vitis live inference mode.
 - `--dry-run`: force dry-run mode.
+- `--live-fallback-policy <LIVE_FALLBACK_POLICY>`: live-mode fallback behavior. Values: `none`, `dry-run-on-error`. Default: `none`.
 - `--format <FORMAT>`: output format. Values: `json`, `summary`, `markdown`. Default: `json`.
 - `--automation-adapter <AUTOMATION_ADAPTER>`: automation ingestion envelope. Values: `findings-v1`.
 - `--exit-policy <EXIT_POLICY>`: run exit behavior. Values: `none`, `severity-threshold`. Default: `none`.
@@ -87,7 +88,13 @@ Run `--doctor` to validate:
 - config file discovery/parsing,
 - environment variable parsing,
 - final effective runtime resolution,
-- live-mode file-path readiness checks.
+- live-mode model-pack readiness checks:
+	- model path exists,
+	- model extension is `.onnx`,
+	- model file size is non-zero,
+	- tokenizer path exists,
+	- tokenizer file size is non-zero,
+	- tokenizer JSON parses and includes top-level `model` key.
 
 Behavior:
 
@@ -302,6 +309,7 @@ Default run output (`--format json`) includes:
 - `contract_version`: machine-readable JSON contract version.
 - `task`: original task text.
 - `case_id`: optional case identifier when set via runtime settings.
+- `live_fallback_decision`: optional fallback metadata when live mode fails and configured policy reroutes execution.
 - `findings`: actionable finding list synthesized from collected evidence.
 - `turns`: tool-thought-observation trace.
 - `final_answer`: model/runtime conclusion string.
@@ -319,7 +327,7 @@ When `--verify-bundle` is set, the CLI validates `SHA256SUMS` entries against cu
 When `--automation-adapter findings-v1` is set, run output switches to a findings-only automation envelope:
 
 - `adapter`: fixed value `findings-v1`.
-- `summary`: task/case context plus severity counts.
+- `summary`: task/case context plus severity counts, and optional `live_fallback_decision` metadata.
 - `findings[]`: normalized finding entries with deterministic `finding_id` values (`F-0001`, `F-0002`, ...).
 
 When `--exit-policy severity-threshold` is set, run exit behavior becomes severity-aware:
@@ -328,6 +336,8 @@ When `--exit-policy severity-threshold` is set, run exit behavior becomes severi
 - non-zero exit when at least one finding meets/exceeds threshold.
 
 If `--exit-threshold` is omitted for `severity-threshold`, threshold defaults to `medium`.
+
+When `--live-fallback-policy dry-run-on-error` is set and live inference fails, the runtime retries once in dry-run mode and records fallback details under `live_fallback_decision`.
 
 Coverage-oriented observations may also expose drift/risk metrics including `baseline_version`, `baseline_entries_count`, `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
 
@@ -585,6 +595,12 @@ Live mode:
 wraithrun --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
 ```
 
+Live mode with deterministic fallback:
+
+```powershell
+wraithrun --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --live-fallback-policy dry-run-on-error --task "Investigate unauthorized SSH keys"
+```
+
 Summary output with file export:
 
 ```powershell
@@ -603,7 +619,11 @@ Runtime control variables:
 - `WRAITHRUN_MAX_NEW_TOKENS`
 - `WRAITHRUN_TEMPERATURE`
 - `WRAITHRUN_LIVE`
+- `WRAITHRUN_LIVE_FALLBACK_POLICY`
 - `WRAITHRUN_FORMAT`
+- `WRAITHRUN_AUTOMATION_ADAPTER`
+- `WRAITHRUN_EXIT_POLICY`
+- `WRAITHRUN_EXIT_THRESHOLD`
 - `WRAITHRUN_OUTPUT_FILE`
 - `WRAITHRUN_LOG` (`quiet`, `normal`, `verbose`)
 - `WRAITHRUN_QUIET` (`true/false`, optional legacy override)
@@ -631,6 +651,7 @@ model = "./models/llm.onnx"
 max_steps = 8
 max_new_tokens = 256
 temperature = 0.2
+live_fallback_policy = "none"
 format = "json"
 log = "normal"
 

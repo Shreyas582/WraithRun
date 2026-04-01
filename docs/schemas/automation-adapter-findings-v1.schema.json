@@ -33,6 +33,27 @@
         "case_id": {
           "type": ["string", "null"]
         },
+        "live_fallback_decision": {
+          "type": ["object", "null"],
+          "required": ["policy", "reason", "live_error", "fallback_mode"],
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["none", "dry-run-on-error"]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "live_error": {
+              "type": "string"
+            },
+            "fallback_mode": {
+              "type": "string",
+              "enum": ["dry-run"]
+            }
+          },
+          "additionalProperties": false
+        },
         "finding_count": {
           "type": "integer",
           "minimum": 0

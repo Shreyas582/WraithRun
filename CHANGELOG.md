@@ -8,11 +8,14 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- Model-pack doctor checks for live-mode readiness (`live-model-format`, `live-model-size`, `live-tokenizer-size`, `live-tokenizer-json`, `live-tokenizer-shape`).
+- Configurable live fallback policy via `--live-fallback-policy <none|dry-run-on-error>`.
+- New live-mode operations guide for deployment readiness and troubleshooting (`docs/live-mode-operations.md`).
 
 ### Changed
 
-- (none yet)
+- Run report and findings adapter outputs now include optional `live_fallback_decision` metadata when fallback is triggered.
+- Added integration-test coverage for live-mode fallback success/failure behavior and adapter fallback visibility.
 
 ### Fixed
 

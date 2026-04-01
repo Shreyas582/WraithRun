@@ -218,6 +218,123 @@ fn exit_policy_passes_when_threshold_not_met() {
 }
 
 #[test]
+fn live_mode_falls_back_to_dry_run_when_policy_enabled() {
+    let missing_model = unique_temp_dir("wraithrun-live-fallback-enabled").join("missing.onnx");
+    let missing_model_text = missing_model.to_string_lossy().to_string();
+
+    let args = vec![
+        "--task",
+        "Investigate unauthorized SSH keys",
+        "--live",
+        "--model",
+        missing_model_text.as_str(),
+        "--live-fallback-policy",
+        "dry-run-on-error",
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "process should recover with fallback: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let decision = json
+        .get("live_fallback_decision")
+        .and_then(Value::as_object)
+        .expect("live_fallback_decision should be present");
+    assert_eq!(
+        decision.get("policy").and_then(Value::as_str),
+        Some("dry-run-on-error")
+    );
+    assert_eq!(
+        decision.get("fallback_mode").and_then(Value::as_str),
+        Some("dry-run")
+    );
+
+    let findings = json
+        .get("findings")
+        .and_then(Value::as_array)
+        .expect("findings should be present");
+    assert!(findings.iter().any(|finding| {
+        finding
+            .get("evidence_pointer")
+            .and_then(Value::as_object)
+            .and_then(|pointer| pointer.get("field"))
+            .and_then(Value::as_str)
+            == Some("live_fallback_decision.live_error")
+    }));
+}
+
+#[test]
+fn live_mode_without_fallback_policy_propagates_error() {
+    let missing_model = unique_temp_dir("wraithrun-live-fallback-disabled").join("missing.onnx");
+    let missing_model_text = missing_model.to_string_lossy().to_string();
+
+    let args = vec![
+        "--task",
+        "Investigate unauthorized SSH keys",
+        "--live",
+        "--model",
+        missing_model_text.as_str(),
+        "--live-fallback-policy",
+        "none",
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        !output.status.success(),
+        "process should fail when fallback policy is none"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.trim().is_empty(),
+        "expected non-empty stderr for live failure"
+    );
+}
+
+#[test]
+fn adapter_output_includes_fallback_decision_when_triggered() {
+    let missing_model = unique_temp_dir("wraithrun-live-fallback-adapter").join("missing.onnx");
+    let missing_model_text = missing_model.to_string_lossy().to_string();
+
+    let args = vec![
+        "--task",
+        "Investigate unauthorized SSH keys",
+        "--live",
+        "--model",
+        missing_model_text.as_str(),
+        "--live-fallback-policy",
+        "dry-run-on-error",
+        "--automation-adapter",
+        "findings-v1",
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "adapter run should recover with fallback: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let summary = json
+        .get("summary")
+        .and_then(Value::as_object)
+        .expect("summary should be present");
+    let decision = summary
+        .get("live_fallback_decision")
+        .and_then(Value::as_object)
+        .expect("summary.live_fallback_decision should be present");
+    assert_eq!(
+        decision.get("fallback_mode").and_then(Value::as_str),
+        Some("dry-run")
+    );
+}
+
+#[test]
 fn report_json_contract_includes_case_id_when_provided() {
     let output = run_capture(&[
         "--task",
@@ -704,6 +821,59 @@ fn doctor_json_contract_contains_summary_and_checks() {
         !checks.is_empty(),
         "checks should include at least one entry"
     );
+}
+
+#[test]
+fn doctor_json_contract_includes_model_pack_checks_for_live_mode() {
+    let model_pack_dir = unique_temp_dir("wraithrun-doctor-model-pack");
+    fs::create_dir_all(&model_pack_dir).expect("model pack dir should be created");
+
+    let model_path = model_pack_dir.join("llm.onnx");
+    let tokenizer_path = model_pack_dir.join("tokenizer.json");
+    fs::write(&model_path, b"onnx-model-bytes").expect("model fixture should be written");
+    fs::write(
+        &tokenizer_path,
+        r#"{"model":{"type":"WordPiece"},"version":"1.0"}"#,
+    )
+    .expect("tokenizer fixture should be written");
+
+    let model_path_text = model_path.to_string_lossy().to_string();
+    let tokenizer_path_text = tokenizer_path.to_string_lossy().to_string();
+
+    let args = vec![
+        "--doctor",
+        "--introspection-format",
+        "json",
+        "--live",
+        "--model",
+        model_path_text.as_str(),
+        "--tokenizer",
+        tokenizer_path_text.as_str(),
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let checks = json
+        .get("checks")
+        .and_then(Value::as_array)
+        .expect("checks should be an array");
+
+    assert!(checks.iter().any(|check| {
+        check.get("name").and_then(Value::as_str) == Some("live-model-format")
+            && check.get("status").and_then(Value::as_str) == Some("pass")
+    }));
+    assert!(checks.iter().any(|check| {
+        check.get("name").and_then(Value::as_str) == Some("live-tokenizer-json")
+            && check.get("status").and_then(Value::as_str) == Some("pass")
+    }));
+
+    let _ = fs::remove_dir_all(&model_pack_dir);
 }
 
 #[test]

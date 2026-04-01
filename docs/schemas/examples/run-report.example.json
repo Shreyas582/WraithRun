@@ -2,6 +2,12 @@
   "contract_version": "1.0.0",
   "task": "Investigate unauthorized SSH keys",
   "case_id": "CASE-2026-IR-1001",
+  "live_fallback_decision": {
+    "policy": "dry-run-on-error",
+    "reason": "live inference failed and runtime fell back to dry-run",
+    "live_error": "failed to initialize live inference session",
+    "fallback_mode": "dry-run"
+  },
   "turns": [
     {
       "thought": "<call>{\"tool\":\"check_privilege_escalation_vectors\",\"args\":{}}</call>",
@@ -27,6 +33,17 @@
         "field": "observation.indicator_count"
       },
       "recommended_action": "Validate whether elevated rights are expected and remove unauthorized grants."
+    },
+    {
+      "title": "Live mode fallback applied after inference failure",
+      "severity": "info",
+      "confidence": 1.0,
+      "evidence_pointer": {
+        "turn": null,
+        "tool": null,
+        "field": "live_fallback_decision.live_error"
+      },
+      "recommended_action": "Review live inference error details and model-pack readiness before rerunning live mode."
     }
   ]
 }

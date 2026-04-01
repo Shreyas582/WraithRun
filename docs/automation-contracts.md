@@ -8,6 +8,11 @@ Contract version:
 
 Validate the top-level `contract_version` field before enforcing strict field-level parsing.
 
+Live-mode note:
+
+- Run report includes optional `live_fallback_decision` when policy-driven fallback is triggered.
+- Findings adapter summary includes optional `live_fallback_decision` for pipeline audit visibility.
+
 ## Schema Files
 
 - Run report: `docs/schemas/run-report.schema.json`

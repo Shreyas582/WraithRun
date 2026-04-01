@@ -6,7 +6,9 @@ use std::{fmt::Write as _, fs};
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use core_engine::agent::Agent;
-use core_engine::{CoverageBaseline, EvidencePointer, FindingSeverity, RunReport};
+use core_engine::{
+    CoverageBaseline, EvidencePointer, Finding, FindingSeverity, LiveFallbackDecision, RunReport,
+};
 use cyber_tools::{ToolRegistry, ToolSpec};
 use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
 use serde::{Deserialize, Serialize};
@@ -70,6 +72,14 @@ enum ExitSeverityThreshold {
     Medium,
     High,
     Critical,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+enum LiveFallbackPolicy {
+    #[default]
+    None,
+    DryRunOnError,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -171,6 +181,9 @@ struct Cli {
     dry_run: bool,
 
     #[arg(long, value_enum)]
+    live_fallback_policy: Option<LiveFallbackPolicy>,
+
+    #[arg(long, value_enum)]
     format: Option<OutputFormat>,
 
     #[arg(long, value_enum)]
@@ -225,6 +238,7 @@ struct SettingsFragment {
     max_new_tokens: Option<usize>,
     temperature: Option<f32>,
     live: Option<bool>,
+    live_fallback_policy: Option<LiveFallbackPolicy>,
     format: Option<OutputFormat>,
     automation_adapter: Option<AutomationAdapter>,
     exit_policy: Option<ExitPolicy>,
@@ -257,6 +271,7 @@ struct RuntimeConfig {
     max_new_tokens: usize,
     temperature: f32,
     live: bool,
+    live_fallback_policy: LiveFallbackPolicy,
     format: OutputFormat,
     automation_adapter: Option<AutomationAdapter>,
     exit_policy: ExitPolicy,
@@ -277,6 +292,7 @@ struct RuntimeConfigView {
     task: String,
     mode: &'static str,
     live: bool,
+    live_fallback_policy: LiveFallbackPolicy,
     model: String,
     tokenizer: Option<String>,
     max_steps: usize,
@@ -301,6 +317,7 @@ struct RuntimeConfigView {
 struct RuntimeConfigSources {
     task: String,
     live: String,
+    live_fallback_policy: String,
     model: String,
     tokenizer: String,
     max_steps: String,
@@ -460,6 +477,8 @@ struct FindingsAdapterSummary {
     task: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     case_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    live_fallback_decision: Option<LiveFallbackDecision>,
     finding_count: usize,
     highest_severity: String,
     severity_counts: AdapterSeverityCounts,
@@ -492,6 +511,7 @@ impl RuntimeConfig {
             max_new_tokens: DEFAULT_MAX_NEW_TOKENS,
             temperature: DEFAULT_TEMPERATURE,
             live: false,
+            live_fallback_policy: LiveFallbackPolicy::None,
             format: OutputFormat::Json,
             automation_adapter: None,
             exit_policy: ExitPolicy::None,
@@ -526,6 +546,9 @@ impl RuntimeConfig {
         }
         if let Some(live) = fragment.live {
             self.live = live;
+        }
+        if let Some(live_fallback_policy) = fragment.live_fallback_policy {
+            self.live_fallback_policy = live_fallback_policy;
         }
         if let Some(format) = fragment.format {
             self.format = format;
@@ -574,6 +597,7 @@ impl RuntimeConfigSources {
         Self {
             task: task_source.to_string(),
             live: "default".to_string(),
+            live_fallback_policy: "default".to_string(),
             model: "default".to_string(),
             tokenizer: "default".to_string(),
             max_steps: "default".to_string(),
@@ -753,27 +777,7 @@ async fn main() -> Result<()> {
     let runtime = resolve_runtime_config(&cli)?;
     init_tracing(runtime.log_mode);
 
-    let vitis_config = build_vitis_config(&runtime);
-
-    let model_config = ModelConfig {
-        model_path: runtime.model,
-        tokenizer_path: runtime.tokenizer,
-        max_new_tokens: runtime.max_new_tokens,
-        temperature: runtime.temperature,
-        dry_run: !runtime.live,
-        vitis_config,
-    };
-
-    let brain = OnnxVitisEngine::new(model_config);
-    let tools = ToolRegistry::with_default_tools();
-    let mut agent = Agent::new(brain, tools).with_max_steps(runtime.max_steps);
-
-    if let Some(baseline_bundle) = runtime.baseline_bundle.as_deref() {
-        let coverage_baseline = load_coverage_baseline_from_bundle(baseline_bundle)?;
-        agent = agent.with_coverage_baseline(coverage_baseline);
-    }
-
-    let mut report = agent.run(&runtime.task).await?;
+    let mut report = run_with_live_fallback(&runtime).await?;
     if let Some(case_id) = runtime.case_id.as_ref() {
         report.case_id = Some(case_id.trim().to_string());
     }
@@ -1570,6 +1574,7 @@ fn env_settings_fragment() -> Result<SettingsFragment> {
         max_new_tokens: read_env_parse("WRAITHRUN_MAX_NEW_TOKENS")?,
         temperature: read_env_parse("WRAITHRUN_TEMPERATURE")?,
         live: read_env_bool("WRAITHRUN_LIVE")?,
+        live_fallback_policy: read_env_live_fallback_policy("WRAITHRUN_LIVE_FALLBACK_POLICY")?,
         format: read_env_output_format("WRAITHRUN_FORMAT")?,
         automation_adapter: read_env_automation_adapter("WRAITHRUN_AUTOMATION_ADAPTER")?,
         exit_policy: read_env_exit_policy("WRAITHRUN_EXIT_POLICY")?,
@@ -1607,6 +1612,9 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     }
     if cli.dry_run {
         runtime.live = false;
+    }
+    if let Some(live_fallback_policy) = cli.live_fallback_policy {
+        runtime.live_fallback_policy = live_fallback_policy;
     }
     if let Some(format) = cli.format {
         runtime.format = format;
@@ -1681,6 +1689,10 @@ fn apply_fragment_with_source(
     if let Some(live) = fragment.live {
         runtime.live = live;
         sources.live = source.to_string();
+    }
+    if let Some(live_fallback_policy) = fragment.live_fallback_policy {
+        runtime.live_fallback_policy = live_fallback_policy;
+        sources.live_fallback_policy = source.to_string();
     }
     if let Some(format) = fragment.format {
         runtime.format = format;
@@ -1768,6 +1780,10 @@ fn apply_cli_overrides_with_source(
     if cli.dry_run {
         runtime.live = false;
         sources.live = "cli --dry-run".to_string();
+    }
+    if let Some(live_fallback_policy) = cli.live_fallback_policy {
+        runtime.live_fallback_policy = live_fallback_policy;
+        sources.live_fallback_policy = "cli --live-fallback-policy".to_string();
     }
     if let Some(format) = cli.format {
         runtime.format = format;
@@ -1984,6 +2000,22 @@ fn parse_automation_adapter(raw: &str, source: &str) -> Result<AutomationAdapter
     match raw.to_ascii_lowercase().as_str() {
         "findings-v1" => Ok(AutomationAdapter::FindingsV1),
         _ => bail!("{source} must be 'findings-v1' (got '{raw}')"),
+    }
+}
+
+fn read_env_live_fallback_policy(name: &str) -> Result<Option<LiveFallbackPolicy>> {
+    let Some(raw) = read_env_string(name)? else {
+        return Ok(None);
+    };
+
+    parse_live_fallback_policy(&raw, name).map(Some)
+}
+
+fn parse_live_fallback_policy(raw: &str, source: &str) -> Result<LiveFallbackPolicy> {
+    match raw.to_ascii_lowercase().as_str() {
+        "none" => Ok(LiveFallbackPolicy::None),
+        "dry-run-on-error" => Ok(LiveFallbackPolicy::DryRunOnError),
+        _ => bail!("{source} must be one of: none, dry-run-on-error (got '{raw}')"),
     }
 }
 
@@ -2319,6 +2351,7 @@ impl RuntimeConfigView {
             task: runtime.task.clone(),
             mode: if runtime.live { "live" } else { "dry-run" },
             live: runtime.live,
+            live_fallback_policy: runtime.live_fallback_policy,
             model: runtime.model.display().to_string(),
             tokenizer: runtime
                 .tokenizer
@@ -2518,51 +2551,10 @@ fn run_doctor(cli: &Cli) -> DoctorReport {
                     ),
                 );
 
-                if runtime.live {
-                    if runtime.model.is_file() {
-                        report.push(
-                            DoctorStatus::Pass,
-                            "live-model-path",
-                            format!("Model file found: {}", runtime.model.display()),
-                        );
-                    } else {
-                        report.push(
-                            DoctorStatus::Warn,
-                            "live-model-path",
-                            format!(
-                                "Live mode is enabled but model file was not found at {}.",
-                                runtime.model.display()
-                            ),
-                        );
-                    }
+                run_model_pack_doctor_checks(&runtime, &mut report);
 
-                    match runtime.tokenizer {
-                        Some(tokenizer) if tokenizer.is_file() => {
-                            report.push(
-                                DoctorStatus::Pass,
-                                "live-tokenizer-path",
-                                format!("Tokenizer file found: {}", tokenizer.display()),
-                            );
-                        }
-                        Some(tokenizer) => {
-                            report.push(
-                                DoctorStatus::Warn,
-                                "live-tokenizer-path",
-                                format!("Tokenizer file not found: {}", tokenizer.display()),
-                            );
-                        }
-                        None => {
-                            report.push(
-                                DoctorStatus::Warn,
-                                "live-tokenizer-path",
-                                "No tokenizer path resolved for live mode. The runtime will only work if tokenizer discovery succeeds.",
-                            );
-                        }
-                    }
-                }
-
-                if let Some(vitis_config) = runtime.vitis_config {
-                    let path = PathBuf::from(&vitis_config);
+                if let Some(vitis_config) = runtime.vitis_config.as_ref() {
+                    let path = PathBuf::from(vitis_config);
                     if path.is_file() {
                         report.push(
                             DoctorStatus::Pass,
@@ -2592,6 +2584,186 @@ fn run_doctor(cli: &Cli) -> DoctorReport {
     }
 
     report
+}
+
+fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorReport) {
+    if !runtime.live {
+        return;
+    }
+
+    if runtime.model.is_file() {
+        report.push(
+            DoctorStatus::Pass,
+            "live-model-path",
+            format!("Model file found: {}", runtime.model.display()),
+        );
+
+        let onnx_extension = runtime
+            .model
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("onnx"))
+            .unwrap_or(false);
+
+        if onnx_extension {
+            report.push(
+                DoctorStatus::Pass,
+                "live-model-format",
+                format!("Model extension is .onnx: {}", runtime.model.display()),
+            );
+        } else {
+            report.push(
+                DoctorStatus::Warn,
+                "live-model-format",
+                format!(
+                    "Model file extension is not .onnx (path: {}).",
+                    runtime.model.display()
+                ),
+            );
+        }
+
+        match fs::metadata(&runtime.model) {
+            Ok(metadata) if metadata.len() > 0 => {
+                report.push(
+                    DoctorStatus::Pass,
+                    "live-model-size",
+                    format!("Model file size: {} bytes", metadata.len()),
+                );
+            }
+            Ok(_) => {
+                report.push(
+                    DoctorStatus::Fail,
+                    "live-model-size",
+                    format!("Model file is empty: {}", runtime.model.display()),
+                );
+            }
+            Err(err) => {
+                report.push(
+                    DoctorStatus::Fail,
+                    "live-model-size",
+                    format!(
+                        "Unable to read model metadata '{}': {err}",
+                        runtime.model.display()
+                    ),
+                );
+            }
+        }
+    } else {
+        report.push(
+            DoctorStatus::Warn,
+            "live-model-path",
+            format!(
+                "Live mode is enabled but model file was not found at {}.",
+                runtime.model.display()
+            ),
+        );
+    }
+
+    match runtime.tokenizer.as_ref() {
+        Some(tokenizer) if tokenizer.is_file() => {
+            report.push(
+                DoctorStatus::Pass,
+                "live-tokenizer-path",
+                format!("Tokenizer file found: {}", tokenizer.display()),
+            );
+
+            match fs::metadata(tokenizer) {
+                Ok(metadata) if metadata.len() > 0 => {
+                    report.push(
+                        DoctorStatus::Pass,
+                        "live-tokenizer-size",
+                        format!("Tokenizer file size: {} bytes", metadata.len()),
+                    );
+                }
+                Ok(_) => {
+                    report.push(
+                        DoctorStatus::Fail,
+                        "live-tokenizer-size",
+                        format!("Tokenizer file is empty: {}", tokenizer.display()),
+                    );
+                    return;
+                }
+                Err(err) => {
+                    report.push(
+                        DoctorStatus::Fail,
+                        "live-tokenizer-size",
+                        format!(
+                            "Unable to read tokenizer metadata '{}': {err}",
+                            tokenizer.display()
+                        ),
+                    );
+                    return;
+                }
+            }
+
+            match fs::read(tokenizer) {
+                Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+                    Ok(json) => {
+                        report.push(
+                            DoctorStatus::Pass,
+                            "live-tokenizer-json",
+                            format!(
+                                "Tokenizer JSON parsed successfully: {}",
+                                tokenizer.display()
+                            ),
+                        );
+
+                        if json
+                            .as_object()
+                            .map(|obj| obj.contains_key("model"))
+                            .unwrap_or(false)
+                        {
+                            report.push(
+                                DoctorStatus::Pass,
+                                "live-tokenizer-shape",
+                                "Tokenizer JSON contains top-level 'model' key.",
+                            );
+                        } else {
+                            report.push(
+                                DoctorStatus::Warn,
+                                "live-tokenizer-shape",
+                                "Tokenizer JSON parsed but top-level 'model' key was not found.",
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        report.push(
+                            DoctorStatus::Fail,
+                            "live-tokenizer-json",
+                            format!(
+                                "Tokenizer JSON parse failed for '{}': {err}",
+                                tokenizer.display()
+                            ),
+                        );
+                    }
+                },
+                Err(err) => {
+                    report.push(
+                        DoctorStatus::Fail,
+                        "live-tokenizer-json",
+                        format!(
+                            "Unable to read tokenizer file '{}': {err}",
+                            tokenizer.display()
+                        ),
+                    );
+                }
+            }
+        }
+        Some(tokenizer) => {
+            report.push(
+                DoctorStatus::Warn,
+                "live-tokenizer-path",
+                format!("Tokenizer file not found: {}", tokenizer.display()),
+            );
+        }
+        None => {
+            report.push(
+                DoctorStatus::Warn,
+                "live-tokenizer-path",
+                "No tokenizer path resolved for live mode. The runtime will only work if tokenizer discovery succeeds.",
+            );
+        }
+    }
 }
 
 fn render_doctor_report(report: &DoctorReport) -> String {
@@ -2677,6 +2849,7 @@ fn render_findings_adapter_v1(report: &RunReport) -> Result<String> {
         summary: FindingsAdapterSummary {
             task: report.task.clone(),
             case_id: report.case_id.clone(),
+            live_fallback_decision: report.live_fallback_decision.clone(),
             finding_count: findings.len(),
             highest_severity: if findings.is_empty() {
                 "none".to_string()
@@ -3257,6 +3430,11 @@ fn render_summary(report: &RunReport) -> String {
     if let Some(case_id) = report.case_id.as_deref() {
         let _ = writeln!(output, "Case ID: {case_id}");
     }
+    if let Some(decision) = report.live_fallback_decision.as_ref() {
+        let _ = writeln!(output, "Live Fallback: {}", decision.fallback_mode);
+        let _ = writeln!(output, "Fallback Policy: {}", decision.policy);
+        let _ = writeln!(output, "Fallback Reason: {}", decision.reason);
+    }
     let _ = writeln!(output, "Turns: {}", report.turns.len());
     let _ = writeln!(output, "Findings: {}", report.findings.len());
     let _ = writeln!(output, "Final Answer: {}", report.final_answer);
@@ -3322,6 +3500,11 @@ fn render_markdown(report: &RunReport) -> String {
     let _ = writeln!(output, "- Task: {}", report.task);
     if let Some(case_id) = report.case_id.as_deref() {
         let _ = writeln!(output, "- Case ID: {case_id}");
+    }
+    if let Some(decision) = report.live_fallback_decision.as_ref() {
+        let _ = writeln!(output, "- Live Fallback: {}", decision.fallback_mode);
+        let _ = writeln!(output, "- Fallback Policy: {}", decision.policy);
+        let _ = writeln!(output, "- Fallback Reason: {}", decision.reason);
     }
     let _ = writeln!(output, "- Turns: {}", report.turns.len());
     let _ = writeln!(output, "- Findings: {}", report.findings.len());
@@ -3432,6 +3615,95 @@ fn render_evidence_pointer(pointer: &EvidencePointer) -> String {
     format!("{turn}, {tool}, {}", pointer.field)
 }
 
+async fn run_with_live_fallback(runtime: &RuntimeConfig) -> Result<RunReport> {
+    if !runtime.live {
+        return run_agent_once(runtime, true).await;
+    }
+
+    match run_agent_once(runtime, false).await {
+        Ok(report) => Ok(report),
+        Err(err) => {
+            if runtime.live_fallback_policy != LiveFallbackPolicy::DryRunOnError {
+                return Err(err);
+            }
+
+            let live_error = format!("{err:#}");
+            let mut report = run_agent_once(runtime, true).await.with_context(|| {
+                format!(
+                    "live run failed and fallback dry-run also failed (live error: {live_error})"
+                )
+            })?;
+
+            let decision = LiveFallbackDecision {
+                policy: live_fallback_policy_token(runtime.live_fallback_policy).to_string(),
+                reason: "live inference failed and runtime fell back to dry-run".to_string(),
+                live_error,
+                fallback_mode: "dry-run".to_string(),
+            };
+
+            append_live_fallback_finding(&mut report, &decision);
+            report.live_fallback_decision = Some(decision);
+
+            Ok(report)
+        }
+    }
+}
+
+async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunReport> {
+    let vitis_config = build_vitis_config(runtime);
+    let model_config = ModelConfig {
+        model_path: runtime.model.clone(),
+        tokenizer_path: runtime.tokenizer.clone(),
+        max_new_tokens: runtime.max_new_tokens,
+        temperature: runtime.temperature,
+        dry_run,
+        vitis_config,
+    };
+
+    let brain = OnnxVitisEngine::new(model_config);
+    let tools = ToolRegistry::with_default_tools();
+    let mut agent = Agent::new(brain, tools).with_max_steps(runtime.max_steps);
+
+    if let Some(baseline_bundle) = runtime.baseline_bundle.as_deref() {
+        let coverage_baseline = load_coverage_baseline_from_bundle(baseline_bundle)?;
+        agent = agent.with_coverage_baseline(coverage_baseline);
+    }
+
+    agent.run(&runtime.task).await
+}
+
+fn append_live_fallback_finding(report: &mut RunReport, decision: &LiveFallbackDecision) {
+    if report
+        .findings
+        .iter()
+        .any(|finding| finding.evidence_pointer.field == "live_fallback_decision.live_error")
+    {
+        return;
+    }
+
+    report.findings.push(Finding {
+        title: "Live mode fallback applied after inference failure".to_string(),
+        severity: FindingSeverity::Info,
+        confidence: 1.0,
+        evidence_pointer: EvidencePointer {
+            turn: None,
+            tool: None,
+            field: "live_fallback_decision.live_error".to_string(),
+        },
+        recommended_action: format!(
+            "Review live inference error details and model-pack readiness, then rerun live mode after fixing root cause. Fallback reason: {}.",
+            decision.reason
+        ),
+    });
+}
+
+fn live_fallback_policy_token(policy: LiveFallbackPolicy) -> &'static str {
+    match policy {
+        LiveFallbackPolicy::None => "none",
+        LiveFallbackPolicy::DryRunOnError => "dry-run-on-error",
+    }
+}
+
 fn build_vitis_config(runtime: &RuntimeConfig) -> Option<VitisEpConfig> {
     if runtime.vitis_config.is_none()
         && runtime.vitis_cache_dir.is_none()
@@ -3476,10 +3748,13 @@ mod tests {
 
     use serde_json::json;
 
-    use core_engine::{AgentTurn, EvidencePointer, Finding, FindingSeverity, RunReport, ToolCall};
+    use core_engine::{
+        AgentTurn, EvidencePointer, Finding, FindingSeverity, LiveFallbackDecision, RunReport,
+        ToolCall,
+    };
 
     use super::{
-        ensure_introspection_format_usage, evaluate_exit_policy,
+        append_live_fallback_finding, ensure_introspection_format_usage, evaluate_exit_policy,
         load_coverage_baseline_from_bundle, merge_sources, render_bundle_verification_report,
         render_doctor_report, render_doctor_report_json, render_effective_config_explanation_json,
         render_effective_config_json, render_profile_list, render_profile_list_json, render_report,
@@ -3487,10 +3762,10 @@ mod tests {
         render_tool_detail_json, render_tool_list, render_tool_list_json,
         resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
         resolve_task_for_run, run_describe_tool, run_init_config, run_list_tools,
-        verify_evidence_bundle, write_evidence_bundle, write_evidence_bundle_archive,
-        AutomationAdapter, Cli, DoctorReport, DoctorStatus, ExitPolicy, ExitSeverityThreshold,
-        FileConfig, IntrospectionFormat, OutputFormat, SettingsFragment, TaskTemplate,
-        ToolRegistry,
+        run_model_pack_doctor_checks, verify_evidence_bundle, write_evidence_bundle,
+        write_evidence_bundle_archive, AutomationAdapter, Cli, DoctorReport, DoctorStatus,
+        ExitPolicy, ExitSeverityThreshold, FileConfig, IntrospectionFormat, LiveFallbackPolicy,
+        OutputFormat, RuntimeConfig, SettingsFragment, TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -3522,6 +3797,7 @@ mod tests {
             temperature: None,
             live: false,
             dry_run: false,
+            live_fallback_policy: None,
             format: None,
             automation_adapter: None,
             exit_policy: None,
@@ -3544,6 +3820,7 @@ mod tests {
         RunReport {
             task: "Check suspicious listener ports and summarize risk".to_string(),
             case_id: Some("CASE-2026-0001".to_string()),
+            live_fallback_decision: None,
             turns: vec![AgentTurn {
                 thought: "<call>{...}</call>".to_string(),
                 tool_call: Some(ToolCall {
@@ -3638,6 +3915,48 @@ mod tests {
         assert!(err
             .to_string()
             .contains("automation_adapter requires JSON output format"));
+    }
+
+    #[test]
+    fn fallback_policy_from_cli_is_applied() {
+        let mut cli = base_cli();
+        cli.live_fallback_policy = Some(LiveFallbackPolicy::DryRunOnError);
+
+        let resolved = merge_sources(
+            &cli,
+            "test-task".to_string(),
+            None,
+            None,
+            None,
+            &SettingsFragment::default(),
+        )
+        .expect("runtime resolution should succeed");
+
+        assert_eq!(
+            resolved.live_fallback_policy,
+            LiveFallbackPolicy::DryRunOnError
+        );
+    }
+
+    #[test]
+    fn appends_live_fallback_finding_once() {
+        let mut report = sample_report();
+        let decision = LiveFallbackDecision {
+            policy: "dry-run-on-error".to_string(),
+            reason: "live inference failed and runtime fell back to dry-run".to_string(),
+            live_error: "session create failed".to_string(),
+            fallback_mode: "dry-run".to_string(),
+        };
+
+        append_live_fallback_finding(&mut report, &decision);
+        append_live_fallback_finding(&mut report, &decision);
+
+        let fallback_findings = report
+            .findings
+            .iter()
+            .filter(|finding| finding.evidence_pointer.field == "live_fallback_decision.live_error")
+            .count();
+        assert_eq!(fallback_findings, 1);
     }
 
     #[test]
@@ -3989,6 +4308,71 @@ mod tests {
         assert!(rendered.contains("\"summary\""));
         assert!(rendered.contains("\"pass\": 1"));
         assert!(rendered.contains("\"status\": \"fail\""));
+    }
+
+    #[test]
+    fn model_pack_doctor_checks_detect_invalid_live_pack() {
+        let temp_dir = unique_temp_dir("wraithrun-doctor-model-pack-invalid");
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let model_path = temp_dir.join("model.bin");
+        let tokenizer_path = temp_dir.join("tokenizer.json");
+        fs::write(&model_path, b"not an onnx payload").expect("model fixture should be written");
+        fs::write(&tokenizer_path, b"").expect("tokenizer fixture should be written");
+
+        let mut runtime = RuntimeConfig::new("doctor-task".to_string());
+        runtime.live = true;
+        runtime.model = model_path;
+        runtime.tokenizer = Some(tokenizer_path);
+
+        let mut report = DoctorReport::default();
+        run_model_pack_doctor_checks(&runtime, &mut report);
+
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.name == "live-model-format" && check.status == DoctorStatus::Warn));
+        assert!(report.checks.iter().any(|check| {
+            check.name == "live-tokenizer-size" && check.status == DoctorStatus::Fail
+        }));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn model_pack_doctor_checks_accept_valid_live_pack() {
+        let temp_dir = unique_temp_dir("wraithrun-doctor-model-pack-valid");
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let model_path = temp_dir.join("model.onnx");
+        let tokenizer_path = temp_dir.join("tokenizer.json");
+        fs::write(&model_path, b"onnx-model-bytes").expect("model fixture should be written");
+        fs::write(
+            &tokenizer_path,
+            r#"{"model":{"type":"WordPiece"},"version":"1.0"}"#,
+        )
+        .expect("tokenizer fixture should be written");
+
+        let mut runtime = RuntimeConfig::new("doctor-task".to_string());
+        runtime.live = true;
+        runtime.model = model_path;
+        runtime.tokenizer = Some(tokenizer_path);
+
+        let mut report = DoctorReport::default();
+        run_model_pack_doctor_checks(&runtime, &mut report);
+
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.name == "live-model-format" && check.status == DoctorStatus::Pass));
+        assert!(report.checks.iter().any(|check| {
+            check.name == "live-tokenizer-json" && check.status == DoctorStatus::Pass
+        }));
+        assert!(report.checks.iter().any(|check| {
+            check.name == "live-tokenizer-shape" && check.status == DoctorStatus::Pass
+        }));
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

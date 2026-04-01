@@ -111,6 +111,7 @@ impl<B: InferenceEngine> Agent<B> {
                 return Ok(RunReport {
                     task: task.to_string(),
                     case_id: None,
+                    live_fallback_decision: None,
                     turns,
                     final_answer,
                     findings,
@@ -149,6 +150,7 @@ impl<B: InferenceEngine> Agent<B> {
             return Ok(RunReport {
                 task: task.to_string(),
                 case_id: None,
+                live_fallback_decision: None,
                 turns,
                 final_answer: output,
                 findings,
@@ -161,6 +163,7 @@ impl<B: InferenceEngine> Agent<B> {
         Ok(RunReport {
             task: task.to_string(),
             case_id: None,
+            live_fallback_decision: None,
             turns,
             final_answer,
             findings,
