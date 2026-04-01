@@ -48,6 +48,30 @@ enum IntrospectionFormat {
     Json,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum AutomationAdapter {
+    FindingsV1,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+enum ExitPolicy {
+    #[default]
+    None,
+    SeverityThreshold,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum ExitSeverityThreshold {
+    Info,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 enum TaskTemplate {
     #[value(name = "ssh-keys")]
@@ -149,6 +173,15 @@ struct Cli {
     #[arg(long, value_enum)]
     format: Option<OutputFormat>,
 
+    #[arg(long, value_enum)]
+    automation_adapter: Option<AutomationAdapter>,
+
+    #[arg(long, value_enum)]
+    exit_policy: Option<ExitPolicy>,
+
+    #[arg(long, value_enum, requires = "exit_policy")]
+    exit_threshold: Option<ExitSeverityThreshold>,
+
     #[arg(long)]
     output_file: Option<PathBuf>,
 
@@ -193,6 +226,9 @@ struct SettingsFragment {
     temperature: Option<f32>,
     live: Option<bool>,
     format: Option<OutputFormat>,
+    automation_adapter: Option<AutomationAdapter>,
+    exit_policy: Option<ExitPolicy>,
+    exit_threshold: Option<ExitSeverityThreshold>,
     output_file: Option<PathBuf>,
     case_id: Option<String>,
     evidence_bundle_dir: Option<PathBuf>,
@@ -222,6 +258,9 @@ struct RuntimeConfig {
     temperature: f32,
     live: bool,
     format: OutputFormat,
+    automation_adapter: Option<AutomationAdapter>,
+    exit_policy: ExitPolicy,
+    exit_threshold: Option<ExitSeverityThreshold>,
     output_file: Option<PathBuf>,
     case_id: Option<String>,
     evidence_bundle_dir: Option<PathBuf>,
@@ -244,6 +283,9 @@ struct RuntimeConfigView {
     max_new_tokens: usize,
     temperature: f32,
     format: OutputFormat,
+    automation_adapter: Option<AutomationAdapter>,
+    exit_policy: ExitPolicy,
+    exit_threshold: Option<ExitSeverityThreshold>,
     output_file: Option<String>,
     case_id: Option<String>,
     evidence_bundle_dir: Option<String>,
@@ -265,6 +307,9 @@ struct RuntimeConfigSources {
     max_new_tokens: String,
     temperature: String,
     format: String,
+    automation_adapter: String,
+    exit_policy: String,
+    exit_threshold: String,
     output_file: String,
     case_id: String,
     evidence_bundle_dir: String,
@@ -401,6 +446,42 @@ struct DoctorReportView<'a> {
     checks: &'a [DoctorCheck],
 }
 
+#[derive(Debug, Default, Serialize)]
+struct AdapterSeverityCounts {
+    info: usize,
+    low: usize,
+    medium: usize,
+    high: usize,
+    critical: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct FindingsAdapterSummary {
+    task: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    case_id: Option<String>,
+    finding_count: usize,
+    highest_severity: String,
+    severity_counts: AdapterSeverityCounts,
+}
+
+#[derive(Debug, Serialize)]
+struct FindingsAdapterEntry {
+    finding_id: String,
+    title: String,
+    severity: FindingSeverity,
+    confidence: f32,
+    recommended_action: String,
+    evidence_pointer: EvidencePointer,
+}
+
+#[derive(Debug, Serialize)]
+struct FindingsAdapterView {
+    adapter: &'static str,
+    summary: FindingsAdapterSummary,
+    findings: Vec<FindingsAdapterEntry>,
+}
+
 impl RuntimeConfig {
     fn new(task: String) -> Self {
         Self {
@@ -412,6 +493,9 @@ impl RuntimeConfig {
             temperature: DEFAULT_TEMPERATURE,
             live: false,
             format: OutputFormat::Json,
+            automation_adapter: None,
+            exit_policy: ExitPolicy::None,
+            exit_threshold: None,
             output_file: None,
             case_id: None,
             evidence_bundle_dir: None,
@@ -445,6 +529,15 @@ impl RuntimeConfig {
         }
         if let Some(format) = fragment.format {
             self.format = format;
+        }
+        if let Some(automation_adapter) = fragment.automation_adapter {
+            self.automation_adapter = Some(automation_adapter);
+        }
+        if let Some(exit_policy) = fragment.exit_policy {
+            self.exit_policy = exit_policy;
+        }
+        if let Some(exit_threshold) = fragment.exit_threshold {
+            self.exit_threshold = Some(exit_threshold);
         }
         if let Some(output_file) = &fragment.output_file {
             self.output_file = Some(output_file.clone());
@@ -487,6 +580,9 @@ impl RuntimeConfigSources {
             max_new_tokens: "default".to_string(),
             temperature: "default".to_string(),
             format: "default".to_string(),
+            automation_adapter: "default".to_string(),
+            exit_policy: "default".to_string(),
+            exit_threshold: "default".to_string(),
             output_file: "default".to_string(),
             case_id: "default".to_string(),
             evidence_bundle_dir: "default".to_string(),
@@ -690,11 +786,17 @@ async fn main() -> Result<()> {
         write_evidence_bundle_archive(archive_path, &report)?;
     }
 
-    let rendered = render_report(&report, runtime.format)?;
+    let rendered = render_report(&report, runtime.format, runtime.automation_adapter)?;
     if let Some(path) = &runtime.output_file {
         write_report_file(path, &rendered)?;
     }
     println!("{rendered}");
+
+    if let Some(message) =
+        evaluate_exit_policy(&report, runtime.exit_policy, runtime.exit_threshold)
+    {
+        bail!("{message}");
+    }
 
     Ok(())
 }
@@ -1469,6 +1571,9 @@ fn env_settings_fragment() -> Result<SettingsFragment> {
         temperature: read_env_parse("WRAITHRUN_TEMPERATURE")?,
         live: read_env_bool("WRAITHRUN_LIVE")?,
         format: read_env_output_format("WRAITHRUN_FORMAT")?,
+        automation_adapter: read_env_automation_adapter("WRAITHRUN_AUTOMATION_ADAPTER")?,
+        exit_policy: read_env_exit_policy("WRAITHRUN_EXIT_POLICY")?,
+        exit_threshold: read_env_exit_threshold("WRAITHRUN_EXIT_THRESHOLD")?,
         output_file: read_env_path("WRAITHRUN_OUTPUT_FILE")?,
         case_id: read_env_string("WRAITHRUN_CASE_ID")?,
         evidence_bundle_dir: read_env_path("WRAITHRUN_EVIDENCE_BUNDLE_DIR")?,
@@ -1505,6 +1610,15 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     }
     if let Some(format) = cli.format {
         runtime.format = format;
+    }
+    if let Some(automation_adapter) = cli.automation_adapter {
+        runtime.automation_adapter = Some(automation_adapter);
+    }
+    if let Some(exit_policy) = cli.exit_policy {
+        runtime.exit_policy = exit_policy;
+    }
+    if let Some(exit_threshold) = cli.exit_threshold {
+        runtime.exit_threshold = Some(exit_threshold);
     }
     if let Some(output_file) = &cli.output_file {
         runtime.output_file = Some(output_file.clone());
@@ -1571,6 +1685,18 @@ fn apply_fragment_with_source(
     if let Some(format) = fragment.format {
         runtime.format = format;
         sources.format = source.to_string();
+    }
+    if let Some(automation_adapter) = fragment.automation_adapter {
+        runtime.automation_adapter = Some(automation_adapter);
+        sources.automation_adapter = source.to_string();
+    }
+    if let Some(exit_policy) = fragment.exit_policy {
+        runtime.exit_policy = exit_policy;
+        sources.exit_policy = source.to_string();
+    }
+    if let Some(exit_threshold) = fragment.exit_threshold {
+        runtime.exit_threshold = Some(exit_threshold);
+        sources.exit_threshold = source.to_string();
     }
     if let Some(output_file) = &fragment.output_file {
         runtime.output_file = Some(output_file.clone());
@@ -1647,6 +1773,18 @@ fn apply_cli_overrides_with_source(
         runtime.format = format;
         sources.format = "cli --format".to_string();
     }
+    if let Some(automation_adapter) = cli.automation_adapter {
+        runtime.automation_adapter = Some(automation_adapter);
+        sources.automation_adapter = "cli --automation-adapter".to_string();
+    }
+    if let Some(exit_policy) = cli.exit_policy {
+        runtime.exit_policy = exit_policy;
+        sources.exit_policy = "cli --exit-policy".to_string();
+    }
+    if let Some(exit_threshold) = cli.exit_threshold {
+        runtime.exit_threshold = Some(exit_threshold);
+        sources.exit_threshold = "cli --exit-threshold".to_string();
+    }
     if let Some(output_file) = &cli.output_file {
         runtime.output_file = Some(output_file.clone());
         sources.output_file = "cli --output-file".to_string();
@@ -1698,6 +1836,14 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Result<()> {
     }
     if config.temperature.is_nan() || !(0.0..=2.0).contains(&config.temperature) {
         bail!("temperature must be between 0.0 and 2.0");
+    }
+
+    if config.automation_adapter.is_some() && config.format != OutputFormat::Json {
+        bail!("automation_adapter requires JSON output format (--format json)");
+    }
+
+    if config.exit_policy == ExitPolicy::None && config.exit_threshold.is_some() {
+        bail!("exit_threshold requires exit_policy=severity-threshold");
     }
 
     if let Some(case_id) = config.case_id.as_deref() {
@@ -1823,6 +1969,56 @@ fn parse_output_format(raw: &str, source: &str) -> Result<OutputFormat> {
         "summary" => Ok(OutputFormat::Summary),
         "markdown" => Ok(OutputFormat::Markdown),
         _ => bail!("{source} must be one of: json, summary, markdown (got '{raw}')"),
+    }
+}
+
+fn read_env_automation_adapter(name: &str) -> Result<Option<AutomationAdapter>> {
+    let Some(raw) = read_env_string(name)? else {
+        return Ok(None);
+    };
+
+    parse_automation_adapter(&raw, name).map(Some)
+}
+
+fn parse_automation_adapter(raw: &str, source: &str) -> Result<AutomationAdapter> {
+    match raw.to_ascii_lowercase().as_str() {
+        "findings-v1" => Ok(AutomationAdapter::FindingsV1),
+        _ => bail!("{source} must be 'findings-v1' (got '{raw}')"),
+    }
+}
+
+fn read_env_exit_policy(name: &str) -> Result<Option<ExitPolicy>> {
+    let Some(raw) = read_env_string(name)? else {
+        return Ok(None);
+    };
+
+    parse_exit_policy(&raw, name).map(Some)
+}
+
+fn parse_exit_policy(raw: &str, source: &str) -> Result<ExitPolicy> {
+    match raw.to_ascii_lowercase().as_str() {
+        "none" => Ok(ExitPolicy::None),
+        "severity-threshold" => Ok(ExitPolicy::SeverityThreshold),
+        _ => bail!("{source} must be one of: none, severity-threshold (got '{raw}')"),
+    }
+}
+
+fn read_env_exit_threshold(name: &str) -> Result<Option<ExitSeverityThreshold>> {
+    let Some(raw) = read_env_string(name)? else {
+        return Ok(None);
+    };
+
+    parse_exit_threshold(&raw, name).map(Some)
+}
+
+fn parse_exit_threshold(raw: &str, source: &str) -> Result<ExitSeverityThreshold> {
+    match raw.to_ascii_lowercase().as_str() {
+        "info" => Ok(ExitSeverityThreshold::Info),
+        "low" => Ok(ExitSeverityThreshold::Low),
+        "medium" => Ok(ExitSeverityThreshold::Medium),
+        "high" => Ok(ExitSeverityThreshold::High),
+        "critical" => Ok(ExitSeverityThreshold::Critical),
+        _ => bail!("{source} must be one of: info, low, medium, high, critical (got '{raw}')"),
     }
 }
 
@@ -2132,6 +2328,9 @@ impl RuntimeConfigView {
             max_new_tokens: runtime.max_new_tokens,
             temperature: runtime.temperature,
             format: runtime.format,
+            automation_adapter: runtime.automation_adapter,
+            exit_policy: runtime.exit_policy,
+            exit_threshold: runtime.exit_threshold,
             output_file: runtime
                 .output_file
                 .as_ref()
@@ -2431,11 +2630,153 @@ fn render_doctor_report_json(report: &DoctorReport) -> Result<String> {
     render_json_with_contract(&view)
 }
 
-fn render_report(report: &RunReport, format: OutputFormat) -> Result<String> {
+fn render_report(
+    report: &RunReport,
+    format: OutputFormat,
+    automation_adapter: Option<AutomationAdapter>,
+) -> Result<String> {
+    if let Some(adapter) = automation_adapter {
+        return render_automation_adapter(report, adapter);
+    }
+
     match format {
         OutputFormat::Json => render_json_with_contract(report),
         OutputFormat::Summary => Ok(render_summary(report)),
         OutputFormat::Markdown => Ok(render_markdown(report)),
+    }
+}
+
+fn render_automation_adapter(report: &RunReport, adapter: AutomationAdapter) -> Result<String> {
+    match adapter {
+        AutomationAdapter::FindingsV1 => render_findings_adapter_v1(report),
+    }
+}
+
+fn render_findings_adapter_v1(report: &RunReport) -> Result<String> {
+    let mut severity_counts = AdapterSeverityCounts::default();
+    let mut highest_rank = 0;
+    let mut findings = Vec::with_capacity(report.findings.len());
+
+    for (idx, finding) in report.findings.iter().enumerate() {
+        let rank = finding_severity_rank(finding.severity);
+        highest_rank = highest_rank.max(rank);
+        increment_severity_count(&mut severity_counts, finding.severity);
+
+        findings.push(FindingsAdapterEntry {
+            finding_id: format!("F-{:04}", idx + 1),
+            title: finding.title.clone(),
+            severity: finding.severity,
+            confidence: finding.confidence,
+            recommended_action: finding.recommended_action.clone(),
+            evidence_pointer: finding.evidence_pointer.clone(),
+        });
+    }
+
+    let view = FindingsAdapterView {
+        adapter: "findings-v1",
+        summary: FindingsAdapterSummary {
+            task: report.task.clone(),
+            case_id: report.case_id.clone(),
+            finding_count: findings.len(),
+            highest_severity: if findings.is_empty() {
+                "none".to_string()
+            } else {
+                finding_severity_token_from_rank(highest_rank).to_string()
+            },
+            severity_counts,
+        },
+        findings,
+    };
+
+    render_json_with_contract(&view)
+}
+
+fn increment_severity_count(counts: &mut AdapterSeverityCounts, severity: FindingSeverity) {
+    match severity {
+        FindingSeverity::Info => counts.info += 1,
+        FindingSeverity::Low => counts.low += 1,
+        FindingSeverity::Medium => counts.medium += 1,
+        FindingSeverity::High => counts.high += 1,
+        FindingSeverity::Critical => counts.critical += 1,
+    }
+}
+
+fn evaluate_exit_policy(
+    report: &RunReport,
+    policy: ExitPolicy,
+    threshold: Option<ExitSeverityThreshold>,
+) -> Option<String> {
+    match policy {
+        ExitPolicy::None => None,
+        ExitPolicy::SeverityThreshold => {
+            let threshold = threshold.unwrap_or(ExitSeverityThreshold::Medium);
+            let threshold_rank = exit_threshold_rank(threshold);
+
+            report
+                .findings
+                .iter()
+                .enumerate()
+                .find(|(_, finding)| finding_severity_rank(finding.severity) >= threshold_rank)
+                .map(|(idx, finding)| {
+                    format!(
+                        "exit policy triggered: finding severity '{}' met/exceeded threshold '{}' (finding {}: {})",
+                        finding_severity_token(finding.severity),
+                        exit_threshold_token(threshold),
+                        idx + 1,
+                        finding.title
+                    )
+                })
+        }
+    }
+}
+
+fn finding_severity_rank(severity: FindingSeverity) -> u8 {
+    match severity {
+        FindingSeverity::Info => 0,
+        FindingSeverity::Low => 1,
+        FindingSeverity::Medium => 2,
+        FindingSeverity::High => 3,
+        FindingSeverity::Critical => 4,
+    }
+}
+
+fn exit_threshold_rank(threshold: ExitSeverityThreshold) -> u8 {
+    match threshold {
+        ExitSeverityThreshold::Info => 0,
+        ExitSeverityThreshold::Low => 1,
+        ExitSeverityThreshold::Medium => 2,
+        ExitSeverityThreshold::High => 3,
+        ExitSeverityThreshold::Critical => 4,
+    }
+}
+
+fn finding_severity_token(severity: FindingSeverity) -> &'static str {
+    match severity {
+        FindingSeverity::Info => "info",
+        FindingSeverity::Low => "low",
+        FindingSeverity::Medium => "medium",
+        FindingSeverity::High => "high",
+        FindingSeverity::Critical => "critical",
+    }
+}
+
+fn finding_severity_token_from_rank(rank: u8) -> &'static str {
+    match rank {
+        0 => "info",
+        1 => "low",
+        2 => "medium",
+        3 => "high",
+        _ => "critical",
+    }
+}
+
+fn exit_threshold_token(threshold: ExitSeverityThreshold) -> &'static str {
+    match threshold {
+        ExitSeverityThreshold::Info => "info",
+        ExitSeverityThreshold::Low => "low",
+        ExitSeverityThreshold::Medium => "medium",
+        ExitSeverityThreshold::High => "high",
+        ExitSeverityThreshold::Critical => "critical",
     }
 }
 
@@ -3138,16 +3479,18 @@ mod tests {
     use core_engine::{AgentTurn, EvidencePointer, Finding, FindingSeverity, RunReport, ToolCall};
 
     use super::{
-        ensure_introspection_format_usage, load_coverage_baseline_from_bundle, merge_sources,
-        render_bundle_verification_report, render_doctor_report, render_doctor_report_json,
-        render_effective_config_explanation_json, render_effective_config_json,
-        render_profile_list, render_profile_list_json, render_report, render_task_template_list,
-        render_task_template_list_json, render_tool_detail, render_tool_detail_json,
-        render_tool_list, render_tool_list_json, resolve_effective_config_explanation,
-        resolve_init_config_path, resolve_task_for_mode, resolve_task_for_run, run_describe_tool,
-        run_init_config, run_list_tools, verify_evidence_bundle, write_evidence_bundle,
-        write_evidence_bundle_archive, Cli, DoctorReport, DoctorStatus, FileConfig,
-        IntrospectionFormat, OutputFormat, SettingsFragment, TaskTemplate, ToolRegistry,
+        ensure_introspection_format_usage, evaluate_exit_policy,
+        load_coverage_baseline_from_bundle, merge_sources, render_bundle_verification_report,
+        render_doctor_report, render_doctor_report_json, render_effective_config_explanation_json,
+        render_effective_config_json, render_profile_list, render_profile_list_json, render_report,
+        render_task_template_list, render_task_template_list_json, render_tool_detail,
+        render_tool_detail_json, render_tool_list, render_tool_list_json,
+        resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
+        resolve_task_for_run, run_describe_tool, run_init_config, run_list_tools,
+        verify_evidence_bundle, write_evidence_bundle, write_evidence_bundle_archive,
+        AutomationAdapter, Cli, DoctorReport, DoctorStatus, ExitPolicy, ExitSeverityThreshold,
+        FileConfig, IntrospectionFormat, OutputFormat, SettingsFragment, TaskTemplate,
+        ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -3180,6 +3523,9 @@ mod tests {
             live: false,
             dry_run: false,
             format: None,
+            automation_adapter: None,
+            exit_policy: None,
+            exit_threshold: None,
             output_file: None,
             case_id: None,
             evidence_bundle_dir: None,
@@ -3225,7 +3571,8 @@ mod tests {
     #[test]
     fn renders_json_output() {
         let report = sample_report();
-        let rendered = render_report(&report, OutputFormat::Json).expect("json render should work");
+        let rendered =
+            render_report(&report, OutputFormat::Json, None).expect("json render should work");
         assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"task\""));
         assert!(rendered.contains("\"scan_network\""));
@@ -3235,8 +3582,8 @@ mod tests {
     #[test]
     fn renders_summary_output() {
         let report = sample_report();
-        let rendered =
-            render_report(&report, OutputFormat::Summary).expect("summary render should work");
+        let rendered = render_report(&report, OutputFormat::Summary, None)
+            .expect("summary render should work");
         assert!(rendered.contains("Task:"));
         assert!(rendered.contains("Case ID: CASE-2026-0001"));
         assert!(rendered.contains("Findings:"));
@@ -3247,13 +3594,93 @@ mod tests {
     #[test]
     fn renders_markdown_output() {
         let report = sample_report();
-        let rendered =
-            render_report(&report, OutputFormat::Markdown).expect("markdown render should work");
+        let rendered = render_report(&report, OutputFormat::Markdown, None)
+            .expect("markdown render should work");
         assert!(rendered.contains("# WraithRun Report"));
         assert!(rendered.contains("- Case ID: CASE-2026-0001"));
         assert!(rendered.contains("## Findings"));
         assert!(rendered.contains("## Turns"));
         assert!(rendered.contains("```json"));
+    }
+
+    #[test]
+    fn renders_findings_adapter_output() {
+        let report = sample_report();
+        let rendered = render_report(
+            &report,
+            OutputFormat::Json,
+            Some(AutomationAdapter::FindingsV1),
+        )
+        .expect("adapter render should work");
+
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
+        assert!(rendered.contains("\"adapter\": \"findings-v1\""));
+        assert!(rendered.contains("\"finding_id\": \"F-0001\""));
+        assert!(rendered.contains("\"summary\""));
+    }
+
+    #[test]
+    fn adapter_requires_json_output_format() {
+        let mut cli = base_cli();
+        cli.format = Some(OutputFormat::Summary);
+        cli.automation_adapter = Some(AutomationAdapter::FindingsV1);
+
+        let err = merge_sources(
+            &cli,
+            "test-task".to_string(),
+            None,
+            None,
+            None,
+            &SettingsFragment::default(),
+        )
+        .expect_err("adapter should require JSON output format");
+
+        assert!(err
+            .to_string()
+            .contains("automation_adapter requires JSON output format"));
+    }
+
+    #[test]
+    fn exit_threshold_requires_policy() {
+        let mut cli = base_cli();
+        cli.exit_threshold = Some(ExitSeverityThreshold::High);
+
+        let err = merge_sources(
+            &cli,
+            "test-task".to_string(),
+            None,
+            None,
+            None,
+            &SettingsFragment::default(),
+        )
+        .expect_err("exit threshold without policy should fail");
+
+        assert!(err
+            .to_string()
+            .contains("exit_threshold requires exit_policy=severity-threshold"));
+    }
+
+    #[test]
+    fn exit_policy_triggers_when_threshold_is_met() {
+        let report = sample_report();
+        let message = evaluate_exit_policy(
+            &report,
+            ExitPolicy::SeverityThreshold,
+            Some(ExitSeverityThreshold::Medium),
+        );
+
+        assert!(message.is_some());
+        assert!(message
+            .expect("message should exist")
+            .contains("exit policy triggered"));
+    }
+
+    #[test]
+    fn exit_policy_uses_medium_default_threshold() {
+        let report = sample_report();
+        let message = evaluate_exit_policy(&report, ExitPolicy::SeverityThreshold, None);
+
+        assert!(message.is_some());
     }
 
     #[test]

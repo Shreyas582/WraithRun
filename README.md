@@ -10,6 +10,7 @@ It is a local-first command-line tool for defenders and security engineers that:
 - supports baseline-aware drift signals and process-network risk scoring for faster triage prioritization,
 - supports case-tagged investigations and evidence bundle export (report, raw observations, checksums),
 - verifies evidence bundle integrity against `SHA256SUMS` for auditable evidence handling,
+- includes automation adapter output plus severity-threshold exit policy for CI/SIEM pipelines,
 - keeps evidence on your own machine by default,
 - returns a structured JSON report you can archive, diff, or automate around.
 
@@ -170,6 +171,9 @@ Common options:
 - `--max-new-tokens <N>` generation cap per response (default `256`).
 - `--temperature <F>` generation temperature (default `0.2`).
 - `--format <json|summary|markdown>` output format (default `json`).
+- `--automation-adapter <findings-v1>` emit normalized findings adapter JSON envelope for automation ingestion.
+- `--exit-policy <none|severity-threshold>` configure run exit behavior for automation pipelines.
+- `--exit-threshold <info|low|medium|high|critical>` severity threshold used when `--exit-policy severity-threshold` is set (default threshold: `medium`).
 - `--output-file <PATH>` write rendered report to file and create directories if needed.
 - `--case-id <CASE_ID>` attach a case identifier to the run report (`A-Z a-z 0-9 - _ . :`, max 128 chars).
 - `--evidence-bundle-dir <PATH>` export `report.json`, `raw_observations.json`, and `SHA256SUMS` to a bundle directory.
@@ -277,6 +281,18 @@ Verify evidence bundle integrity before sharing artifacts:
 
 ```powershell
 cargo run -p wraithrun -- --verify-bundle .\evidence\CASE-2026-IR-0042 --introspection-format json
+```
+
+Emit normalized findings adapter output for pipeline ingestion:
+
+```powershell
+cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --automation-adapter findings-v1 --output-file .\launch-assets\findings-v1.json
+```
+
+Fail pipeline when findings reach `high` severity:
+
+```powershell
+cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --automation-adapter findings-v1 --exit-policy severity-threshold --exit-threshold high
 ```
 
 Describe one tool:

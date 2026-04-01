@@ -1,0 +1,43 @@
+{
+  "contract_version": "1.0.0",
+  "adapter": "findings-v1",
+  "summary": {
+    "task": "Investigate unauthorized SSH keys",
+    "case_id": "CASE-2026-IR-0042",
+    "finding_count": 2,
+    "highest_severity": "high",
+    "severity_counts": {
+      "info": 0,
+      "low": 0,
+      "medium": 1,
+      "high": 1,
+      "critical": 0
+    }
+  },
+  "findings": [
+    {
+      "finding_id": "F-0001",
+      "title": "Privileged account baseline drift detected (1 new account(s))",
+      "severity": "high",
+      "confidence": 0.82,
+      "recommended_action": "Validate each newly privileged account against approved access changes.",
+      "evidence_pointer": {
+        "turn": 1,
+        "tool": "audit_account_changes",
+        "field": "observation.newly_privileged_account_count"
+      }
+    },
+    {
+      "finding_id": "F-0002",
+      "title": "Suspicious persistence entries detected (2)",
+      "severity": "medium",
+      "confidence": 0.8,
+      "recommended_action": "Review persistence entries and remove unapproved autoruns.",
+      "evidence_pointer": {
+        "turn": 2,
+        "tool": "inspect_persistence_locations",
+        "field": "observation.suspicious_entry_count"
+      }
+    }
+  ]
+}

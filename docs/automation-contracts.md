@@ -11,6 +11,7 @@ Validate the top-level `contract_version` field before enforcing strict field-le
 ## Schema Files
 
 - Run report: `docs/schemas/run-report.schema.json`
+- Automation adapter (findings-v1): `docs/schemas/automation-adapter-findings-v1.schema.json`
 - Doctor introspection: `docs/schemas/doctor-introspection.schema.json`
 - Tool list introspection: `docs/schemas/tool-list-introspection.schema.json`
 - Profile list introspection: `docs/schemas/profile-list-introspection.schema.json`
@@ -19,6 +20,7 @@ Validate the top-level `contract_version` field before enforcing strict field-le
 ## Example Payloads
 
 - Run report example: `docs/schemas/examples/run-report.example.json`
+- Automation adapter example: `docs/schemas/examples/automation-adapter-findings-v1.example.json`
 - Doctor introspection example: `docs/schemas/examples/doctor-introspection.example.json`
 - Tool list introspection example: `docs/schemas/examples/tool-list-introspection.example.json`
 - Profile list introspection example: `docs/schemas/examples/profile-list-introspection.example.json`
@@ -30,3 +32,5 @@ Validate the top-level `contract_version` field before enforcing strict field-le
 2. Validate `contract_version` against expected value.
 3. Validate payload shape using the matching schema.
 4. Ignore unknown fields for forward compatibility unless policy requires strict rejection.
+
+For end-to-end CI/SIEM usage patterns, see `docs/automation-workflows.md`.

@@ -6,6 +6,8 @@
 
 - Run and introspection JSON outputs now include top-level `contract_version` (`1.0.0`) for automation compatibility checks.
 - Added machine-readable JSON schema and example files for run report and core introspection outputs under `docs/schemas/`.
+- Added `--automation-adapter findings-v1` output mode for findings-only normalized pipeline ingestion.
+- Added severity-threshold exit policy controls (`--exit-policy`, `--exit-threshold`) for deterministic CI/SIEM gating.
 - Added case-workflow runbook examples for evidence collection, integrity verification, and retention operations.
 - Expanded evidence-bundle path handling coverage to include direct `SHA256SUMS` verification and path-with-spaces workflows.
 
@@ -23,10 +25,18 @@ Import baseline arrays directly from a `raw_observations.json` file path:
 .\wraithrun.exe --task "Audit account change activity in admin group membership" --baseline-bundle ".\evidence\CASE-2026-IR-0042\baseline\raw_observations.json"
 ```
 
+Run with findings adapter and severity gate:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --automation-adapter findings-v1 --exit-policy severity-threshold --exit-threshold high
+```
+
 ### Recommended checks after upgrade
 
 - Validate automation parsers check `contract_version` before strict field-level validation.
 - Validate contract checks in CI against the published schema set in `docs/automation-contracts.md`.
+- Validate adapter parsers against `docs/schemas/automation-adapter-findings-v1.schema.json`.
+- Confirm pipeline exit behavior for each threshold (`info` through `critical`) in both dry-run and live mode.
 - Validate your incident-response runbook uses the documented collection, verify, and retention sequence for case workflows.
 - Add test coverage in downstream wrappers for bundle paths that include spaces or direct checksum-manifest references.
 

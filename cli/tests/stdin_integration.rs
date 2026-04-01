@@ -129,6 +129,95 @@ fn report_json_contract_contains_findings_layer() {
 }
 
 #[test]
+fn automation_adapter_outputs_findings_envelope_json() {
+    let output = run_capture(&[
+        "--task",
+        "Hash ./README.md and report integrity context",
+        "--automation-adapter",
+        "findings-v1",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
+    assert_eq!(
+        json.get("adapter").and_then(Value::as_str),
+        Some("findings-v1")
+    );
+
+    let summary = json
+        .get("summary")
+        .and_then(Value::as_object)
+        .expect("summary should be an object");
+    assert!(
+        summary
+            .get("finding_count")
+            .and_then(Value::as_u64)
+            .is_some(),
+        "summary.finding_count should be present"
+    );
+
+    let findings = json
+        .get("findings")
+        .and_then(Value::as_array)
+        .expect("findings should be an array");
+    assert!(!findings.is_empty(), "adapter findings should not be empty");
+    assert!(findings[0]
+        .get("finding_id")
+        .and_then(Value::as_str)
+        .is_some());
+}
+
+#[test]
+fn exit_policy_fails_when_threshold_is_met() {
+    let output = run_capture(&[
+        "--task",
+        "Hash ./README.md and report integrity context",
+        "--exit-policy",
+        "severity-threshold",
+        "--exit-threshold",
+        "info",
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "process should fail when exit policy threshold is met"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("exit policy triggered"));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"contract_version\": \"1.0.0\""));
+}
+
+#[test]
+fn exit_policy_passes_when_threshold_not_met() {
+    let output = run_capture(&[
+        "--task",
+        "Hash ./README.md and report integrity context",
+        "--exit-policy",
+        "severity-threshold",
+        "--exit-threshold",
+        "critical",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "process should pass when threshold is not met: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn report_json_contract_includes_case_id_when_provided() {
     let output = run_capture(&[
         "--task",

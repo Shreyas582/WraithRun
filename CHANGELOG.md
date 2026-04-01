@@ -11,11 +11,15 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Operator case-workflow runbook examples covering collection, verification, and retention sequences.
 - Added top-level `contract_version` field (`1.0.0`) to run and introspection JSON outputs.
 - Published machine-readable JSON schemas and example payloads for run report plus doctor/tool/profile/task-template introspection outputs.
+- Added `--automation-adapter findings-v1` for findings-only normalized automation output.
+- Added severity-threshold exit policy controls (`--exit-policy`, `--exit-threshold`) for CI/SIEM gating.
+- Published automation adapter schema and example payload files.
 
 ### Changed
 
 - Expanded CLI examples with direct `SHA256SUMS` verification and baseline import via `raw_observations.json` path.
 - JSON schema guidance now requires automation parsers to validate `contract_version` before strict parsing.
+- Added practical CI/SIEM automation workflow docs for adapter output and severity-based exit behavior.
 
 ### Fixed
 

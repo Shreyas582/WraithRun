@@ -53,6 +53,9 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--live`: enable ONNX/Vitis live inference mode.
 - `--dry-run`: force dry-run mode.
 - `--format <FORMAT>`: output format. Values: `json`, `summary`, `markdown`. Default: `json`.
+- `--automation-adapter <AUTOMATION_ADAPTER>`: automation ingestion envelope. Values: `findings-v1`.
+- `--exit-policy <EXIT_POLICY>`: run exit behavior. Values: `none`, `severity-threshold`. Default: `none`.
+- `--exit-threshold <EXIT_THRESHOLD>`: severity threshold for `severity-threshold` policy. Values: `info`, `low`, `medium`, `high`, `critical`. Default when policy is set: `medium`.
 - `--output-file <OUTPUT_FILE>`: write rendered output to file.
 - `--case-id <CASE_ID>`: optional investigation case identifier. Allowed chars: alphanumeric plus `- _ . :`.
 - `--evidence-bundle-dir <PATH>`: optional bundle export directory for `report.json`, `raw_observations.json`, and `SHA256SUMS`.
@@ -313,6 +316,19 @@ When `--evidence-bundle-archive` is set, the CLI writes a deterministic tar arch
 
 When `--verify-bundle` is set, the CLI validates `SHA256SUMS` entries against current bundle files and exits non-zero if any mismatches or missing files are detected.
 
+When `--automation-adapter findings-v1` is set, run output switches to a findings-only automation envelope:
+
+- `adapter`: fixed value `findings-v1`.
+- `summary`: task/case context plus severity counts.
+- `findings[]`: normalized finding entries with deterministic `finding_id` values (`F-0001`, `F-0002`, ...).
+
+When `--exit-policy severity-threshold` is set, run exit behavior becomes severity-aware:
+
+- exit `0` when no findings meet/exceed threshold,
+- non-zero exit when at least one finding meets/exceeds threshold.
+
+If `--exit-threshold` is omitted for `severity-threshold`, threshold defaults to `medium`.
+
 Coverage-oriented observations may also expose drift/risk metrics including `baseline_version`, `baseline_entries_count`, `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
 
 When `--baseline-bundle` is set, the runtime imports the latest `capture_coverage_baseline` observation from the referenced bundle and auto-injects arrays into drift-aware tool calls:
@@ -393,6 +409,18 @@ Import baseline arrays from a direct raw-observations file path:
 
 ```powershell
 wraithrun --task "Audit account change activity in admin group membership" --baseline-bundle ".\evidence\CASE-2026-IR-0042\baseline\raw_observations.json"
+```
+
+Emit normalized findings adapter payload:
+
+```powershell
+wraithrun --task "Investigate unauthorized SSH keys" --automation-adapter findings-v1 --output-file .\launch-assets\findings-v1.json
+```
+
+Use severity-threshold exit policy for CI gates:
+
+```powershell
+wraithrun --task "Investigate unauthorized SSH keys" --automation-adapter findings-v1 --exit-policy severity-threshold --exit-threshold high
 ```
 
 Case-tagged bundle export:
