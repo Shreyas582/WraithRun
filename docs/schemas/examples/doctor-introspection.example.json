@@ -1,0 +1,20 @@
+{
+  "contract_version": "1.0.0",
+  "summary": {
+    "pass": 2,
+    "warn": 1,
+    "fail": 0
+  },
+  "checks": [
+    {
+      "status": "pass",
+      "name": "config-file",
+      "detail": "Loaded config: ./wraithrun.toml"
+    },
+    {
+      "status": "warn",
+      "name": "live-model-path",
+      "detail": "Live mode disabled, skipping model path checks"
+    }
+  ]
+}

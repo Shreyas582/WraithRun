@@ -1,0 +1,13 @@
+{
+  "contract_version": "1.0.0",
+  "templates": [
+    {
+      "name": "syslog-summary",
+      "prompt": "Read and summarize last 200 lines from C:/Logs/agent.log",
+      "supports_template_target": true,
+      "supports_template_lines": true,
+      "default_target": "C:/Logs/agent.log",
+      "default_lines": 200
+    }
+  ]
+}

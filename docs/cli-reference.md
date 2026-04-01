@@ -290,6 +290,8 @@ Schema compatibility policy:
 - Minor releases (`0.Y.0`) may add new JSON fields, but existing documented fields are not removed or renamed without an explicit changelog note.
 - Automation should ignore unknown extra fields to remain forward-compatible.
 
+Canonical schema and example files for automation validation live under `docs/schemas/` and are indexed in `docs/automation-contracts.md`.
+
 ## Run Report JSON Fields
 
 Default run output (`--format json`) includes:

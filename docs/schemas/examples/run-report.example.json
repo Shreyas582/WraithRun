@@ -1,0 +1,32 @@
+{
+  "contract_version": "1.0.0",
+  "task": "Investigate unauthorized SSH keys",
+  "case_id": "CASE-2026-IR-1001",
+  "turns": [
+    {
+      "thought": "<call>{\"tool\":\"check_privilege_escalation_vectors\",\"args\":{}}</call>",
+      "tool_call": {
+        "tool": "check_privilege_escalation_vectors",
+        "args": {}
+      },
+      "observation": {
+        "indicator_count": 1,
+        "potential_vectors": ["SeDebugPrivilege"]
+      }
+    }
+  ],
+  "final_answer": "Privilege escalation indicators require follow-up investigation.",
+  "findings": [
+    {
+      "title": "Privilege escalation indicators detected (1)",
+      "severity": "medium",
+      "confidence": 0.74,
+      "evidence_pointer": {
+        "turn": 1,
+        "tool": "check_privilege_escalation_vectors",
+        "field": "observation.indicator_count"
+      },
+      "recommended_action": "Validate whether elevated rights are expected and remove unauthorized grants."
+    }
+  ]
+}

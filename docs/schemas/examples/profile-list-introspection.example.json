@@ -1,0 +1,15 @@
+{
+  "contract_version": "1.0.0",
+  "built_in_profiles": [
+    {
+      "name": "local-lab",
+      "description": "dry-run, compact step/token budget, summary output"
+    }
+  ],
+  "config_path": "./wraithrun.toml",
+  "config_profiles": ["team-default"],
+  "selected_profile": {
+    "name": "local-lab",
+    "source": "built-in"
+  }
+}

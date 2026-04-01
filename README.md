@@ -19,6 +19,7 @@ If you need fast, repeatable endpoint triage with auditable output, WraithRun is
 
 - Hosted docs (Read the Docs): https://wraithrun.readthedocs.io/en/latest/
 - Docs setup and publishing runbook: [docs/READTHEDOCS_SETUP.md](docs/READTHEDOCS_SETUP.md)
+- Automation contract schemas and examples: [docs/automation-contracts.md](docs/automation-contracts.md)
 
 ## Start Here
 

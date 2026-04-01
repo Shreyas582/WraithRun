@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wraithrun.dev/schemas/profile-list-introspection.schema.json",
+  "title": "WraithRun Profile List Introspection",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "built_in_profiles",
+    "config_path",
+    "config_profiles",
+    "selected_profile"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "built_in_profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "description"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "config_path": {
+      "type": ["string", "null"]
+    },
+    "config_profiles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "selected_profile": {
+      "type": ["object", "null"],
+      "required": ["name", "source"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["built-in", "config", "built-in+config", "missing"]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

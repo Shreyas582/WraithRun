@@ -1,0 +1,18 @@
+{
+  "contract_version": "1.0.0",
+  "tools": [
+    {
+      "name": "hash_binary",
+      "description": "Computes SHA-256 hash of a file for local integrity triage.",
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["path"]
+      }
+    }
+  ]
+}

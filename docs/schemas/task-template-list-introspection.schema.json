@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wraithrun.dev/schemas/task-template-list-introspection.schema.json",
+  "title": "WraithRun Task Template List Introspection",
+  "type": "object",
+  "required": ["contract_version", "templates"],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "templates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "prompt",
+          "supports_template_target",
+          "supports_template_lines",
+          "default_target",
+          "default_lines"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "supports_template_target": {
+            "type": "boolean"
+          },
+          "supports_template_lines": {
+            "type": "boolean"
+          },
+          "default_target": {
+            "type": ["string", "null"]
+          },
+          "default_lines": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

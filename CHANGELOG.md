@@ -10,6 +10,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - Operator case-workflow runbook examples covering collection, verification, and retention sequences.
 - Added top-level `contract_version` field (`1.0.0`) to run and introspection JSON outputs.
+- Published machine-readable JSON schemas and example payloads for run report plus doctor/tool/profile/task-template introspection outputs.
 
 ### Changed
 

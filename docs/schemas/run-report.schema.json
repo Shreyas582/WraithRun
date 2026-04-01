@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wraithrun.dev/schemas/run-report.schema.json",
+  "title": "WraithRun Run Report",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "task",
+    "turns",
+    "final_answer",
+    "findings"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "task": {
+      "type": "string"
+    },
+    "case_id": {
+      "type": ["string", "null"]
+    },
+    "turns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["thought"],
+        "properties": {
+          "thought": {
+            "type": "string"
+          },
+          "tool_call": {
+            "type": ["object", "null"],
+            "required": ["tool", "args"],
+            "properties": {
+              "tool": {
+                "type": "string"
+              },
+              "args": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": true
+          },
+          "observation": {
+            "type": ["object", "array", "string", "number", "boolean", "null"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "final_answer": {
+      "type": "string"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "severity",
+          "confidence",
+          "evidence_pointer",
+          "recommended_action"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["info", "low", "medium", "high", "critical"]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0
+          },
+          "evidence_pointer": {
+            "type": "object",
+            "required": ["turn", "tool", "field"],
+            "properties": {
+              "turn": {
+                "type": ["integer", "null"],
+                "minimum": 1
+              },
+              "tool": {
+                "type": ["string", "null"]
+              },
+              "field": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "recommended_action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

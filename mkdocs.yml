@@ -34,6 +34,7 @@ nav:
   - Getting Started: getting-started.md
   - Usage Examples: USAGE_EXAMPLES.md
   - CLI Reference: cli-reference.md
+  - Automation Contracts: automation-contracts.md
   - Tool Reference: tool-reference.md
   - Security and Sandbox: security-sandbox.md
   - Troubleshooting: troubleshooting.md
