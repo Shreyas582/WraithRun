@@ -1,6 +1,6 @@
 # Upgrade Notes
 
-## Next (in progress toward v0.7.0)
+## v0.7.0
 
 ### Breaking/visible changes
 
