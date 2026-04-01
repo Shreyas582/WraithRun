@@ -293,11 +293,8 @@ fn doctor_live_fix_auto_discovers_tokenizer_and_sets_fallback_policy() {
     fs::write(&model_path, b"onnx-fixture").expect("model fixture should be written");
 
     let tokenizer_path = fixture_dir.join("tokenizer.json");
-    fs::write(
-        &tokenizer_path,
-        r#"{"model":{"type":"WordPiece"}}"#,
-    )
-    .expect("tokenizer fixture should be written");
+    fs::write(&tokenizer_path, r#"{"model":{"type":"WordPiece"}}"#)
+        .expect("tokenizer fixture should be written");
 
     let model_path_text = model_path.to_string_lossy().to_string();
     let args = vec![
@@ -385,7 +382,8 @@ fn doctor_live_fix_emits_reason_code_for_explicit_tokenizer_path_failure() {
     assert!(checks.iter().any(|check| {
         check.get("name") == Some(&Value::String("fix-live-tokenizer-path".to_string()))
             && check.get("status") == Some(&Value::String("warn".to_string()))
-            && check.get("reason_code") == Some(&Value::String("tokenizer_path_missing".to_string()))
+            && check.get("reason_code")
+                == Some(&Value::String("tokenizer_path_missing".to_string()))
     }));
 
     let _ = fs::remove_dir_all(&fixture_dir);

@@ -167,7 +167,11 @@ fn discover_tokenizer_path_with_validation(
     discover_tokenizer_candidates(model_path)
         .into_iter()
         .filter(|path| path.is_file())
-        .filter(|path| exclude.map(|blocked| blocked != path.as_path()).unwrap_or(true))
+        .filter(|path| {
+            exclude
+                .map(|blocked| blocked != path.as_path())
+                .unwrap_or(true)
+        })
         .find(|path| tokenizer_json_health(path).is_ok())
 }
 
@@ -267,9 +271,15 @@ fn write_live_setup_profile(config_path: &Path, runtime: &RuntimeConfig) -> Resu
         "live_fallback_policy".to_string(),
         toml::Value::String("dry-run-on-error".to_string()),
     );
-    profile.insert("format".to_string(), toml::Value::String("json".to_string()));
+    profile.insert(
+        "format".to_string(),
+        toml::Value::String("json".to_string()),
+    );
 
-    profiles_table.insert(LIVE_SETUP_PROFILE_NAME.to_string(), toml::Value::Table(profile));
+    profiles_table.insert(
+        LIVE_SETUP_PROFILE_NAME.to_string(),
+        toml::Value::Table(profile),
+    );
 
     let rendered = toml::to_string_pretty(&root).context("Failed serializing updated config")?;
     fs::write(config_path, rendered)
@@ -2949,7 +2959,11 @@ fn run_doctor(cli: &Cli) -> DoctorReport {
     report
 }
 
-fn apply_doctor_live_fix_handlers(cli: &Cli, runtime: &mut RuntimeConfig, report: &mut DoctorReport) {
+fn apply_doctor_live_fix_handlers(
+    cli: &Cli,
+    runtime: &mut RuntimeConfig,
+    report: &mut DoctorReport,
+) {
     if !runtime.live {
         report.push_with_reason(
             DoctorStatus::Warn,
@@ -3115,10 +3129,7 @@ fn apply_doctor_live_fix_handlers(cli: &Cli, runtime: &mut RuntimeConfig, report
         report.push_with_reason(
             DoctorStatus::Pass,
             "fix-live-tokenizer-path",
-            format!(
-                "Auto-discovered a valid tokenizer JSON: {}",
-                path.display()
-            ),
+            format!("Auto-discovered a valid tokenizer JSON: {}", path.display()),
             Some("tokenizer_path_auto_discovered"),
         );
         return;
