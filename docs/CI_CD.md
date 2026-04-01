@@ -14,8 +14,10 @@ This repository uses GitHub Actions for quality gates, release planning, and art
 
 - `release.yml`
   - Performs preflight checks (`cargo check`, `cargo test --workspace`, Vitis feature check).
-  - Builds release binaries on tag pushes (`v*.*.*`) and publishes GitHub Releases.
-  - Publishes Linux, macOS, and Windows CLI artifacts.
+  - Builds cross-platform release packages on tag pushes (`v*.*.*`) and publishes GitHub Releases.
+  - Publishes Windows (`.zip`, `.msi`), Linux (`.tar.gz`, `.deb`, `.rpm`), and macOS (`.tar.gz`, `.pkg`) artifacts.
+  - Generates `SHA256SUMS` and `SBOM.spdx.json` release assets.
+  - Runs post-install smoke checks for archive and installer packages before publishing.
 
 - `dependency-review.yml`
   - Runs dependency review on pull requests.

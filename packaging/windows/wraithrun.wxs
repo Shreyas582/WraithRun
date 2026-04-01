@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="WraithRun"
+    Language="1033"
+    Version="$(var.ProductVersion)"
+    Manufacturer="WraithRun"
+    UpgradeCode="15A2E2E4-0A3E-4D3A-85FB-2CE8A6A6E4A5">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of WraithRun is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="MainFeature" Title="WraithRun" Level="1">
+      <ComponentRef Id="CmpWraithRunExe" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="WraithRun" />
+      </Directory>
+    </Directory>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="CmpWraithRunExe" Guid="C92EF78D-10B1-4C4D-AB7F-5A8E4D1D2D16">
+        <File Id="FileWraithRunExe" Source="$(var.SourceExe)" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Product>
+</Wix>

@@ -27,19 +27,26 @@ jobs:
     name: Release preflight checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      draft: ${{ steps.meta.outputs.draft }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate release documentation coverage
+      - name: Resolve release metadata
+        id: meta
         shell: bash
         run: |
           set -euo pipefail
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tag="${{ github.event.inputs.tag }}"
+            draft="${{ github.event.inputs.draft }}"
           else
             tag="${GITHUB_REF_NAME}"
+            draft="false"
           fi
 
           if ! echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -47,7 +54,16 @@ jobs:
             exit 1
           fi
 
-          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release documentation coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.meta.outputs.version }}"
 
           if ! grep -Eq "^## ${version} - " CHANGELOG.md; then
             echo "CHANGELOG.md is missing a section for ${version}"
@@ -108,21 +124,11 @@ jobs:
       - name: Validate Vitis feature path
         run: cargo check -p inference_bridge --features vitis
 
-  build:
-    name: Build release binaries (${{ matrix.os }})
+  package-linux:
+    name: Package Linux artifacts
     needs: verify
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: wraithrun-linux-x86_64.tar.gz
-          - os: macos-latest
-            artifact: wraithrun-macos-x86_64.tar.gz
-          - os: windows-latest
-            artifact: wraithrun-windows-x86_64.zip
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -136,72 +142,233 @@ jobs:
       - name: Build release binary
         run: cargo build -p wraithrun --release
 
-      - name: Package Linux artifact
-        if: runner.os == 'Linux'
+      - name: Install Linux packaging dependencies
         run: |
-          cp target/release/wraithrun wraithrun
-          tar -czf ${{ matrix.artifact }} wraithrun
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev rpm
+          sudo gem install --no-document fpm
 
-      - name: Package macOS artifact
-        if: runner.os == 'macOS'
+      - name: Package Linux tar/deb/rpm artifacts
         run: |
-          cp target/release/wraithrun wraithrun
-          tar -czf ${{ matrix.artifact }} wraithrun
+          set -euo pipefail
 
-      - name: Package Windows artifact
-        if: runner.os == 'Windows'
-        shell: pwsh
+          version="${{ needs.verify.outputs.version }}"
+
+          mkdir -p dist/stage/usr/local/bin
+          install -m 0755 target/release/wraithrun dist/stage/usr/local/bin/wraithrun
+
+          tar -C dist/stage/usr/local/bin -czf dist/wraithrun-linux-x86_64.tar.gz wraithrun
+
+          fpm -s dir -t deb \
+            --name wraithrun \
+            --version "$version" \
+            --license MIT \
+            --description "WraithRun local-first cyber investigation CLI" \
+            --prefix /usr/local/bin \
+            --package dist/wraithrun-linux-x86_64.deb \
+            dist/stage/usr/local/bin/wraithrun
+
+          fpm -s dir -t rpm \
+            --name wraithrun \
+            --version "$version" \
+            --license MIT \
+            --description "WraithRun local-first cyber investigation CLI" \
+            --prefix /usr/local/bin \
+            --package dist/wraithrun-linux-x86_64.rpm \
+            dist/stage/usr/local/bin/wraithrun
+
+      - name: Smoke check Linux tar.gz install
         run: |
-          Copy-Item target/release/wraithrun.exe wraithrun.exe
-          Compress-Archive -Path wraithrun.exe -DestinationPath ${{ matrix.artifact }}
+          set -euo pipefail
+          mkdir -p dist/smoke-tar
+          tar -xzf dist/wraithrun-linux-x86_64.tar.gz -C dist/smoke-tar
+          dist/smoke-tar/wraithrun --help > /dev/null
 
-      - name: Upload packaged artifact
+      - name: Smoke check Linux deb install
+        run: |
+          set -euo pipefail
+          sudo dpkg -i dist/wraithrun-linux-x86_64.deb
+          wraithrun --help > /dev/null
+          sudo dpkg -r wraithrun
+
+      - name: Smoke check Linux rpm install (Fedora container)
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/dist:/dist:ro" fedora:40 bash -lc "dnf -y install /dist/wraithrun-linux-x86_64.rpm && wraithrun --help > /dev/null"
+
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          name: release-linux-assets
+          path: |
+            dist/wraithrun-linux-x86_64.tar.gz
+            dist/wraithrun-linux-x86_64.deb
+            dist/wraithrun-linux-x86_64.rpm
+          if-no-files-found: error
+
+  package-macos:
+    name: Package macOS artifacts
+    needs: verify
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build -p wraithrun --release
+
+      - name: Package macOS tar/pkg artifacts
+        run: |
+          set -euo pipefail
+
+          version="${{ needs.verify.outputs.version }}"
+
+          mkdir -p dist/stage/usr/local/bin
+          install -m 0755 target/release/wraithrun dist/stage/usr/local/bin/wraithrun
+
+          tar -C dist/stage/usr/local/bin -czf dist/wraithrun-macos-x86_64.tar.gz wraithrun
+
+          pkgbuild \
+            --root dist/stage \
+            --identifier dev.wraithrun.cli \
+            --version "$version" \
+            --install-location / \
+            dist/wraithrun-macos-x86_64.pkg
+
+      - name: Smoke check macOS tar.gz install
+        run: |
+          set -euo pipefail
+          mkdir -p dist/smoke-tar
+          tar -xzf dist/wraithrun-macos-x86_64.tar.gz -C dist/smoke-tar
+          dist/smoke-tar/wraithrun --help > /dev/null
+
+      - name: Smoke check macOS pkg install
+        run: |
+          set -euo pipefail
+          sudo installer -pkg dist/wraithrun-macos-x86_64.pkg -target /
+          /usr/local/bin/wraithrun --help > /dev/null
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-assets
+          path: |
+            dist/wraithrun-macos-x86_64.tar.gz
+            dist/wraithrun-macos-x86_64.pkg
+          if-no-files-found: error
+
+  package-windows:
+    name: Package Windows artifacts
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build -p wraithrun --release
+
+      - name: Install WiX toolset
+        shell: pwsh
+        run: |
+          choco install wixtoolset --no-progress -y
+
+      - name: Package Windows zip/msi artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          Copy-Item target/release/wraithrun.exe dist/wraithrun.exe
+          Compress-Archive -Path dist/wraithrun.exe -DestinationPath dist/wraithrun-windows-x86_64.zip -Force
+
+          $sourceExe = (Resolve-Path "target/release/wraithrun.exe").Path
+          $productVersion = "${{ needs.verify.outputs.version }}"
+
+          candle.exe -nologo "-dProductVersion=$productVersion" "-dSourceExe=$sourceExe" packaging/windows/wraithrun.wxs -out dist/wraithrun.wixobj
+          light.exe -nologo dist/wraithrun.wixobj -out dist/wraithrun-windows-x86_64.msi
+
+      - name: Smoke check Windows zip install
+        shell: pwsh
+        run: |
+          Expand-Archive -Path dist/wraithrun-windows-x86_64.zip -DestinationPath dist/smoke-zip -Force
+          & dist/smoke-zip/wraithrun.exe --help | Out-Null
+
+      - name: Smoke check Windows MSI install
+        shell: pwsh
+        run: |
+          $msiPath = (Resolve-Path dist/wraithrun-windows-x86_64.msi).Path
+          Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn /norestart" -Wait -NoNewWindow
+
+          $installedExe = Join-Path $env:ProgramFiles "WraithRun\wraithrun.exe"
+          if (-not (Test-Path $installedExe)) {
+            throw "Expected installed executable at $installedExe"
+          }
+
+          & $installedExe --help | Out-Null
+
+          Start-Process msiexec.exe -ArgumentList "/x `"$msiPath`" /qn /norestart" -Wait -NoNewWindow
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-assets
+          path: |
+            dist/wraithrun-windows-x86_64.zip
+            dist/wraithrun-windows-x86_64.msi
           if-no-files-found: error
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs:
+      - verify
+      - package-linux
+      - package-macos
+      - package-windows
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Resolve release metadata
-        id: meta
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ github.event.inputs.tag }}"
-            echo "draft=${{ github.event.inputs.draft }}" >> "$GITHUB_OUTPUT"
-          else
-            tag="${GITHUB_REF_NAME}"
-            echo "draft=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          if ! echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Invalid release tag format: $tag"
-            echo "Expected semantic version tag like v0.2.0"
-            exit 1
-          fi
-
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
+          merge-multiple: true
+
+      - name: Install Syft
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Generate SBOM
+        run: |
+          set -euo pipefail
+          syft dir:. -o spdx-json=dist/SBOM.spdx.json
 
       - name: Generate checksum manifest
         run: |
           set -euo pipefail
-          cd dist
-          find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          find dist -maxdepth 1 -type f ! -name "SHA256SUMS" -print0 | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          draft: ${{ steps.meta.outputs.draft }}
+          tag_name: ${{ needs.verify.outputs.tag }}
+          draft: ${{ needs.verify.outputs.draft }}
           generate_release_notes: true
-          files: dist/**/*
+          files: dist/*

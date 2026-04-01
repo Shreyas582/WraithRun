@@ -12,12 +12,15 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Structured `reason_code` values on doctor checks to support machine-actionable failure/warning classification.
 - Model-pack manager modes: `wraithrun models list`, `wraithrun models validate`, and `wraithrun models benchmark`.
 - New built-in live presets: `live-fast`, `live-balanced`, and `live-deep`.
+- Cross-platform release packaging pipeline producing Windows (`.zip`, `.msi`), Linux (`.tar.gz`, `.deb`, `.rpm`), and macOS (`.tar.gz`, `.pkg`) artifacts.
+- Release assets now include `SBOM.spdx.json` and `SHA256SUMS` manifests.
 
 ### Changed
 
 - `live_fallback_decision` metadata now includes required `reason_code` when fallback is triggered.
 - Summary and markdown output now render fallback reason code alongside fallback reason.
 - CLI/README reference examples now include model-pack discovery, validation, and benchmark workflows.
+- Release workflow now runs post-install smoke checks for native installer and archive artifacts before publishing.
 
 ### Fixed
 

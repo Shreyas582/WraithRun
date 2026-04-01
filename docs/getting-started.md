@@ -12,20 +12,47 @@ For source builds:
 
 ## Option A: Run Release Binary
 
-1. Download your OS artifact from GitHub Releases.
-2. Extract the archive.
-3. Run a dry-run investigation task.
+1. Download your OS artifacts from GitHub Releases.
+2. Install using a native package (`.msi`, `.deb`, `.rpm`, `.pkg`) or extract archive (`.zip`, `.tar.gz`).
+3. Run a smoke check with `wraithrun --help`.
+4. Run a dry-run investigation task.
 
-Windows:
+Windows (MSI):
+
+```powershell
+msiexec /i .\wraithrun-windows-x86_64.msi /qn
+wraithrun --help
+```
+
+Windows (ZIP):
 
 ```powershell
 .\wraithrun.exe --task "Investigate unauthorized SSH keys"
 ```
 
-Linux/macOS:
+Linux (DEB/RPM):
+
+```bash
+sudo dpkg -i ./wraithrun-linux-x86_64.deb
+wraithrun --help
+```
+
+```bash
+sudo dnf install ./wraithrun-linux-x86_64.rpm
+wraithrun --help
+```
+
+Linux/macOS (tar.gz):
 
 ```bash
 ./wraithrun --task "Investigate unauthorized SSH keys"
+```
+
+macOS (PKG):
+
+```bash
+sudo installer -pkg ./wraithrun-macos-x86_64.pkg -target /
+/usr/local/bin/wraithrun --help
 ```
 
 ## Option B: Run From Source
@@ -101,6 +128,9 @@ Built-in profile names:
 - `local-lab`
 - `production-triage`
 - `live-model`
+- `live-fast`
+- `live-balanced`
+- `live-deep`
 
 Example:
 
