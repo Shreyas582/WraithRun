@@ -1,5 +1,33 @@
 # Upgrade Notes
 
+## v0.9.1
+
+### Breaking/visible changes
+
+- Live mode now performs runtime preflight checks before engine startup and fails immediately when model/tokenizer assets are missing or invalid.
+- Release documentation is reorganized for live-first onboarding, with clearer operator fit guidance and advanced feature mapping.
+- Release packaging workflow reliability improved for Linux package smoke checks and Windows WiX x64 metadata.
+
+### Migration examples
+
+Validate live readiness before active triage:
+
+```powershell
+.\wraithrun.exe --doctor --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --introspection-format json
+```
+
+Run live mode with deterministic fallback for resilient case execution:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --live-fallback-policy dry-run-on-error
+```
+
+### Recommended checks after upgrade
+
+- Confirm automation or wrappers treat new fast-fail preflight errors as setup/configuration failures and route them to operator remediation.
+- Keep `--doctor --live` in preflight runbooks to validate model and tokenizer readiness before operational runs.
+- If you consume release artifacts in deployment workflows, verify package smoke-check and installer ingestion paths remain green.
+
 ## v0.9.0
 
 ### Breaking/visible changes

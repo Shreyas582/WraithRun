@@ -18,6 +18,21 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 0.9.1 - 2026-04-01
+
+### Added
+
+- Live runtime preflight regression tests covering missing model path, missing explicit tokenizer path, and valid model/tokenizer success flow.
+
+### Changed
+
+- README now follows a live-first onboarding flow with a practical quick start, audience-fit guidance, and advanced capability highlights.
+
+### Fixed
+
+- Live mode now fails fast in runtime when required assets are missing by validating model/tokenizer availability before engine/session startup.
+- Release packaging workflow fixes for Linux package smoke-check path handling and Windows WiX x64 metadata alignment.
+
 ## 0.9.0 - 2026-04-01
 
 ### Added
