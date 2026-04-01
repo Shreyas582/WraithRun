@@ -1,6 +1,6 @@
 # Upgrade Notes
 
-## v0.8.0 (in progress)
+## v0.8.0
 
 ### Breaking/visible changes
 
