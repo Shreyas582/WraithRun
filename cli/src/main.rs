@@ -175,6 +175,53 @@ fn discover_tokenizer_path_with_validation(
         .find(|path| tokenizer_json_health(path).is_ok())
 }
 
+fn validate_live_runtime_preflight(runtime: &RuntimeConfig) -> Result<()> {
+    if !runtime.live {
+        return Ok(());
+    }
+
+    if !runtime.model.is_file() {
+        bail!(
+            "Live mode model file not found: {}. Run '--doctor --live --introspection-format json' (or '--doctor --live --fix') and provide a readable --model path.",
+            runtime.model.display()
+        );
+    }
+
+    fs::File::open(&runtime.model).with_context(|| {
+        format!(
+            "Live mode model file is not readable: {}",
+            runtime.model.display()
+        )
+    })?;
+
+    match runtime.tokenizer.as_deref() {
+        Some(tokenizer_path) => {
+            if !tokenizer_path.is_file() {
+                bail!(
+                    "Tokenizer file not found: {}. Provide a valid --tokenizer path or run '--doctor --live --fix'.",
+                    tokenizer_path.display()
+                );
+            }
+
+            tokenizer_json_health(tokenizer_path).map_err(|reason_code| {
+                anyhow!(
+                    "Tokenizer validation failed for '{}': {reason_code}. Provide a readable tokenizer JSON with a top-level model key.",
+                    tokenizer_path.display()
+                )
+            })?;
+        }
+        None => {
+            if discover_tokenizer_path_with_validation(&runtime.model, None).is_none() {
+                bail!(
+                    "No valid tokenizer JSON resolved for live mode. Provide --tokenizer <PATH> or place tokenizer.json beside the model."
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn validate_live_setup_report(report: &DoctorReport) -> Result<()> {
     let required_passes = [
         "live-model-path",
@@ -5007,6 +5054,10 @@ fn ratio(count: usize, total: usize) -> f64 {
 }
 
 async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunReport> {
+    if runtime.live && !dry_run {
+        validate_live_runtime_preflight(runtime)?;
+    }
+
     let vitis_config = build_vitis_config(runtime);
     let model_config = ModelConfig {
         model_path: runtime.model.clone(),
@@ -5158,10 +5209,11 @@ mod tests {
         render_tool_list, render_tool_list_json, resolve_effective_config_explanation,
         resolve_init_config_path, resolve_task_for_mode, resolve_task_for_run, run_describe_tool,
         run_init_config, run_list_tools, run_model_pack_doctor_checks, run_models_benchmark,
-        run_models_list, run_models_validate, verify_evidence_bundle, write_evidence_bundle,
-        write_evidence_bundle_archive, AutomationAdapter, Cli, DoctorReport, DoctorStatus,
-        ExitPolicy, ExitSeverityThreshold, FileConfig, IntrospectionFormat, LiveFallbackPolicy,
-        OutputFormat, RuntimeConfig, SettingsFragment, TaskTemplate, ToolRegistry,
+        run_models_list, run_models_validate, validate_live_runtime_preflight,
+        verify_evidence_bundle, write_evidence_bundle, write_evidence_bundle_archive,
+        AutomationAdapter, Cli, DoctorReport, DoctorStatus, ExitPolicy, ExitSeverityThreshold,
+        FileConfig, IntrospectionFormat, LiveFallbackPolicy, OutputFormat, RuntimeConfig,
+        SettingsFragment, TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -5422,6 +5474,69 @@ mod tests {
             .filter(|finding| finding.evidence_pointer.field == "live_fallback_decision.live_error")
             .count();
         assert_eq!(fallback_findings, 1);
+    }
+
+    #[test]
+    fn live_runtime_preflight_rejects_missing_model() {
+        let temp_dir = unique_temp_dir("wraithrun-live-preflight-missing-model");
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let mut runtime = RuntimeConfig::new("live-preflight".to_string());
+        runtime.live = true;
+        runtime.model = temp_dir.join("missing.onnx");
+
+        let err = validate_live_runtime_preflight(&runtime)
+            .expect_err("missing model should fail preflight");
+
+        assert!(err.to_string().contains("model file not found"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn live_runtime_preflight_rejects_missing_explicit_tokenizer() {
+        let temp_dir = unique_temp_dir("wraithrun-live-preflight-missing-tokenizer");
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let model_path = temp_dir.join("model.onnx");
+        fs::write(&model_path, b"onnx-model-bytes").expect("model fixture should be written");
+
+        let mut runtime = RuntimeConfig::new("live-preflight".to_string());
+        runtime.live = true;
+        runtime.model = model_path;
+        runtime.tokenizer = Some(temp_dir.join("missing-tokenizer.json"));
+
+        let err = validate_live_runtime_preflight(&runtime)
+            .expect_err("missing tokenizer should fail preflight");
+
+        assert!(err.to_string().contains("Tokenizer file not found"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn live_runtime_preflight_accepts_valid_model_and_tokenizer() {
+        let temp_dir = unique_temp_dir("wraithrun-live-preflight-valid");
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let model_path = temp_dir.join("model.onnx");
+        let tokenizer_path = temp_dir.join("tokenizer.json");
+        fs::write(&model_path, b"onnx-model-bytes").expect("model fixture should be written");
+        fs::write(
+            &tokenizer_path,
+            r#"{"model":{"type":"WordPiece"},"version":"1.0"}"#,
+        )
+        .expect("tokenizer fixture should be written");
+
+        let mut runtime = RuntimeConfig::new("live-preflight".to_string());
+        runtime.live = true;
+        runtime.model = model_path;
+        runtime.tokenizer = Some(tokenizer_path);
+
+        validate_live_runtime_preflight(&runtime)
+            .expect("valid live model/tokenizer should pass preflight");
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
