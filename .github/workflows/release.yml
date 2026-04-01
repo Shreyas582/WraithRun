@@ -166,7 +166,8 @@ jobs:
             --description "WraithRun local-first cyber investigation CLI" \
             --prefix /usr/local/bin \
             --package dist/wraithrun-linux-x86_64.deb \
-            dist/stage/usr/local/bin/wraithrun
+            --chdir dist/stage/usr/local/bin \
+            wraithrun
 
           fpm -s dir -t rpm \
             --name wraithrun \
@@ -175,7 +176,8 @@ jobs:
             --description "WraithRun local-first cyber investigation CLI" \
             --prefix /usr/local/bin \
             --package dist/wraithrun-linux-x86_64.rpm \
-            dist/stage/usr/local/bin/wraithrun
+            --chdir dist/stage/usr/local/bin \
+            wraithrun
 
       - name: Smoke check Linux tar.gz install
         run: |
