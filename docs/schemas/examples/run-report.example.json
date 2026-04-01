@@ -9,6 +9,26 @@
     "live_error": "failed to initialize live inference session",
     "fallback_mode": "dry-run"
   },
+  "run_timing": {
+    "first_token_latency_ms": 112,
+    "total_run_duration_ms": 578
+  },
+  "live_run_metrics": {
+    "first_token_latency_ms": 268,
+    "total_run_duration_ms": 734,
+    "live_attempt_duration_ms": 156,
+    "live_attempt_count": 1,
+    "live_success_count": 0,
+    "fallback_count": 1,
+    "live_success_rate": 0.0,
+    "fallback_rate": 1.0,
+    "top_failure_reasons": [
+      {
+        "reason_code": "live_runtime_error",
+        "count": 1
+      }
+    ]
+  },
   "turns": [
     {
       "thought": "<call>{\"tool\":\"check_privilege_escalation_vectors\",\"args\":{}}</call>",

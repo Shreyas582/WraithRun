@@ -66,6 +66,7 @@ Example adapter payload fields for forwarding:
 - `findings[].recommended_action`
 - `findings[].evidence_pointer`
 - `summary.live_fallback_decision` (when fallback is triggered)
+- `summary.live_run_metrics` (when `--live` is enabled)
 
 ## Migration Notes
 

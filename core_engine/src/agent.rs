@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Map, Value};
+use std::time::Instant;
 use tracing::info;
 
 use cyber_tools::ToolRegistry;
@@ -7,7 +8,7 @@ use inference_bridge::InferenceEngine;
 
 use crate::{
     derive_findings, extract_tag, format_system_prompt, parse_tool_call, AgentTurn,
-    CoverageBaseline, RunReport, ToolCall,
+    CoverageBaseline, RunReport, RunTimingMetrics, ToolCall,
 };
 
 pub struct Agent<B: InferenceEngine> {
@@ -94,6 +95,8 @@ impl<B: InferenceEngine> Agent<B> {
         let mut turns = Vec::new();
         let mut transcript = format!("Task: {task}\n");
         let system_prompt = format_system_prompt(&self.tools.manifest_json_pretty());
+        let run_started_at = Instant::now();
+        let mut first_token_latency_ms = None;
 
         for step in 0..self.max_steps {
             let prompt = format!(
@@ -104,6 +107,9 @@ impl<B: InferenceEngine> Agent<B> {
             );
 
             let output = self.brain.generate(&prompt).await?;
+            if first_token_latency_ms.is_none() {
+                first_token_latency_ms = Some(elapsed_ms_since(run_started_at));
+            }
             info!(step = step + 1, output = %output, "agent brain output");
 
             if let Some(final_answer) = extract_tag(&output, "final") {
@@ -112,6 +118,11 @@ impl<B: InferenceEngine> Agent<B> {
                     task: task.to_string(),
                     case_id: None,
                     live_fallback_decision: None,
+                    run_timing: Some(build_run_timing_metrics(
+                        run_started_at,
+                        first_token_latency_ms,
+                    )),
+                    live_run_metrics: None,
                     turns,
                     final_answer,
                     findings,
@@ -151,6 +162,11 @@ impl<B: InferenceEngine> Agent<B> {
                 task: task.to_string(),
                 case_id: None,
                 live_fallback_decision: None,
+                run_timing: Some(build_run_timing_metrics(
+                    run_started_at,
+                    first_token_latency_ms,
+                )),
+                live_run_metrics: None,
                 turns,
                 final_answer: output,
                 findings,
@@ -164,10 +180,33 @@ impl<B: InferenceEngine> Agent<B> {
             task: task.to_string(),
             case_id: None,
             live_fallback_decision: None,
+            run_timing: Some(build_run_timing_metrics(
+                run_started_at,
+                first_token_latency_ms,
+            )),
+            live_run_metrics: None,
             turns,
             final_answer,
             findings,
         })
+    }
+}
+
+fn elapsed_ms_since(started_at: Instant) -> u64 {
+    started_at
+        .elapsed()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn build_run_timing_metrics(
+    run_started_at: Instant,
+    first_token_latency_ms: Option<u64>,
+) -> RunTimingMetrics {
+    RunTimingMetrics {
+        first_token_latency_ms,
+        total_run_duration_ms: elapsed_ms_since(run_started_at),
     }
 }
 

@@ -14,17 +14,22 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - New built-in live presets: `live-fast`, `live-balanced`, and `live-deep`.
 - Cross-platform release packaging pipeline producing Windows (`.zip`, `.msi`), Linux (`.tar.gz`, `.deb`, `.rpm`), and macOS (`.tar.gz`, `.pkg`) artifacts.
 - Release assets now include `SBOM.spdx.json` and `SHA256SUMS` manifests.
+- Live-mode telemetry fields: `run_timing` and `live_run_metrics` in run JSON output, including `first_token_latency_ms`, `total_run_duration_ms`, and reliability counters/rates.
+- Findings adapter (`findings-v1`) summary now includes optional `live_run_metrics` for machine-consumable CI/SIEM scoring.
+- CI live-metrics benchmark gate enforcing regression thresholds for `first_token_latency_ms` and `total_run_duration_ms` on every run.
 
 ### Changed
 
 - `live_fallback_decision` metadata now includes required `reason_code` when fallback is triggered.
 - Summary and markdown output now render fallback reason code alongside fallback reason.
+- Summary and markdown output now render run timing and live reliability metrics when available.
 - CLI/README reference examples now include model-pack discovery, validation, and benchmark workflows.
 - Release workflow now runs post-install smoke checks for native installer and archive artifacts before publishing.
 
 ### Fixed
 
 - Live-mode integration coverage now validates fallback reason-code presence and doctor fix-handler behavior.
+- Live fallback integration tests now validate `live_run_metrics` presence and top failure-reason propagation.
 
 ## 0.8.0 - 2026-03-31
 

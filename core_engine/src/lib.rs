@@ -76,6 +76,34 @@ pub struct LiveFallbackDecision {
     pub fallback_mode: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunTimingMetrics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_token_latency_ms: Option<u64>,
+    pub total_run_duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveFailureReasonCount {
+    pub reason_code: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiveRunMetrics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_token_latency_ms: Option<u64>,
+    pub total_run_duration_ms: u64,
+    pub live_attempt_duration_ms: u64,
+    pub live_attempt_count: usize,
+    pub live_success_count: usize,
+    pub fallback_count: usize,
+    pub live_success_rate: f64,
+    pub fallback_rate: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_failure_reasons: Vec<LiveFailureReasonCount>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunReport {
     pub task: String,
@@ -83,6 +111,10 @@ pub struct RunReport {
     pub case_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_fallback_decision: Option<LiveFallbackDecision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_timing: Option<RunTimingMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_run_metrics: Option<LiveRunMetrics>,
     pub turns: Vec<AgentTurn>,
     pub final_answer: String,
     #[serde(default)]

@@ -312,13 +312,15 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{Cursor, IsTerminal, Read};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use std::{fmt::Write as _, fs};
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use core_engine::agent::Agent;
 use core_engine::{
-    CoverageBaseline, EvidencePointer, Finding, FindingSeverity, LiveFallbackDecision, RunReport,
+    CoverageBaseline, EvidencePointer, Finding, FindingSeverity, LiveFailureReasonCount,
+    LiveFallbackDecision, LiveRunMetrics, RunReport,
 };
 use cyber_tools::{ToolRegistry, ToolSpec};
 use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
@@ -877,6 +879,8 @@ struct FindingsAdapterSummary {
     case_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     live_fallback_decision: Option<LiveFallbackDecision>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    live_run_metrics: Option<LiveRunMetrics>,
     finding_count: usize,
     highest_severity: String,
     severity_counts: AdapterSeverityCounts,
@@ -4049,6 +4053,7 @@ fn render_findings_adapter_v1(report: &RunReport) -> Result<String> {
             task: report.task.clone(),
             case_id: report.case_id.clone(),
             live_fallback_decision: report.live_fallback_decision.clone(),
+            live_run_metrics: report.live_run_metrics.clone(),
             finding_count: findings.len(),
             highest_severity: if findings.is_empty() {
                 "none".to_string()
@@ -4635,6 +4640,32 @@ fn render_summary(report: &RunReport) -> String {
         let _ = writeln!(output, "Fallback Reason: {}", decision.reason);
         let _ = writeln!(output, "Fallback Reason Code: {}", decision.reason_code);
     }
+    if let Some(run_timing) = report.run_timing.as_ref() {
+        let _ = writeln!(
+            output,
+            "Run Timing: first_token_ms={}, total_ms={}",
+            optional_latency_label(run_timing.first_token_latency_ms),
+            run_timing.total_run_duration_ms
+        );
+    }
+    if let Some(metrics) = report.live_run_metrics.as_ref() {
+        let _ = writeln!(
+            output,
+            "Live Metrics: success_rate={:.2}, fallback_rate={:.2}, live_attempt_duration_ms={}, total_ms={}, first_token_ms={}",
+            metrics.live_success_rate,
+            metrics.fallback_rate,
+            metrics.live_attempt_duration_ms,
+            metrics.total_run_duration_ms,
+            optional_latency_label(metrics.first_token_latency_ms)
+        );
+        if !metrics.top_failure_reasons.is_empty() {
+            let _ = writeln!(
+                output,
+                "Live Failure Reasons: {}",
+                format_live_failure_reasons(&metrics.top_failure_reasons)
+            );
+        }
+    }
     let _ = writeln!(output, "Turns: {}", report.turns.len());
     let _ = writeln!(output, "Findings: {}", report.findings.len());
     let _ = writeln!(output, "Final Answer: {}", report.final_answer);
@@ -4706,6 +4737,32 @@ fn render_markdown(report: &RunReport) -> String {
         let _ = writeln!(output, "- Fallback Policy: {}", decision.policy);
         let _ = writeln!(output, "- Fallback Reason: {}", decision.reason);
         let _ = writeln!(output, "- Fallback Reason Code: {}", decision.reason_code);
+    }
+    if let Some(run_timing) = report.run_timing.as_ref() {
+        let _ = writeln!(
+            output,
+            "- Run Timing: first_token_ms={}, total_ms={}",
+            optional_latency_label(run_timing.first_token_latency_ms),
+            run_timing.total_run_duration_ms
+        );
+    }
+    if let Some(metrics) = report.live_run_metrics.as_ref() {
+        let _ = writeln!(
+            output,
+            "- Live Metrics: success_rate={:.2}, fallback_rate={:.2}, live_attempt_duration_ms={}, total_ms={}, first_token_ms={}",
+            metrics.live_success_rate,
+            metrics.fallback_rate,
+            metrics.live_attempt_duration_ms,
+            metrics.total_run_duration_ms,
+            optional_latency_label(metrics.first_token_latency_ms)
+        );
+        if !metrics.top_failure_reasons.is_empty() {
+            let _ = writeln!(
+                output,
+                "- Live Failure Reasons: {}",
+                format_live_failure_reasons(&metrics.top_failure_reasons)
+            );
+        }
     }
     let _ = writeln!(output, "- Turns: {}", report.turns.len());
     let _ = writeln!(output, "- Findings: {}", report.findings.len());
@@ -4816,18 +4873,53 @@ fn render_evidence_pointer(pointer: &EvidencePointer) -> String {
     format!("{turn}, {tool}, {}", pointer.field)
 }
 
+fn optional_latency_label(value: Option<u64>) -> String {
+    value
+        .map(|latency_ms| latency_ms.to_string())
+        .unwrap_or_else(|| "null".to_string())
+}
+
+fn format_live_failure_reasons(reasons: &[LiveFailureReasonCount]) -> String {
+    reasons
+        .iter()
+        .map(|entry| format!("{}:{}", entry.reason_code, entry.count))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 async fn run_with_live_fallback(runtime: &RuntimeConfig) -> Result<RunReport> {
     if !runtime.live {
         return run_agent_once(runtime, true).await;
     }
 
+    let run_started_at = Instant::now();
+    let live_attempt_started_at = Instant::now();
+
     match run_agent_once(runtime, false).await {
-        Ok(report) => Ok(report),
+        Ok(mut report) => {
+            let live_attempt_duration_ms = elapsed_ms_since(live_attempt_started_at);
+            let total_run_duration_ms = elapsed_ms_since(run_started_at);
+            let first_token_latency_ms = report
+                .run_timing
+                .as_ref()
+                .and_then(|timing| timing.first_token_latency_ms);
+
+            report.live_run_metrics = Some(build_live_run_metrics(
+                total_run_duration_ms,
+                live_attempt_duration_ms,
+                first_token_latency_ms,
+                true,
+                None,
+            ));
+
+            Ok(report)
+        }
         Err(err) => {
             if runtime.live_fallback_policy != LiveFallbackPolicy::DryRunOnError {
                 return Err(err);
             }
 
+            let live_attempt_duration_ms = elapsed_ms_since(live_attempt_started_at);
             let live_error = format!("{err:#}");
             let reason_code = classify_live_error_reason_code(&live_error).to_string();
             let mut report = run_agent_once(runtime, true).await.with_context(|| {
@@ -4839,17 +4931,79 @@ async fn run_with_live_fallback(runtime: &RuntimeConfig) -> Result<RunReport> {
             let decision = LiveFallbackDecision {
                 policy: live_fallback_policy_token(runtime.live_fallback_policy).to_string(),
                 reason: "live inference failed and runtime fell back to dry-run".to_string(),
-                reason_code,
+                reason_code: reason_code.clone(),
                 live_error,
                 fallback_mode: "dry-run".to_string(),
             };
 
             append_live_fallback_finding(&mut report, &decision);
             report.live_fallback_decision = Some(decision);
+            let fallback_first_token_latency_ms = report
+                .run_timing
+                .as_ref()
+                .and_then(|timing| timing.first_token_latency_ms);
+            let first_token_latency_ms = fallback_first_token_latency_ms
+                .map(|value| live_attempt_duration_ms.saturating_add(value));
+
+            report.live_run_metrics = Some(build_live_run_metrics(
+                elapsed_ms_since(run_started_at),
+                live_attempt_duration_ms,
+                first_token_latency_ms,
+                false,
+                Some(reason_code.as_str()),
+            ));
 
             Ok(report)
         }
     }
+}
+
+fn elapsed_ms_since(started_at: Instant) -> u64 {
+    started_at
+        .elapsed()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn build_live_run_metrics(
+    total_run_duration_ms: u64,
+    live_attempt_duration_ms: u64,
+    first_token_latency_ms: Option<u64>,
+    live_success: bool,
+    failure_reason_code: Option<&str>,
+) -> LiveRunMetrics {
+    let live_attempt_count = 1usize;
+    let live_success_count = if live_success { 1 } else { 0 };
+    let fallback_count = if live_success { 0 } else { 1 };
+    let top_failure_reasons = failure_reason_code
+        .map(|reason_code| {
+            vec![LiveFailureReasonCount {
+                reason_code: reason_code.to_string(),
+                count: 1,
+            }]
+        })
+        .unwrap_or_default();
+
+    LiveRunMetrics {
+        first_token_latency_ms,
+        total_run_duration_ms,
+        live_attempt_duration_ms,
+        live_attempt_count,
+        live_success_count,
+        fallback_count,
+        live_success_rate: ratio(live_success_count, live_attempt_count),
+        fallback_rate: ratio(fallback_count, live_attempt_count),
+        top_failure_reasons,
+    }
+}
+
+fn ratio(count: usize, total: usize) -> f64 {
+    if total == 0 {
+        return 0.0;
+    }
+
+    count as f64 / total as f64
 }
 
 async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunReport> {
@@ -4990,24 +5144,24 @@ mod tests {
     use serde_json::json;
 
     use core_engine::{
-        AgentTurn, EvidencePointer, Finding, FindingSeverity, LiveFallbackDecision, RunReport,
-        ToolCall,
+        AgentTurn, EvidencePointer, Finding, FindingSeverity, LiveFailureReasonCount,
+        LiveFallbackDecision, LiveRunMetrics, RunReport, RunTimingMetrics, ToolCall,
     };
 
     use super::{
-        append_live_fallback_finding, ensure_introspection_format_usage, evaluate_exit_policy,
-        load_coverage_baseline_from_bundle, merge_sources, render_bundle_verification_report,
-        render_doctor_report, render_doctor_report_json, render_effective_config_explanation_json,
-        render_effective_config_json, render_profile_list, render_profile_list_json, render_report,
-        render_task_template_list, render_task_template_list_json, render_tool_detail,
-        render_tool_detail_json, render_tool_list, render_tool_list_json,
-        resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
-        resolve_task_for_run, run_describe_tool, run_init_config, run_list_tools,
-        run_model_pack_doctor_checks, run_models_benchmark, run_models_list, run_models_validate,
-        verify_evidence_bundle, write_evidence_bundle, write_evidence_bundle_archive,
-        AutomationAdapter, Cli, DoctorReport, DoctorStatus, ExitPolicy, ExitSeverityThreshold,
-        FileConfig, IntrospectionFormat, LiveFallbackPolicy, OutputFormat, RuntimeConfig,
-        SettingsFragment, TaskTemplate, ToolRegistry,
+        append_live_fallback_finding, build_live_run_metrics, ensure_introspection_format_usage,
+        evaluate_exit_policy, load_coverage_baseline_from_bundle, merge_sources,
+        render_bundle_verification_report, render_doctor_report, render_doctor_report_json,
+        render_effective_config_explanation_json, render_effective_config_json,
+        render_profile_list, render_profile_list_json, render_report, render_task_template_list,
+        render_task_template_list_json, render_tool_detail, render_tool_detail_json,
+        render_tool_list, render_tool_list_json, resolve_effective_config_explanation,
+        resolve_init_config_path, resolve_task_for_mode, resolve_task_for_run, run_describe_tool,
+        run_init_config, run_list_tools, run_model_pack_doctor_checks, run_models_benchmark,
+        run_models_list, run_models_validate, verify_evidence_bundle, write_evidence_bundle,
+        write_evidence_bundle_archive, AutomationAdapter, Cli, DoctorReport, DoctorStatus,
+        ExitPolicy, ExitSeverityThreshold, FileConfig, IntrospectionFormat, LiveFallbackPolicy,
+        OutputFormat, RuntimeConfig, SettingsFragment, TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -5068,6 +5222,8 @@ mod tests {
             task: "Check suspicious listener ports and summarize risk".to_string(),
             case_id: Some("CASE-2026-0001".to_string()),
             live_fallback_decision: None,
+            run_timing: None,
+            live_run_metrics: None,
             turns: vec![AgentTurn {
                 thought: "<call>{...}</call>".to_string(),
                 tool_call: Some(ToolCall {
@@ -5101,6 +5257,37 @@ mod tests {
         assert!(rendered.contains("\"task\""));
         assert!(rendered.contains("\"scan_network\""));
         assert!(rendered.contains("\"findings\""));
+    }
+
+    #[test]
+    fn renders_json_output_with_live_metrics() {
+        let mut report = sample_report();
+        report.run_timing = Some(RunTimingMetrics {
+            first_token_latency_ms: Some(42),
+            total_run_duration_ms: 210,
+        });
+        report.live_run_metrics = Some(LiveRunMetrics {
+            first_token_latency_ms: Some(77),
+            total_run_duration_ms: 512,
+            live_attempt_duration_ms: 150,
+            live_attempt_count: 1,
+            live_success_count: 0,
+            fallback_count: 1,
+            live_success_rate: 0.0,
+            fallback_rate: 1.0,
+            top_failure_reasons: vec![LiveFailureReasonCount {
+                reason_code: "live_runtime_error".to_string(),
+                count: 1,
+            }],
+        });
+
+        let rendered =
+            render_report(&report, OutputFormat::Json, None).expect("json render should work");
+
+        assert!(rendered.contains("\"run_timing\""));
+        assert!(rendered.contains("\"live_run_metrics\""));
+        assert!(rendered.contains("\"first_token_latency_ms\": 77"));
+        assert!(rendered.contains("\"top_failure_reasons\""));
     }
 
     #[test]
@@ -5141,6 +5328,36 @@ mod tests {
         assert!(rendered.contains("\"adapter\": \"findings-v1\""));
         assert!(rendered.contains("\"finding_id\": \"F-0001\""));
         assert!(rendered.contains("\"summary\""));
+    }
+
+    #[test]
+    fn findings_adapter_includes_live_metrics_summary() {
+        let mut report = sample_report();
+        report.live_run_metrics = Some(LiveRunMetrics {
+            first_token_latency_ms: Some(95),
+            total_run_duration_ms: 540,
+            live_attempt_duration_ms: 180,
+            live_attempt_count: 1,
+            live_success_count: 0,
+            fallback_count: 1,
+            live_success_rate: 0.0,
+            fallback_rate: 1.0,
+            top_failure_reasons: vec![LiveFailureReasonCount {
+                reason_code: "model_path_missing".to_string(),
+                count: 1,
+            }],
+        });
+
+        let rendered = render_report(
+            &report,
+            OutputFormat::Json,
+            Some(AutomationAdapter::FindingsV1),
+        )
+        .expect("adapter render should work");
+
+        assert!(rendered.contains("\"live_run_metrics\""));
+        assert!(rendered.contains("\"fallback_rate\": 1.0"));
+        assert!(rendered.contains("\"reason_code\": \"model_path_missing\""));
     }
 
     #[test]
@@ -5205,6 +5422,35 @@ mod tests {
             .filter(|finding| finding.evidence_pointer.field == "live_fallback_decision.live_error")
             .count();
         assert_eq!(fallback_findings, 1);
+    }
+
+    #[test]
+    fn build_live_run_metrics_calculates_success_rates() {
+        let metrics = build_live_run_metrics(400, 400, Some(120), true, None);
+
+        assert_eq!(metrics.live_attempt_count, 1);
+        assert_eq!(metrics.live_success_count, 1);
+        assert_eq!(metrics.fallback_count, 0);
+        assert_eq!(metrics.live_success_rate, 1.0);
+        assert_eq!(metrics.fallback_rate, 0.0);
+        assert!(metrics.top_failure_reasons.is_empty());
+    }
+
+    #[test]
+    fn build_live_run_metrics_captures_fallback_reason() {
+        let metrics =
+            build_live_run_metrics(900, 200, Some(260), false, Some("live_runtime_error"));
+
+        assert_eq!(metrics.live_attempt_count, 1);
+        assert_eq!(metrics.live_success_count, 0);
+        assert_eq!(metrics.fallback_count, 1);
+        assert_eq!(metrics.live_success_rate, 0.0);
+        assert_eq!(metrics.fallback_rate, 1.0);
+        assert_eq!(metrics.top_failure_reasons.len(), 1);
+        assert_eq!(
+            metrics.top_failure_reasons[0].reason_code,
+            "live_runtime_error"
+        );
     }
 
     #[test]

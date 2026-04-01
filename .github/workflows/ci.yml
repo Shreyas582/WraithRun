@@ -99,3 +99,97 @@ jobs:
 
       - name: Workspace check
         run: cargo check --workspace
+
+  live-metrics-benchmark:
+    name: Live metrics benchmark regression (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LIVE_BENCH_MAX_FIRST_TOKEN_MS: "15000"
+      LIVE_BENCH_MAX_TOTAL_MS: "30000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Capture live-mode metrics output
+        run: |
+          cargo run -p wraithrun -- \
+            --task "Investigate unauthorized SSH keys" \
+            --live \
+            --model ./models/__ci_missing_model__.onnx \
+            --live-fallback-policy dry-run-on-error \
+            --format json > live-metrics.json
+
+      - name: Enforce live metrics regression thresholds
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          with open("live-metrics.json", "r", encoding="utf-8") as handle:
+              payload = json.load(handle)
+
+          metrics = payload.get("live_run_metrics")
+          if metrics is None:
+              raise SystemExit("missing live_run_metrics in live run output")
+
+          required = [
+              "total_run_duration_ms",
+              "live_attempt_duration_ms",
+              "live_attempt_count",
+              "live_success_count",
+              "fallback_count",
+              "live_success_rate",
+              "fallback_rate",
+          ]
+          missing = [field for field in required if field not in metrics]
+          if missing:
+              raise SystemExit(f"missing required live_run_metrics fields: {missing}")
+
+          first_token_latency_ms = metrics.get("first_token_latency_ms")
+          total_run_duration_ms = metrics.get("total_run_duration_ms")
+          live_success_rate = metrics.get("live_success_rate")
+          fallback_rate = metrics.get("fallback_rate")
+          top_failure_reasons = metrics.get("top_failure_reasons", [])
+
+          if first_token_latency_ms is None:
+              raise SystemExit("first_token_latency_ms should be present for fallback benchmark output")
+          if not isinstance(top_failure_reasons, list) or not top_failure_reasons:
+              raise SystemExit("top_failure_reasons should include at least one live failure reason in fallback benchmark output")
+
+          max_first_token_ms = int(os.environ["LIVE_BENCH_MAX_FIRST_TOKEN_MS"])
+          max_total_ms = int(os.environ["LIVE_BENCH_MAX_TOTAL_MS"])
+          if first_token_latency_ms > max_first_token_ms:
+              raise SystemExit(
+                  f"first_token_latency_ms regression: {first_token_latency_ms} > {max_first_token_ms}"
+              )
+          if total_run_duration_ms > max_total_ms:
+              raise SystemExit(
+                  f"total_run_duration_ms regression: {total_run_duration_ms} > {max_total_ms}"
+              )
+
+          if not (0.0 <= live_success_rate <= 1.0):
+              raise SystemExit(f"live_success_rate out of range: {live_success_rate}")
+          if not (0.0 <= fallback_rate <= 1.0):
+              raise SystemExit(f"fallback_rate out of range: {fallback_rate}")
+
+          print(
+              "validated live metrics:",
+              {
+                  "first_token_latency_ms": first_token_latency_ms,
+                  "total_run_duration_ms": total_run_duration_ms,
+                  "live_success_rate": live_success_rate,
+                  "fallback_rate": fallback_rate,
+                  "top_failure_reasons": top_failure_reasons,
+              },
+          )
+          PY

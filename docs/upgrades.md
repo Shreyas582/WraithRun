@@ -7,6 +7,7 @@
 - Added live-mode model-pack doctor checks for model and tokenizer readiness (`live-model-format`, `live-model-size`, `live-tokenizer-size`, `live-tokenizer-json`, `live-tokenizer-shape`).
 - Added `--live-fallback-policy <none|dry-run-on-error>` for deterministic live-mode fallback behavior.
 - Run report and findings adapter outputs now include optional `live_fallback_decision` metadata when fallback is triggered.
+- Run report and findings adapter outputs now include optional `run_timing` and `live_run_metrics` telemetry for latency/reliability automation.
 
 ### Migration examples
 
@@ -25,6 +26,7 @@ Validate live model-pack readiness before deployment:
 ### Recommended checks after upgrade
 
 - Confirm automation parsers tolerate optional `live_fallback_decision` in run and adapter payloads.
+- Confirm automation parsers tolerate optional `run_timing` and `live_run_metrics` in run and adapter payloads.
 - Keep `--doctor --live` in preflight runbooks for model-pack readiness checks.
 - Decide whether pipelines should use fallback (`dry-run-on-error`) or fail-fast (`none`) based on incident handling policy.
 

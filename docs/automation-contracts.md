@@ -13,6 +13,8 @@ Live-mode note:
 - Run report includes optional `live_fallback_decision` when policy-driven fallback is triggered.
 - Findings adapter summary includes optional `live_fallback_decision` for pipeline audit visibility.
 - `live_fallback_decision.reason_code` provides machine-readable fallback classification.
+- Run report includes optional `run_timing` and `live_run_metrics` for latency and reliability telemetry.
+- Findings adapter summary includes optional `live_run_metrics` for downstream alerting and scoring.
 
 ## Schema Files
 

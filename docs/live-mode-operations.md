@@ -59,6 +59,8 @@ Policy behavior:
 
 When fallback is triggered, `live_fallback_decision.reason_code` provides structured classification for automation and alert routing.
 
+When `--live` is enabled, run output also includes `live_run_metrics` for operational telemetry (`first_token_latency_ms`, `total_run_duration_ms`, `live_success_rate`, `fallback_rate`, and `top_failure_reasons`).
+
 ## 4. Pipeline Gating Pattern
 
 For automation pipelines, combine fallback and exit policy:
@@ -71,7 +73,7 @@ This keeps ingestion deterministic while preserving incident signaling:
 
 - adapter output stays machine-consumable,
 - severity threshold still controls process exit code,
-- fallback details are preserved in output for auditability.
+- fallback details and live telemetry are preserved in output for auditability.
 
 ## 5. Troubleshooting Checklist
 

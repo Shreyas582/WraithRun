@@ -270,6 +270,52 @@ fn live_mode_falls_back_to_dry_run_when_policy_enabled() {
         "unexpected fallback reason code: {reason_code}"
     );
 
+    let live_metrics = json
+        .get("live_run_metrics")
+        .and_then(Value::as_object)
+        .expect("live_run_metrics should be present for live-mode fallback output");
+    assert_eq!(
+        live_metrics
+            .get("live_attempt_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        live_metrics
+            .get("live_success_count")
+            .and_then(Value::as_u64),
+        Some(0)
+    );
+    assert_eq!(
+        live_metrics.get("fallback_count").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        live_metrics
+            .get("first_token_latency_ms")
+            .and_then(Value::as_u64)
+            .is_some(),
+        "first_token_latency_ms should be present when fallback run succeeds"
+    );
+    assert!(
+        live_metrics
+            .get("total_run_duration_ms")
+            .and_then(Value::as_u64)
+            .is_some(),
+        "total_run_duration_ms should be present"
+    );
+    let reasons = live_metrics
+        .get("top_failure_reasons")
+        .and_then(Value::as_array)
+        .expect("top_failure_reasons should be an array");
+    assert!(
+        reasons.iter().any(|entry| {
+            entry.get("reason_code").and_then(Value::as_str) == Some(reason_code)
+                && entry.get("count").and_then(Value::as_u64) == Some(1)
+        }),
+        "top_failure_reasons should include the fallback reason code"
+    );
+
     let findings = json
         .get("findings")
         .and_then(Value::as_array)
@@ -453,6 +499,19 @@ fn adapter_output_includes_fallback_decision_when_triggered() {
     assert_eq!(
         decision.get("fallback_mode").and_then(Value::as_str),
         Some("dry-run")
+    );
+
+    let metrics = summary
+        .get("live_run_metrics")
+        .and_then(Value::as_object)
+        .expect("summary.live_run_metrics should be present");
+    assert_eq!(
+        metrics.get("live_attempt_count").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        metrics.get("fallback_count").and_then(Value::as_u64),
+        Some(1)
     );
 }
 

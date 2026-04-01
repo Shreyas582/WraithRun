@@ -65,6 +65,80 @@
           },
           "additionalProperties": false
         },
+        "live_run_metrics": {
+          "type": ["object", "null"],
+          "required": [
+            "total_run_duration_ms",
+            "live_attempt_duration_ms",
+            "live_attempt_count",
+            "live_success_count",
+            "fallback_count",
+            "live_success_rate",
+            "fallback_rate"
+          ],
+          "properties": {
+            "first_token_latency_ms": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            },
+            "total_run_duration_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "live_attempt_duration_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "live_attempt_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "live_success_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fallback_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "live_success_rate": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "fallback_rate": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "top_failure_reasons": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["reason_code", "count"],
+                "properties": {
+                  "reason_code": {
+                    "type": "string",
+                    "enum": [
+                      "tokenizer_path_missing",
+                      "tokenizer_json_invalid",
+                      "model_path_missing",
+                      "permission_denied",
+                      "live_runtime_error",
+                      "unknown_live_error"
+                    ]
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
         "finding_count": {
           "type": "integer",
           "minimum": 0

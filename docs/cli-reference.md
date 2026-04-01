@@ -354,6 +354,9 @@ Default run output (`--format json`) includes:
 - `case_id`: optional case identifier when set via runtime settings.
 - `live_fallback_decision`: optional fallback metadata when live mode fails and configured policy reroutes execution.
 	- includes `reason_code` for machine-actionable fallback classification.
+- `run_timing`: optional run-level latency timing (`first_token_latency_ms`, `total_run_duration_ms`).
+- `live_run_metrics`: optional live-mode reliability and latency metrics when `--live` is enabled.
+	- includes `live_success_rate`, `fallback_rate`, and `top_failure_reasons` for automation scoring.
 - `findings`: actionable finding list synthesized from collected evidence.
 - `turns`: tool-thought-observation trace.
 - `final_answer`: model/runtime conclusion string.
@@ -371,7 +374,7 @@ When `--verify-bundle` is set, the CLI validates `SHA256SUMS` entries against cu
 When `--automation-adapter findings-v1` is set, run output switches to a findings-only automation envelope:
 
 - `adapter`: fixed value `findings-v1`.
-- `summary`: task/case context plus severity counts, and optional `live_fallback_decision` metadata.
+- `summary`: task/case context plus severity counts, optional `live_fallback_decision`, and optional `live_run_metrics`.
 - `findings[]`: normalized finding entries with deterministic `finding_id` values (`F-0001`, `F-0002`, ...).
 
 When `--exit-policy severity-threshold` is set, run exit behavior becomes severity-aware:
@@ -390,6 +393,18 @@ Fallback metadata fields:
 - `reason_code`: machine-readable classification (`model_path_missing`, `tokenizer_path_missing`, `tokenizer_json_invalid`, `permission_denied`, `live_runtime_error`, `unknown_live_error`).
 - `live_error`: raw error text from live execution failure.
 - `fallback_mode`: applied fallback runtime mode.
+
+Live metrics fields (`live_run_metrics`):
+
+- `first_token_latency_ms`: elapsed milliseconds before first model output in the overall live workflow.
+- `total_run_duration_ms`: elapsed milliseconds for the complete live workflow (including fallback, when used).
+- `live_attempt_duration_ms`: elapsed milliseconds spent in the initial live attempt.
+- `live_attempt_count`: count of live attempts for the run (currently `1`).
+- `live_success_count`: count of successful live attempts.
+- `fallback_count`: count of fallback activations.
+- `live_success_rate`: ratio of `live_success_count / live_attempt_count`.
+- `fallback_rate`: ratio of `fallback_count / live_attempt_count`.
+- `top_failure_reasons`: list of machine-readable reason-code/count pairs for live failures.
 
 Coverage-oriented observations may also expose drift/risk metrics including `baseline_version`, `baseline_entries_count`, `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
 
