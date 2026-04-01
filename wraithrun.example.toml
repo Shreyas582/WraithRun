@@ -46,3 +46,27 @@ format = "json"
 # vitis_config = "C:/models/vitis.json"
 # vitis_cache_dir = "C:/models/cache"
 # vitis_cache_key = "npu-profile"
+
+[profiles.live-fast]
+live = true
+format = "json"
+max_steps = 6
+max_new_tokens = 256
+temperature = 0.1
+live_fallback_policy = "dry-run-on-error"
+
+[profiles.live-balanced]
+live = true
+format = "json"
+max_steps = 10
+max_new_tokens = 512
+temperature = 0.2
+live_fallback_policy = "dry-run-on-error"
+
+[profiles.live-deep]
+live = true
+format = "json"
+max_steps = 16
+max_new_tokens = 768
+temperature = 0.25
+live_fallback_policy = "dry-run-on-error"

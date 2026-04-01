@@ -28,7 +28,23 @@ Expected warning that should be reviewed but may still run:
 
 - `live-model-format` warning if file extension is not `.onnx`
 
-## 2. Configure Predictable Fallback
+## 2. Compare Presets and Packs
+
+Use the model-pack manager to compare presets and live profiles before selecting one for active runs:
+
+```powershell
+wraithrun models list
+wraithrun models benchmark --introspection-format json
+```
+
+Validate all discovered packs (or a specific one via `--profile`) before promotion:
+
+```powershell
+wraithrun models validate --introspection-format json
+wraithrun models validate --profile live-balanced --introspection-format json
+```
+
+## 3. Configure Predictable Fallback
 
 Use fallback policy when live inference must not block triage completion:
 
@@ -43,7 +59,7 @@ Policy behavior:
 
 When fallback is triggered, `live_fallback_decision.reason_code` provides structured classification for automation and alert routing.
 
-## 3. Pipeline Gating Pattern
+## 4. Pipeline Gating Pattern
 
 For automation pipelines, combine fallback and exit policy:
 
@@ -57,7 +73,7 @@ This keeps ingestion deterministic while preserving incident signaling:
 - severity threshold still controls process exit code,
 - fallback details are preserved in output for auditability.
 
-## 4. Troubleshooting Checklist
+## 5. Troubleshooting Checklist
 
 If live mode repeatedly falls back:
 
@@ -67,7 +83,7 @@ If live mode repeatedly falls back:
 4. Confirm Vitis paths (`--vitis-config`, `--vitis-cache-dir`) are valid when used.
 5. Review `live_fallback_decision.reason_code` and `live_fallback_decision.live_error` in run output and capture both in incident notes.
 
-## 5. Operator Recording Guidance
+## 6. Operator Recording Guidance
 
 When fallback is triggered during an active case:
 

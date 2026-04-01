@@ -10,11 +10,14 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - `--doctor --live --fix` remediation flow for common live-mode misconfigurations (path discovery, fallback-policy hardening, and operator guidance).
 - Structured `reason_code` values on doctor checks to support machine-actionable failure/warning classification.
+- Model-pack manager modes: `wraithrun models list`, `wraithrun models validate`, and `wraithrun models benchmark`.
+- New built-in live presets: `live-fast`, `live-balanced`, and `live-deep`.
 
 ### Changed
 
 - `live_fallback_decision` metadata now includes required `reason_code` when fallback is triggered.
 - Summary and markdown output now render fallback reason code alongside fallback reason.
+- CLI/README reference examples now include model-pack discovery, validation, and benchmark workflows.
 
 ### Fixed
 

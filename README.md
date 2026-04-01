@@ -159,7 +159,10 @@ Common options:
 - `--tool-filter <QUERY>` filter `--list-tools` output by tool name or description terms (case-insensitive, punctuation-normalized, supports multi-word queries).
 - `--describe-tool <NAME>` show details for one tool (name, description, argument schema). Accepts case-insensitive full names plus unique partial or hyphenated queries.
 - `--list-profiles` list built-in and config-defined profiles.
-- `--introspection-format <text|json>` output format for `--doctor`, `--list-task-templates`, `--list-tools`, `--describe-tool`, `--list-profiles`, and `--verify-bundle` (default `text`).
+- `--models-list` list discovered live model packs and readiness (`wraithrun models list`).
+- `--models-validate` run model-pack readiness checks and exit non-zero on failures (`wraithrun models validate`).
+- `--models-benchmark` rank live model packs by estimated responsiveness (`wraithrun models benchmark`).
+- `--introspection-format <text|json>` output format for `--doctor`, `--list-task-templates`, `--list-tools`, `--describe-tool`, `--list-profiles`, `--verify-bundle`, `--models-list`, `--models-validate`, and `--models-benchmark` (default `text`).
 - `--print-effective-config` render the resolved runtime settings as JSON and exit.
 - `--explain-effective-config` render resolved runtime settings plus per-field source attribution.
 - `--init-config` write a starter TOML config file and exit.
@@ -288,6 +291,24 @@ Run live mode with deterministic dry-run fallback:
 cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --live --model C:/models/llm.onnx --live-fallback-policy dry-run-on-error
 ```
 
+List discovered model packs:
+
+```powershell
+cargo run -p wraithrun -- models list --introspection-format json
+```
+
+Validate model packs:
+
+```powershell
+cargo run -p wraithrun -- models validate --introspection-format json
+```
+
+Benchmark model packs:
+
+```powershell
+cargo run -p wraithrun -- models benchmark --introspection-format json
+```
+
 Verify evidence bundle integrity before sharing artifacts:
 
 ```powershell
@@ -406,6 +427,9 @@ Built-in profiles:
 - `local-lab`: short dry-run loops with summary output.
 - `production-triage`: longer dry-run loops with markdown output.
 - `live-model`: live inference enabled with higher token budget.
+- `live-fast`: live preset optimized for lower-latency triage.
+- `live-balanced`: live preset balancing response depth and speed.
+- `live-deep`: live preset for deeper iterative investigations.
 
 Examples:
 

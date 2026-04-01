@@ -1169,6 +1169,120 @@ fn profiles_json_contract_contains_expected_fields() {
 }
 
 #[test]
+fn models_list_command_outputs_presets_as_json() {
+    let output = run_capture(&["models", "list", "--introspection-format", "json"]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
+
+    let packs = json
+        .get("packs")
+        .and_then(Value::as_array)
+        .expect("packs should be an array");
+    assert!(packs
+        .iter()
+        .any(|pack| { pack.get("name").and_then(Value::as_str) == Some("live-fast") }));
+    assert!(packs
+        .iter()
+        .any(|pack| { pack.get("name").and_then(Value::as_str) == Some("live-balanced") }));
+    assert!(packs
+        .iter()
+        .any(|pack| { pack.get("name").and_then(Value::as_str) == Some("live-deep") }));
+}
+
+#[test]
+fn models_benchmark_command_outputs_recommendation_as_json() {
+    let output = run_capture(&["models", "benchmark", "--introspection-format", "json"]);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    assert!(
+        json.get("recommended_profile")
+            .and_then(Value::as_str)
+            .is_some(),
+        "recommended_profile should be present"
+    );
+    assert!(
+        json.get("packs")
+            .and_then(Value::as_array)
+            .is_some_and(|packs| !packs.is_empty()),
+        "benchmark packs should be present"
+    );
+}
+
+#[test]
+fn models_validate_command_fails_with_missing_model_pack() {
+    let output = run_capture(&["models", "validate", "--introspection-format", "json"]);
+
+    assert!(
+        !output.status.success(),
+        "models validate should fail when packs are not ready"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"packs\""));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("model pack validation reported failures"));
+}
+
+#[test]
+fn models_validate_command_passes_with_valid_fixture_pack() {
+    let fixture_dir = unique_temp_dir("wraithrun-model-pack-validate-pass");
+    fs::create_dir_all(&fixture_dir).expect("fixture directory should be created");
+
+    let model_path = fixture_dir.join("fixture-model.onnx");
+    let tokenizer_path = fixture_dir.join("tokenizer.json");
+    fs::write(&model_path, b"onnx-fixture").expect("model fixture should be written");
+    fs::write(&tokenizer_path, r#"{"model":{"type":"WordPiece"}}"#)
+        .expect("tokenizer fixture should be written");
+
+    let model_path_text = model_path.to_string_lossy().to_string();
+    let tokenizer_path_text = tokenizer_path.to_string_lossy().to_string();
+    let args = vec![
+        "models",
+        "validate",
+        "--profile",
+        "live-fast",
+        "--model",
+        model_path_text.as_str(),
+        "--tokenizer",
+        tokenizer_path_text.as_str(),
+        "--introspection-format",
+        "json",
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let summary = json
+        .get("summary")
+        .and_then(Value::as_object)
+        .expect("summary should be an object");
+    assert_eq!(summary.get("fail").and_then(Value::as_u64), Some(0));
+
+    let _ = fs::remove_dir_all(&fixture_dir);
+}
+
+#[test]
 fn tools_json_contract_contains_expected_fields() {
     let output = run_capture(&["--list-tools", "--introspection-format", "json"]);
 

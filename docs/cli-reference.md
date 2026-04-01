@@ -20,6 +20,9 @@ wraithrun --verify-bundle <PATH> [OPTIONS]
 wraithrun --print-effective-config [OPTIONS]
 wraithrun --explain-effective-config [OPTIONS]
 wraithrun --init-config [--init-config-path <PATH>] [--force]
+wraithrun models list [OPTIONS]
+wraithrun models validate [OPTIONS]
+wraithrun models benchmark [OPTIONS]
 ```
 
 ## Options
@@ -37,6 +40,9 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--tool-filter <QUERY>`: filter `--list-tools` results by name/description terms (case-insensitive, punctuation-normalized, multi-term support).
 - `--describe-tool <NAME>`: render details for one tool and exit. Accepts case-insensitive full names plus unique partial or hyphenated queries.
 - `--list-profiles`: list built-in and config-defined profiles, then exit.
+- `--models-list`: list discovered live model packs and preset tuning (`wraithrun models list`).
+- `--models-validate`: run live model-pack readiness checks for discovered packs (`wraithrun models validate`).
+- `--models-benchmark`: rank discovered live packs by estimated responsiveness (`wraithrun models benchmark`).
 - `--verify-bundle <PATH>`: verify evidence bundle file integrity from a bundle directory or direct `SHA256SUMS` path.
 - `--introspection-format <INTROSPECTION_FORMAT>`: format for introspection modes. Values: `text`, `json`. Default: `text`.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
@@ -118,6 +124,9 @@ Behavior:
 - `--list-tools`
 - `--describe-tool`
 - `--list-profiles`
+- `--models-list`
+- `--models-validate`
+- `--models-benchmark`
 - `--verify-bundle`
 
 `--list-task-templates` output includes built-in task template names and their prompt text.
@@ -156,6 +165,26 @@ When `--tool-filter` is used with `--list-tools`, only tools matching all query 
 - config file path detection status,
 - config-defined profile names,
 - selected profile source (`built-in`, `config`, `built-in+config`, or `missing`) when `--profile` is set.
+
+`wraithrun models list` output includes:
+
+- live presets (`live-fast`, `live-balanced`, `live-deep`),
+- additional live-capable config profiles,
+- resolved model/tokenizer paths,
+- readiness signal (`PASS`, `WARN`, `FAIL`) with warn/fail counts.
+
+`wraithrun models validate` output includes:
+
+- per-pack doctor-style check results,
+- check-level reason codes when available,
+- non-zero exit when one or more packs have failures.
+
+`wraithrun models benchmark` output includes:
+
+- ranked pack list,
+- estimated token budget (`max_steps * max_new_tokens`),
+- latency tier and benchmark score,
+- recommended profile for fastest safe starting point.
 
 `--print-effective-config` output includes the final merged runtime settings after applying precedence rules.
 
@@ -405,6 +434,9 @@ Template parameter support:
 - `local-lab`: dry-run, compact step/token budget, summary output.
 - `production-triage`: dry-run, deeper loop budget, markdown output.
 - `live-model`: enables live inference and a larger token budget.
+- `live-fast`: live preset optimized for responsiveness.
+- `live-balanced`: live preset balancing speed and depth.
+- `live-deep`: live preset optimized for deeper iterative analysis.
 
 ## Examples
 
@@ -622,6 +654,24 @@ Live mode with deterministic fallback:
 
 ```powershell
 wraithrun --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --live-fallback-policy dry-run-on-error --task "Investigate unauthorized SSH keys"
+```
+
+List model packs and readiness:
+
+```powershell
+wraithrun models list
+```
+
+Validate all discovered model packs (non-zero exit on failures):
+
+```powershell
+wraithrun models validate --introspection-format json
+```
+
+Benchmark presets and choose a starting profile:
+
+```powershell
+wraithrun models benchmark --introspection-format json
 ```
 
 Summary output with file export:

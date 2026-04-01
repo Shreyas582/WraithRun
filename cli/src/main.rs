@@ -335,6 +335,7 @@ const DEFAULT_TEMPERATURE: f32 = 0.2;
 const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../../wraithrun.example.toml");
 const JSON_CONTRACT_VERSION: &str = "1.0.0";
 const LIVE_SETUP_PROFILE_NAME: &str = "live-model-local";
+const LIVE_PRESET_PROFILE_NAMES: [&str; 3] = ["live-fast", "live-balanced", "live-deep"];
 
 #[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -411,7 +412,7 @@ enum TaskTemplate {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates", "verify_bundle", "live_setup"])]
+    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates", "verify_bundle", "live_setup", "models_list", "models_validate", "models_benchmark"])]
     task: Option<String>,
 
     #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_stdin", "task_template"])]
@@ -470,6 +471,15 @@ struct Cli {
 
     #[arg(long)]
     live_setup: bool,
+
+    #[arg(long)]
+    models_list: bool,
+
+    #[arg(long)]
+    models_validate: bool,
+
+    #[arg(long)]
+    models_benchmark: bool,
 
     #[arg(long)]
     config: Option<PathBuf>,
@@ -768,7 +778,77 @@ struct ProfileListView {
     selected_profile: Option<SelectedProfileView>,
 }
 
+#[derive(Debug, Clone)]
+struct ModelPackCandidate {
+    name: String,
+    source: String,
+    runtime: RuntimeConfig,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModelPackView {
+    name: String,
+    source: String,
+    model: String,
+    tokenizer: Option<String>,
+    max_steps: usize,
+    max_new_tokens: usize,
+    temperature: f32,
+    live_fallback_policy: LiveFallbackPolicy,
+    readiness: DoctorStatus,
+    warn_count: usize,
+    fail_count: usize,
+}
+
 #[derive(Debug, Serialize)]
+struct ModelPackListView {
+    packs: Vec<ModelPackView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModelPackValidationCheckView {
+    status: DoctorStatus,
+    name: &'static str,
+    detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModelPackValidationPackView {
+    pack: ModelPackView,
+    summary: DoctorSummaryView,
+    checks: Vec<ModelPackValidationCheckView>,
+}
+
+#[derive(Debug, Serialize)]
+struct ModelPackValidationView {
+    summary: DoctorSummaryView,
+    packs: Vec<ModelPackValidationPackView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModelPackBenchmarkEntry {
+    pack: ModelPackView,
+    estimated_token_budget: usize,
+    latency_tier: &'static str,
+    benchmark_score: f32,
+}
+
+#[derive(Debug, Serialize)]
+struct ModelPackBenchmarkView {
+    recommended_profile: String,
+    rationale: String,
+    packs: Vec<ModelPackBenchmarkEntry>,
+}
+
+#[derive(Debug)]
+struct ModelPackValidationOutcome {
+    rendered: String,
+    has_failures: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct DoctorSummaryView {
     pass: usize,
     warn: usize,
@@ -1025,7 +1105,8 @@ impl DoctorReport {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli_args = normalize_live_setup_alias(std::env::args_os());
+    let cli_args = normalize_models_alias(std::env::args_os());
+    let cli_args = normalize_live_setup_alias(cli_args);
     let cli = Cli::parse_from(cli_args);
     ensure_exclusive_modes(&cli)?;
     ensure_introspection_format_usage(&cli)?;
@@ -1047,6 +1128,27 @@ async fn main() -> Result<()> {
 
     if let Some(tool_name) = cli.describe_tool.as_deref() {
         let rendered = run_describe_tool(tool_name, cli.introspection_format)?;
+        println!("{rendered}");
+        return Ok(());
+    }
+
+    if cli.models_list {
+        let rendered = run_models_list(&cli, cli.introspection_format)?;
+        println!("{rendered}");
+        return Ok(());
+    }
+
+    if cli.models_validate {
+        let outcome = run_models_validate(&cli, cli.introspection_format)?;
+        println!("{}", outcome.rendered);
+        if outcome.has_failures {
+            bail!("model pack validation reported failures");
+        }
+        return Ok(());
+    }
+
+    if cli.models_benchmark {
+        let rendered = run_models_benchmark(&cli, cli.introspection_format)?;
         println!("{rendered}");
         return Ok(());
     }
@@ -1141,6 +1243,43 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn normalize_models_alias(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+    let args: Vec<OsString> = args.into_iter().collect();
+    if args.len() < 3 {
+        return args;
+    }
+
+    let is_models = args
+        .get(1)
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("models"))
+        .unwrap_or(false);
+    if !is_models {
+        return args;
+    }
+
+    let mapped = args
+        .get(2)
+        .and_then(|value| value.to_str())
+        .map(|value| match value.to_ascii_lowercase().as_str() {
+            "list" => Some("--models-list"),
+            "validate" => Some("--models-validate"),
+            "benchmark" => Some("--models-benchmark"),
+            _ => None,
+        })
+        .unwrap_or(None);
+
+    let Some(flag) = mapped else {
+        return args;
+    };
+
+    let mut normalized = Vec::with_capacity(args.len());
+    normalized.push(args[0].clone());
+    normalized.push(OsString::from(flag));
+    normalized.extend(args.into_iter().skip(3));
+    normalized
 }
 
 fn normalize_live_setup_alias(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
@@ -1256,7 +1395,7 @@ fn resolve_task_for_run(cli: &Cli) -> Result<String> {
     }
 
     bail!(
-        "Either --task, --task-stdin, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-tools, --describe-tool, --list-profiles, --print-effective-config, --explain-effective-config, --init-config, or --live-setup is set"
+        "Either --task, --task-stdin, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-tools, --describe-tool, --list-profiles, --print-effective-config, --explain-effective-config, --init-config, --live-setup, --models-list, --models-validate, or --models-benchmark is set"
     )
 }
 
@@ -1900,7 +2039,14 @@ fn lookup_profile<'a>(
     })
 }
 
-const KNOWN_PROFILE_NAMES: [&str; 3] = ["local-lab", "production-triage", "live-model"];
+const KNOWN_PROFILE_NAMES: [&str; 6] = [
+    "local-lab",
+    "production-triage",
+    "live-model",
+    "live-fast",
+    "live-balanced",
+    "live-deep",
+];
 
 fn builtin_profile(name: &str) -> Option<SettingsFragment> {
     match name.to_ascii_lowercase().as_str() {
@@ -1926,6 +2072,33 @@ fn builtin_profile(name: &str) -> Option<SettingsFragment> {
             temperature: Some(0.2),
             format: Some(OutputFormat::Json),
             live: Some(true),
+            ..SettingsFragment::default()
+        }),
+        "live-fast" => Some(SettingsFragment {
+            max_steps: Some(6),
+            max_new_tokens: Some(256),
+            temperature: Some(0.1),
+            format: Some(OutputFormat::Json),
+            live: Some(true),
+            live_fallback_policy: Some(LiveFallbackPolicy::DryRunOnError),
+            ..SettingsFragment::default()
+        }),
+        "live-balanced" => Some(SettingsFragment {
+            max_steps: Some(10),
+            max_new_tokens: Some(512),
+            temperature: Some(0.2),
+            format: Some(OutputFormat::Json),
+            live: Some(true),
+            live_fallback_policy: Some(LiveFallbackPolicy::DryRunOnError),
+            ..SettingsFragment::default()
+        }),
+        "live-deep" => Some(SettingsFragment {
+            max_steps: Some(16),
+            max_new_tokens: Some(768),
+            temperature: Some(0.25),
+            format: Some(OutputFormat::Json),
+            live: Some(true),
+            live_fallback_policy: Some(LiveFallbackPolicy::DryRunOnError),
             ..SettingsFragment::default()
         }),
         _ => None,
@@ -2485,6 +2658,15 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     if cli.live_setup {
         selected.push("--live-setup");
     }
+    if cli.models_list {
+        selected.push("--models-list");
+    }
+    if cli.models_validate {
+        selected.push("--models-validate");
+    }
+    if cli.models_benchmark {
+        selected.push("--models-benchmark");
+    }
 
     if selected.len() > 1 {
         bail!(
@@ -2503,10 +2685,13 @@ fn ensure_introspection_format_usage(cli: &Cli) -> Result<()> {
             || cli.list_tools
             || cli.describe_tool.is_some()
             || cli.list_profiles
-            || cli.verify_bundle.is_some())
+            || cli.verify_bundle.is_some()
+            || cli.models_list
+            || cli.models_validate
+            || cli.models_benchmark)
     {
         bail!(
-            "--introspection-format only applies to --doctor, --list-task-templates, --list-tools, --describe-tool, --list-profiles, or --verify-bundle"
+            "--introspection-format only applies to --doctor, --list-task-templates, --list-tools, --describe-tool, --list-profiles, --verify-bundle, --models-list, --models-validate, or --models-benchmark"
         );
     }
 
@@ -2565,6 +2750,395 @@ fn run_list_profiles(cli: &Cli, format: IntrospectionFormat) -> Result<String> {
     }
 }
 
+fn run_models_list(cli: &Cli, format: IntrospectionFormat) -> Result<String> {
+    let candidates = collect_model_pack_candidates(cli)?;
+    let mut packs = Vec::with_capacity(candidates.len());
+
+    for candidate in &candidates {
+        let mut report = DoctorReport::default();
+        run_model_pack_doctor_checks(&candidate.runtime, &mut report);
+        packs.push(build_model_pack_view(candidate, &report));
+    }
+
+    match format {
+        IntrospectionFormat::Text => Ok(render_model_pack_list(&packs)),
+        IntrospectionFormat::Json => render_json_with_contract(&ModelPackListView { packs }),
+    }
+}
+
+fn run_models_validate(
+    cli: &Cli,
+    format: IntrospectionFormat,
+) -> Result<ModelPackValidationOutcome> {
+    let candidates = collect_model_pack_candidates(cli)?;
+    let mut packs = Vec::with_capacity(candidates.len());
+    let mut total_pass = 0usize;
+    let mut total_warn = 0usize;
+    let mut total_fail = 0usize;
+    let mut has_failures = false;
+
+    for candidate in &candidates {
+        let mut report = DoctorReport::default();
+        run_model_pack_doctor_checks(&candidate.runtime, &mut report);
+        let (pass_count, warn_count, fail_count) = report.counts();
+
+        total_pass += pass_count;
+        total_warn += warn_count;
+        total_fail += fail_count;
+        if fail_count > 0 || warn_count > 0 {
+            has_failures = true;
+        }
+
+        let pack = build_model_pack_view(candidate, &report);
+        let checks = report
+            .checks
+            .iter()
+            .map(|check| ModelPackValidationCheckView {
+                status: check.status,
+                name: check.name,
+                detail: check.detail.clone(),
+                reason_code: check.reason_code.map(|code| code.to_string()),
+            })
+            .collect();
+
+        packs.push(ModelPackValidationPackView {
+            pack,
+            summary: DoctorSummaryView {
+                pass: pass_count,
+                warn: warn_count,
+                fail: fail_count,
+            },
+            checks,
+        });
+    }
+
+    let summary = DoctorSummaryView {
+        pass: total_pass,
+        warn: total_warn,
+        fail: total_fail,
+    };
+
+    let rendered = match format {
+        IntrospectionFormat::Text => render_model_pack_validation(&summary, &packs),
+        IntrospectionFormat::Json => render_json_with_contract(&ModelPackValidationView {
+            summary: summary.clone(),
+            packs,
+        })?,
+    };
+
+    Ok(ModelPackValidationOutcome {
+        rendered,
+        has_failures,
+    })
+}
+
+fn run_models_benchmark(cli: &Cli, format: IntrospectionFormat) -> Result<String> {
+    let candidates = collect_model_pack_candidates(cli)?;
+    let mut packs = Vec::with_capacity(candidates.len());
+
+    for candidate in &candidates {
+        let mut report = DoctorReport::default();
+        run_model_pack_doctor_checks(&candidate.runtime, &mut report);
+        let pack = build_model_pack_view(candidate, &report);
+
+        let estimated_token_budget = candidate
+            .runtime
+            .max_steps
+            .saturating_mul(candidate.runtime.max_new_tokens);
+        let latency_tier = benchmark_latency_tier(estimated_token_budget);
+        let benchmark_score = benchmark_score(candidate, &pack, estimated_token_budget);
+
+        packs.push(ModelPackBenchmarkEntry {
+            pack,
+            estimated_token_budget,
+            latency_tier,
+            benchmark_score,
+        });
+    }
+
+    packs.sort_by(|left, right| {
+        right
+            .benchmark_score
+            .partial_cmp(&left.benchmark_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                left.estimated_token_budget
+                    .cmp(&right.estimated_token_budget)
+            })
+            .then_with(|| left.pack.name.cmp(&right.pack.name))
+    });
+
+    let recommended = packs
+        .iter()
+        .find(|entry| entry.pack.source == "preset")
+        .unwrap_or_else(|| {
+            packs
+                .first()
+                .expect("model benchmark requires at least one pack")
+        });
+
+    let rationale = format!(
+        "'{}' ranked highest for estimated responsiveness with budget {} and readiness {:?}.",
+        recommended.pack.name, recommended.estimated_token_budget, recommended.pack.readiness
+    );
+
+    let view = ModelPackBenchmarkView {
+        recommended_profile: recommended.pack.name.clone(),
+        rationale,
+        packs,
+    };
+
+    match format {
+        IntrospectionFormat::Text => Ok(render_model_pack_benchmark(&view)),
+        IntrospectionFormat::Json => render_json_with_contract(&view),
+    }
+}
+
+fn collect_model_pack_candidates(cli: &Cli) -> Result<Vec<ModelPackCandidate>> {
+    let selected_profile = resolve_profile_name(cli)?;
+    let (file_config, file_config_path) = load_config_for_cli(cli)?;
+    let env_overrides = env_settings_fragment()?;
+    let task = resolve_task_for_mode(cli, "models-mode")?;
+
+    let mut names: Vec<String> = Vec::new();
+    if let Some(profile_name) = selected_profile.as_ref() {
+        names.push(profile_name.clone());
+    } else {
+        names.extend(
+            LIVE_PRESET_PROFILE_NAMES
+                .iter()
+                .map(|name| (*name).to_string()),
+        );
+        names.push("live-model".to_string());
+
+        if let Some(config) = file_config.as_ref() {
+            let mut configured_names: Vec<String> = config.profiles.keys().cloned().collect();
+            configured_names.sort_unstable();
+            names.extend(configured_names);
+        }
+    }
+
+    let mut deduped = Vec::new();
+    for name in names {
+        if !deduped
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(&name))
+        {
+            deduped.push(name);
+        }
+    }
+
+    let mut packs = Vec::new();
+    for profile_name in deduped {
+        let mut scoped_cli = cli.clone();
+        scoped_cli.profile = Some(profile_name.clone());
+        scoped_cli.live = false;
+        scoped_cli.dry_run = false;
+
+        let runtime = merge_sources(
+            &scoped_cli,
+            task.clone(),
+            Some(profile_name.clone()),
+            file_config.as_ref(),
+            file_config_path.as_deref(),
+            &env_overrides,
+        )?;
+
+        if !runtime.live {
+            continue;
+        }
+
+        let source = if is_live_preset_profile(&profile_name) {
+            "preset".to_string()
+        } else {
+            selected_profile_source(&profile_name, file_config.as_ref()).to_string()
+        };
+
+        packs.push(ModelPackCandidate {
+            name: profile_name,
+            source,
+            runtime,
+        });
+    }
+
+    if packs.is_empty() {
+        if let Some(profile_name) = selected_profile {
+            bail!(
+                "Profile '{profile_name}' did not resolve to a live model pack. Choose a live profile or preset (live-fast, live-balanced, live-deep)."
+            );
+        }
+
+        bail!(
+            "No live model packs were discovered. Configure a live profile or use built-in presets: live-fast, live-balanced, live-deep."
+        );
+    }
+
+    Ok(packs)
+}
+
+fn is_live_preset_profile(name: &str) -> bool {
+    LIVE_PRESET_PROFILE_NAMES
+        .iter()
+        .any(|preset| preset.eq_ignore_ascii_case(name))
+}
+
+fn build_model_pack_view(candidate: &ModelPackCandidate, report: &DoctorReport) -> ModelPackView {
+    let (_, warn_count, fail_count) = report.counts();
+    let readiness = if fail_count > 0 {
+        DoctorStatus::Fail
+    } else if warn_count > 0 {
+        DoctorStatus::Warn
+    } else {
+        DoctorStatus::Pass
+    };
+
+    ModelPackView {
+        name: candidate.name.clone(),
+        source: candidate.source.clone(),
+        model: candidate.runtime.model.display().to_string(),
+        tokenizer: candidate
+            .runtime
+            .tokenizer
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        max_steps: candidate.runtime.max_steps,
+        max_new_tokens: candidate.runtime.max_new_tokens,
+        temperature: candidate.runtime.temperature,
+        live_fallback_policy: candidate.runtime.live_fallback_policy,
+        readiness,
+        warn_count,
+        fail_count,
+    }
+}
+
+fn render_model_pack_list(packs: &[ModelPackView]) -> String {
+    let mut output = String::new();
+    let _ = writeln!(output, "WraithRun Model Packs");
+
+    for pack in packs {
+        let tokenizer = pack.tokenizer.as_deref().unwrap_or("(auto-discovery)");
+        let _ = writeln!(
+            output,
+            "- {} [{}]: readiness={} (warn={}, fail={}), steps={}, max_new_tokens={}, temp={:.2}, fallback={}, model={}, tokenizer={}",
+            pack.name,
+            pack.source,
+            pack.readiness.label(),
+            pack.warn_count,
+            pack.fail_count,
+            pack.max_steps,
+            pack.max_new_tokens,
+            pack.temperature,
+            live_fallback_policy_token(pack.live_fallback_policy),
+            pack.model,
+            tokenizer
+        );
+    }
+
+    output.trim_end().to_string()
+}
+
+fn render_model_pack_validation(
+    summary: &DoctorSummaryView,
+    packs: &[ModelPackValidationPackView],
+) -> String {
+    let mut output = String::new();
+    let _ = writeln!(output, "WraithRun Model Pack Validation");
+    let _ = writeln!(
+        output,
+        "Summary: {} pass, {} warn, {} fail",
+        summary.pass, summary.warn, summary.fail
+    );
+
+    for pack in packs {
+        let _ = writeln!(
+            output,
+            "\n{} [{}] => {} pass, {} warn, {} fail",
+            pack.pack.name,
+            pack.pack.source,
+            pack.summary.pass,
+            pack.summary.warn,
+            pack.summary.fail
+        );
+
+        for check in &pack.checks {
+            if let Some(reason_code) = check.reason_code.as_deref() {
+                let _ = writeln!(
+                    output,
+                    "  - [{}] {} [{}]: {}",
+                    check.status.label(),
+                    check.name,
+                    reason_code,
+                    check.detail
+                );
+            } else {
+                let _ = writeln!(
+                    output,
+                    "  - [{}] {}: {}",
+                    check.status.label(),
+                    check.name,
+                    check.detail
+                );
+            }
+        }
+    }
+
+    output.trim_end().to_string()
+}
+
+fn render_model_pack_benchmark(view: &ModelPackBenchmarkView) -> String {
+    let mut output = String::new();
+    let _ = writeln!(output, "WraithRun Model Pack Benchmark");
+    let _ = writeln!(output, "Recommended preset: {}", view.recommended_profile);
+    let _ = writeln!(output, "Rationale: {}", view.rationale);
+
+    for (idx, entry) in view.packs.iter().enumerate() {
+        let _ = writeln!(
+            output,
+            "{}. {} [{}] score={:.2}, tier={}, budget={}, readiness={}, steps={}, max_new_tokens={}, temp={:.2}",
+            idx + 1,
+            entry.pack.name,
+            entry.pack.source,
+            entry.benchmark_score,
+            entry.latency_tier,
+            entry.estimated_token_budget,
+            entry.pack.readiness.label(),
+            entry.pack.max_steps,
+            entry.pack.max_new_tokens,
+            entry.pack.temperature
+        );
+    }
+
+    output.trim_end().to_string()
+}
+
+fn benchmark_latency_tier(estimated_token_budget: usize) -> &'static str {
+    match estimated_token_budget {
+        0..=2048 => "fast",
+        2049..=8192 => "balanced",
+        _ => "deep",
+    }
+}
+
+fn benchmark_score(
+    candidate: &ModelPackCandidate,
+    pack: &ModelPackView,
+    estimated_token_budget: usize,
+) -> f32 {
+    let budget = estimated_token_budget.max(1) as f32;
+    let fallback_multiplier = match candidate.runtime.live_fallback_policy {
+        LiveFallbackPolicy::None => 0.95,
+        LiveFallbackPolicy::DryRunOnError => 1.05,
+    };
+    let readiness_multiplier = match pack.readiness {
+        DoctorStatus::Pass => 1.0,
+        DoctorStatus::Warn => 0.85,
+        DoctorStatus::Fail => 0.65,
+    };
+
+    let score = (10_000.0 / budget) * fallback_multiplier * readiness_multiplier;
+    (score * 100.0).round() / 100.0
+}
+
 fn builtin_profile_summaries() -> Vec<ProfileSummaryView> {
     vec![
         ProfileSummaryView {
@@ -2578,6 +3152,18 @@ fn builtin_profile_summaries() -> Vec<ProfileSummaryView> {
         ProfileSummaryView {
             name: "live-model",
             description: "live inference enabled, larger token budget",
+        },
+        ProfileSummaryView {
+            name: "live-fast",
+            description: "live preset focused on responsiveness and lower token budget",
+        },
+        ProfileSummaryView {
+            name: "live-balanced",
+            description: "live preset balancing response depth and latency",
+        },
+        ProfileSummaryView {
+            name: "live-deep",
+            description: "live preset for deeper investigations with larger budget",
         },
     ]
 }
@@ -4417,10 +5003,11 @@ mod tests {
         render_tool_detail_json, render_tool_list, render_tool_list_json,
         resolve_effective_config_explanation, resolve_init_config_path, resolve_task_for_mode,
         resolve_task_for_run, run_describe_tool, run_init_config, run_list_tools,
-        run_model_pack_doctor_checks, verify_evidence_bundle, write_evidence_bundle,
-        write_evidence_bundle_archive, AutomationAdapter, Cli, DoctorReport, DoctorStatus,
-        ExitPolicy, ExitSeverityThreshold, FileConfig, IntrospectionFormat, LiveFallbackPolicy,
-        OutputFormat, RuntimeConfig, SettingsFragment, TaskTemplate, ToolRegistry,
+        run_model_pack_doctor_checks, run_models_benchmark, run_models_list, run_models_validate,
+        verify_evidence_bundle, write_evidence_bundle, write_evidence_bundle_archive,
+        AutomationAdapter, Cli, DoctorReport, DoctorStatus, ExitPolicy, ExitSeverityThreshold,
+        FileConfig, IntrospectionFormat, LiveFallbackPolicy, OutputFormat, RuntimeConfig,
+        SettingsFragment, TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -4445,6 +5032,9 @@ mod tests {
             force: false,
             fix: false,
             live_setup: false,
+            models_list: false,
+            models_validate: false,
+            models_benchmark: false,
             config: None,
             profile: None,
             model: None,
@@ -4919,6 +5509,83 @@ mod tests {
         assert_eq!(resolved.max_steps, 6);
         assert_eq!(resolved.format, OutputFormat::Summary);
         assert!(!resolved.live);
+    }
+
+    #[test]
+    fn live_presets_resolve_to_live_mode() {
+        for profile_name in ["live-fast", "live-balanced", "live-deep"] {
+            let mut cli = base_cli();
+            cli.profile = Some(profile_name.to_string());
+
+            let resolved = merge_sources(
+                &cli,
+                "test-task".to_string(),
+                Some(profile_name.to_string()),
+                None,
+                None,
+                &SettingsFragment::default(),
+            )
+            .expect("live preset should resolve");
+
+            assert!(resolved.live, "preset should enable live mode");
+            assert_eq!(resolved.format, OutputFormat::Json);
+            assert_eq!(
+                resolved.live_fallback_policy,
+                LiveFallbackPolicy::DryRunOnError
+            );
+        }
+    }
+
+    #[test]
+    fn models_list_json_includes_live_presets() {
+        let mut cli = base_cli();
+        cli.task = None;
+
+        let rendered =
+            run_models_list(&cli, IntrospectionFormat::Json).expect("models-list should render");
+
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
+        assert!(rendered.contains("\"packs\""));
+        assert!(rendered.contains("\"live-fast\""));
+        assert!(rendered.contains("\"live-balanced\""));
+        assert!(rendered.contains("\"live-deep\""));
+    }
+
+    #[test]
+    fn models_validate_reports_failures_for_missing_pack_files() {
+        let mut cli = base_cli();
+        cli.task = None;
+        cli.profile = Some("live-fast".to_string());
+
+        let missing_model = unique_temp_file("wraithrun-missing-model-pack");
+        let missing_tokenizer = missing_model.with_extension("json");
+        let _ = fs::remove_file(&missing_model);
+        let _ = fs::remove_file(&missing_tokenizer);
+        cli.model = Some(missing_model);
+        cli.tokenizer = Some(missing_tokenizer);
+
+        let outcome = run_models_validate(&cli, IntrospectionFormat::Json)
+            .expect("models-validate should render JSON");
+
+        assert!(
+            outcome.has_failures,
+            "default environment should report failures"
+        );
+        assert!(outcome.rendered.contains("\"summary\""));
+        assert!(outcome.rendered.contains("\"packs\""));
+    }
+
+    #[test]
+    fn models_benchmark_json_reports_recommendation() {
+        let mut cli = base_cli();
+        cli.task = None;
+
+        let rendered = run_models_benchmark(&cli, IntrospectionFormat::Json)
+            .expect("models-benchmark should render");
+
+        assert!(rendered.contains("\"recommended_profile\""));
+        assert!(rendered.contains("\"benchmark_score\""));
+        assert!(rendered.contains("\"live-fast\""));
     }
 
     #[test]
@@ -5446,6 +6113,16 @@ mod tests {
 
         ensure_introspection_format_usage(&cli)
             .expect("json introspection should be allowed for list-profiles");
+    }
+
+    #[test]
+    fn allows_json_introspection_format_for_models_list_mode() {
+        let mut cli = base_cli();
+        cli.models_list = true;
+        cli.introspection_format = IntrospectionFormat::Json;
+
+        ensure_introspection_format_usage(&cli)
+            .expect("json introspection should be allowed for models-list");
     }
 
     #[test]
