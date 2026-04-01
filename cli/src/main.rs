@@ -1,4 +1,210 @@
+fn run_live_setup(cli: &Cli) -> Result<String> {
+    let mut setup_cli = cli.clone();
+    setup_cli.live = true;
+    setup_cli.dry_run = false;
+
+    if let Some(config_path) = setup_cli.config.as_ref() {
+        if !config_path.is_file() {
+            // Allow `live setup --config <new-path>` to bootstrap a brand new config file.
+            setup_cli.config = None;
+        }
+    }
+
+    let task = resolve_task_for_mode(&setup_cli, "live-setup")?;
+    let mut runtime = resolve_runtime_config_with_task(&setup_cli, task)?;
+
+    if cli.model.is_none() && !runtime.model.is_file() {
+        if let Some(discovered_model) = discover_model_path() {
+            runtime.model = discovered_model;
+        }
+    }
+
+    let tokenizer_missing = runtime
+        .tokenizer
+        .as_ref()
+        .map(|path| !path.is_file())
+        .unwrap_or(true);
+    if cli.tokenizer.is_none() && tokenizer_missing {
+        runtime.tokenizer = discover_tokenizer_path(&runtime.model);
+    }
+
+    let mut report = DoctorReport::default();
+    run_model_pack_doctor_checks(&runtime, &mut report);
+    validate_live_setup_report(&report)?;
+
+    let config_path = cli
+        .config
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_FILE));
+    write_live_setup_profile(&config_path, &runtime)?;
+
+    Ok(render_live_setup_summary(&runtime, &config_path))
+}
+
+fn discover_model_path() -> Option<PathBuf> {
+    let default_model = PathBuf::from(DEFAULT_MODEL_PATH);
+    if default_model.is_file() {
+        return Some(default_model);
+    }
+
+    let models_dir = PathBuf::from("./models");
+    let mut candidates: Vec<PathBuf> = fs::read_dir(models_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("onnx"))
+                    .unwrap_or(false)
+        })
+        .collect();
+
+    candidates.sort();
+    candidates.into_iter().next()
+}
+
+fn discover_tokenizer_path(model_path: &Path) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(parent) = model_path.parent() {
+        candidates.push(parent.join("tokenizer.json"));
+    }
+    candidates.push(PathBuf::from("./models/tokenizer.json"));
+
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn validate_live_setup_report(report: &DoctorReport) -> Result<()> {
+    let required_passes = [
+        "live-model-path",
+        "live-model-size",
+        "live-tokenizer-path",
+        "live-tokenizer-size",
+        "live-tokenizer-json",
+    ];
+
+    let missing = required_passes
+        .iter()
+        .copied()
+        .filter(|name| {
+            !report
+                .checks
+                .iter()
+                .any(|check| check.name == *name && check.status == DoctorStatus::Pass)
+        })
+        .collect::<Vec<_>>();
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let mut details = String::new();
+    for check in report
+        .checks
+        .iter()
+        .filter(|check| check.status != DoctorStatus::Pass)
+    {
+        let _ = writeln!(
+            details,
+            "- [{}] {}: {}",
+            check.status.label(),
+            check.name,
+            check.detail
+        );
+    }
+
+    bail!(
+        "Live setup validation failed. Missing passing checks: {}\n{}Resolve the checks above and rerun 'wraithrun live setup --model <PATH> --tokenizer <PATH>'.",
+        missing.join(", "),
+        details
+    );
+}
+
+fn write_live_setup_profile(config_path: &Path, runtime: &RuntimeConfig) -> Result<()> {
+    if let Some(parent) = config_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed creating directory {}", parent.display()))?;
+        }
+    }
+
+    let mut root = if config_path.is_file() {
+        let existing = fs::read_to_string(config_path)
+            .with_context(|| format!("Failed reading config {}", config_path.display()))?;
+        toml::from_str::<toml::Value>(&existing)
+            .with_context(|| format!("Failed parsing config {}", config_path.display()))?
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+
+    let root_table = root.as_table_mut().ok_or_else(|| {
+        anyhow!(
+            "Config root must be a TOML table in '{}'",
+            config_path.display()
+        )
+    })?;
+
+    let profiles_entry = root_table
+        .entry("profiles".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let profiles_table = profiles_entry.as_table_mut().ok_or_else(|| {
+        anyhow!(
+            "Config key 'profiles' must be a TOML table in '{}'",
+            config_path.display()
+        )
+    })?;
+
+    let mut profile = toml::map::Map::new();
+    profile.insert("live".to_string(), toml::Value::Boolean(true));
+    profile.insert(
+        "model".to_string(),
+        toml::Value::String(runtime.model.display().to_string()),
+    );
+    if let Some(tokenizer) = runtime.tokenizer.as_ref() {
+        profile.insert(
+            "tokenizer".to_string(),
+            toml::Value::String(tokenizer.display().to_string()),
+        );
+    }
+    profile.insert(
+        "live_fallback_policy".to_string(),
+        toml::Value::String("dry-run-on-error".to_string()),
+    );
+    profile.insert("format".to_string(), toml::Value::String("json".to_string()));
+
+    profiles_table.insert(LIVE_SETUP_PROFILE_NAME.to_string(), toml::Value::Table(profile));
+
+    let rendered = toml::to_string_pretty(&root).context("Failed serializing updated config")?;
+    fs::write(config_path, rendered)
+        .with_context(|| format!("Failed writing config {}", config_path.display()))?;
+
+    Ok(())
+}
+
+fn render_live_setup_summary(runtime: &RuntimeConfig, config_path: &Path) -> String {
+    let tokenizer = runtime
+        .tokenizer
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "(not set)".to_string());
+
+    let mut output = String::new();
+    let _ = writeln!(output, "Live setup complete");
+    let _ = writeln!(output, "profile: {LIVE_SETUP_PROFILE_NAME}");
+    let _ = writeln!(output, "config: {}", config_path.display());
+    let _ = writeln!(output, "model: {}", runtime.model.display());
+    let _ = writeln!(output, "tokenizer: {tokenizer}");
+    let _ = writeln!(
+        output,
+        "next: wraithrun --profile {LIVE_SETUP_PROFILE_NAME} --live --task \"Investigate unauthorized SSH keys\""
+    );
+
+    output.trim_end().to_string()
+}
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::{Cursor, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::{fmt::Write as _, fs};
@@ -23,6 +229,7 @@ const DEFAULT_MAX_NEW_TOKENS: usize = 256;
 const DEFAULT_TEMPERATURE: f32 = 0.2;
 const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../../wraithrun.example.toml");
 const JSON_CONTRACT_VERSION: &str = "1.0.0";
+const LIVE_SETUP_PROFILE_NAME: &str = "live-model-local";
 
 #[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -99,7 +306,7 @@ enum TaskTemplate {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates", "verify_bundle"])]
+    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates", "verify_bundle", "live_setup"])]
     task: Option<String>,
 
     #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_stdin", "task_template"])]
@@ -152,6 +359,9 @@ struct Cli {
 
     #[arg(long, requires = "init_config")]
     force: bool,
+
+    #[arg(long)]
+    live_setup: bool,
 
     #[arg(long)]
     config: Option<PathBuf>,
@@ -694,7 +904,8 @@ impl DoctorReport {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli_args = normalize_live_setup_alias(std::env::args_os());
+    let cli = Cli::parse_from(cli_args);
     ensure_exclusive_modes(&cli)?;
     ensure_introspection_format_usage(&cli)?;
 
@@ -716,6 +927,12 @@ async fn main() -> Result<()> {
     if let Some(tool_name) = cli.describe_tool.as_deref() {
         let rendered = run_describe_tool(tool_name, cli.introspection_format)?;
         println!("{rendered}");
+        return Ok(());
+    }
+
+    if cli.live_setup {
+        let message = run_live_setup(&cli)?;
+        println!("{message}");
         return Ok(());
     }
 
@@ -805,6 +1022,34 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn normalize_live_setup_alias(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+    let args: Vec<OsString> = args.into_iter().collect();
+    if args.len() < 3 {
+        return args;
+    }
+
+    let is_live = args
+        .get(1)
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("live"))
+        .unwrap_or(false);
+    let is_setup = args
+        .get(2)
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("setup"))
+        .unwrap_or(false);
+
+    if !is_live || !is_setup {
+        return args;
+    }
+
+    let mut normalized = Vec::with_capacity(args.len());
+    normalized.push(args[0].clone());
+    normalized.push(OsString::from("--live-setup"));
+    normalized.extend(args.into_iter().skip(3));
+    normalized
+}
+
 fn resolve_runtime_config(cli: &Cli) -> Result<RuntimeConfig> {
     let task = resolve_task_for_run(cli)?;
 
@@ -890,7 +1135,7 @@ fn resolve_task_for_run(cli: &Cli) -> Result<String> {
     }
 
     bail!(
-        "Either --task, --task-stdin, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-tools, --describe-tool, --list-profiles, --print-effective-config, --explain-effective-config, or --init-config is set"
+        "Either --task, --task-stdin, --task-file, or --task-template is required unless one of --doctor, --list-task-templates, --list-tools, --describe-tool, --list-profiles, --print-effective-config, --explain-effective-config, --init-config, or --live-setup is set"
     )
 }
 
@@ -2115,6 +2360,9 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     }
     if cli.verify_bundle.is_some() {
         selected.push("--verify-bundle");
+    }
+    if cli.live_setup {
+        selected.push("--live-setup");
     }
 
     if selected.len() > 1 {
@@ -3788,6 +4036,7 @@ mod tests {
             init_config: false,
             init_config_path: None,
             force: false,
+            live_setup: false,
             config: None,
             profile: None,
             model: None,

@@ -54,12 +54,37 @@ jobs:
             exit 1
           fi
 
+          changelog_section="$(awk "/^## ${version} - /{flag=1;next}/^## /{flag=0}flag" CHANGELOG.md)"
+          if [ -z "$changelog_section" ]; then
+            echo "CHANGELOG.md section for ${version} is empty"
+            exit 1
+          fi
+
+          changelog_non_placeholder_bullets="$(printf '%s\n' "$changelog_section" | grep -E '^- ' | grep -Evi '^- \((none yet|none)\)$' | wc -l | tr -d ' ')"
+          if [ "$changelog_non_placeholder_bullets" -eq 0 ]; then
+            echo "CHANGELOG.md section for ${version} has no non-placeholder bullet entries"
+            echo "Add at least one concrete bullet under Added/Changed/Fixed."
+            exit 1
+          fi
+
           if ! grep -Eq "^## v${version}$" docs/upgrades.md; then
             echo "docs/upgrades.md is missing a section header for v${version}"
             exit 1
           fi
 
-          for file in README.md docs/cli-reference.md docs/tool-reference.md; do
+          upgrades_section="$(awk "/^## v${version}$/{flag=1;next}/^## v[0-9]+\.[0-9]+\.[0-9]+$/{flag=0}flag" docs/upgrades.md)"
+          if [ -z "$upgrades_section" ]; then
+            echo "docs/upgrades.md section for v${version} is empty"
+            exit 1
+          fi
+
+          upgrades_bullets="$(printf '%s\n' "$upgrades_section" | grep -E '^- ' | wc -l | tr -d ' ')"
+          if [ "$upgrades_bullets" -eq 0 ]; then
+            echo "docs/upgrades.md section for v${version} must include at least one bullet point"
+            exit 1
+          fi
+
+          for file in README.md docs/getting-started.md docs/cli-reference.md docs/tool-reference.md docs/troubleshooting.md; do
             if [ ! -f "$file" ]; then
               echo "Required release doc file is missing: $file"
               exit 1

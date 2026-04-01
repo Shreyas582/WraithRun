@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use serde_json::Value;
+use toml::Value as TomlValue;
 
 fn run_with_stdin(args: &[&str], input: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wraithrun"))
@@ -874,6 +875,97 @@ fn doctor_json_contract_includes_model_pack_checks_for_live_mode() {
     }));
 
     let _ = fs::remove_dir_all(&model_pack_dir);
+}
+
+#[test]
+fn live_setup_command_writes_live_profile_to_config() {
+    let temp_dir = unique_temp_dir("wraithrun-live-setup-success");
+    fs::create_dir_all(&temp_dir).expect("temp directory should be created");
+
+    let model_path = temp_dir.join("llm.onnx");
+    let tokenizer_path = temp_dir.join("tokenizer.json");
+    let config_path = temp_dir.join("wraithrun.toml");
+
+    fs::write(&model_path, b"onnx-model-bytes").expect("model fixture should be written");
+    fs::write(
+        &tokenizer_path,
+        r#"{"model":{"type":"WordPiece"},"version":"1.0"}"#,
+    )
+    .expect("tokenizer fixture should be written");
+
+    let model_path_text = model_path.to_string_lossy().to_string();
+    let tokenizer_path_text = tokenizer_path.to_string_lossy().to_string();
+    let config_path_text = config_path.to_string_lossy().to_string();
+
+    let args = vec![
+        "live",
+        "setup",
+        "--model",
+        model_path_text.as_str(),
+        "--tokenizer",
+        tokenizer_path_text.as_str(),
+        "--config",
+        config_path_text.as_str(),
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "process failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Live setup complete"));
+    assert!(stdout.contains("profile: live-model-local"));
+
+    let config_text = fs::read_to_string(&config_path).expect("config file should be written");
+    let parsed: TomlValue = toml::from_str(&config_text).expect("config should parse as toml");
+    let profile = parsed
+        .get("profiles")
+        .and_then(|profiles| profiles.get("live-model-local"))
+        .and_then(TomlValue::as_table)
+        .expect("live-model-local profile should exist");
+
+    assert_eq!(profile.get("live").and_then(TomlValue::as_bool), Some(true));
+    assert_eq!(
+        profile.get("model").and_then(TomlValue::as_str),
+        Some(model_path_text.as_str())
+    );
+    assert_eq!(
+        profile.get("tokenizer").and_then(TomlValue::as_str),
+        Some(tokenizer_path_text.as_str())
+    );
+    assert_eq!(
+        profile
+            .get("live_fallback_policy")
+            .and_then(TomlValue::as_str),
+        Some("dry-run-on-error")
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn live_setup_command_fails_for_missing_explicit_model() {
+    let temp_dir = unique_temp_dir("wraithrun-live-setup-missing-model");
+    fs::create_dir_all(&temp_dir).expect("temp directory should be created");
+
+    let missing_model = temp_dir.join("missing.onnx");
+    let missing_model_text = missing_model.to_string_lossy().to_string();
+
+    let args = vec!["live", "setup", "--model", missing_model_text.as_str()];
+    let output = run_capture(&args);
+
+    assert!(
+        !output.status.success(),
+        "process should fail when explicit model path is missing"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Live setup validation failed"));
+
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
