@@ -71,6 +71,7 @@ pub struct Finding {
 pub struct LiveFallbackDecision {
     pub policy: String,
     pub reason: String,
+    pub reason_code: String,
     pub live_error: String,
     pub fallback_mode: String,
 }

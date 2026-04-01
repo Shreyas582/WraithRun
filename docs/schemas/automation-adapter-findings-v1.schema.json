@@ -35,7 +35,7 @@
         },
         "live_fallback_decision": {
           "type": ["object", "null"],
-          "required": ["policy", "reason", "live_error", "fallback_mode"],
+          "required": ["policy", "reason", "reason_code", "live_error", "fallback_mode"],
           "properties": {
             "policy": {
               "type": "string",
@@ -43,6 +43,17 @@
             },
             "reason": {
               "type": "string"
+            },
+            "reason_code": {
+              "type": "string",
+              "enum": [
+                "tokenizer_path_missing",
+                "tokenizer_json_invalid",
+                "model_path_missing",
+                "permission_denied",
+                "live_runtime_error",
+                "unknown_live_error"
+              ]
             },
             "live_error": {
               "type": "string"

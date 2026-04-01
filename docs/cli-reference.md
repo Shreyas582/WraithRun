@@ -31,6 +31,7 @@ wraithrun --init-config [--init-config-path <PATH>] [--force]
 - `--template-target <TEMPLATE_TARGET>`: optional target path for supported task templates.
 - `--template-lines <TEMPLATE_LINES>`: optional line count for `syslog-summary` template.
 - `--doctor`: run configuration/runtime diagnostics and exit.
+- `--fix`: with `--doctor`, apply safe remediation handlers (path discovery, fallback-policy hardening, and permission/model-pack guidance).
 - `--list-task-templates`: list built-in investigation templates and exit.
 - `--list-tools`: list built-in local investigation tools and exit.
 - `--tool-filter <QUERY>`: filter `--list-tools` results by name/description terms (case-insensitive, punctuation-normalized, multi-term support).
@@ -90,11 +91,18 @@ Run `--doctor` to validate:
 - final effective runtime resolution,
 - live-mode model-pack readiness checks:
 	- model path exists,
+	- model file is readable by the current operator account,
 	- model extension is `.onnx`,
 	- model file size is non-zero,
 	- tokenizer path exists,
 	- tokenizer file size is non-zero,
 	- tokenizer JSON parses and includes top-level `model` key.
+
+Use `--doctor --live --fix` to apply remediation handlers before checks execute. Current fix handlers cover:
+
+- model/tokenizer path auto-discovery when values are not explicitly provided,
+- fallback-policy hardening (`none` -> `dry-run-on-error`) for live-mode safety,
+- direct guidance for permission and malformed model-pack issues with structured `reason_code` values.
 
 Behavior:
 
@@ -181,6 +189,12 @@ All introspection JSON payloads include a top-level `contract_version` string.
 			"status": "pass",
 			"name": "config-file",
 			"detail": "Loaded config: ./wraithrun.toml"
+		},
+		{
+			"status": "warn",
+			"name": "live-tokenizer-path",
+			"detail": "No tokenizer path resolved for live mode. The runtime will only work if tokenizer discovery succeeds.",
+			"reason_code": "tokenizer_path_missing"
 		}
 	]
 }
@@ -310,6 +324,7 @@ Default run output (`--format json`) includes:
 - `task`: original task text.
 - `case_id`: optional case identifier when set via runtime settings.
 - `live_fallback_decision`: optional fallback metadata when live mode fails and configured policy reroutes execution.
+	- includes `reason_code` for machine-actionable fallback classification.
 - `findings`: actionable finding list synthesized from collected evidence.
 - `turns`: tool-thought-observation trace.
 - `final_answer`: model/runtime conclusion string.
@@ -338,6 +353,14 @@ When `--exit-policy severity-threshold` is set, run exit behavior becomes severi
 If `--exit-threshold` is omitted for `severity-threshold`, threshold defaults to `medium`.
 
 When `--live-fallback-policy dry-run-on-error` is set and live inference fails, the runtime retries once in dry-run mode and records fallback details under `live_fallback_decision`.
+
+Fallback metadata fields:
+
+- `policy`: active live fallback policy.
+- `reason`: human-readable fallback summary.
+- `reason_code`: machine-readable classification (`model_path_missing`, `tokenizer_path_missing`, `tokenizer_json_invalid`, `permission_denied`, `live_runtime_error`, `unknown_live_error`).
+- `live_error`: raw error text from live execution failure.
+- `fallback_mode`: applied fallback runtime mode.
 
 Coverage-oriented observations may also expose drift/risk metrics including `baseline_version`, `baseline_entries_count`, `baseline_new_count`, `newly_privileged_account_count`, `unknown_exposed_process_count`, and `network_risk_score` when those tools are used.
 

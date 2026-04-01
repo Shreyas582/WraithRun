@@ -34,7 +34,8 @@
     {
       "status": "warn",
       "name": "vitis-config",
-      "detail": "Vitis config is set but file was not found: ./models/vitis_ep.json"
+      "detail": "Vitis config is set but file was not found: ./models/vitis_ep.json",
+      "reason_code": "vitis_config_missing"
     }
   ]
 }

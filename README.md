@@ -97,7 +97,7 @@ Top-level fields:
 - `contract_version`: machine-readable JSON contract version for automation compatibility checks.
 - `task`: your input task string.
 - `case_id`: optional investigation identifier when provided via CLI/config/env.
-- `live_fallback_decision`: optional fallback metadata when live mode errors and policy reroutes execution to dry-run.
+- `live_fallback_decision`: optional fallback metadata when live mode errors and policy reroutes execution to dry-run, including machine-readable `reason_code`.
 - `findings`: normalized actionable findings with severity, confidence, evidence pointer, and recommended action.
 - `turns`: intermediate reasoning/tool interaction history.
 - `final_answer`: the model/runtime conclusion.

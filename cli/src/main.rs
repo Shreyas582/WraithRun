@@ -66,14 +66,109 @@ fn discover_model_path() -> Option<PathBuf> {
     candidates.into_iter().next()
 }
 
-fn discover_tokenizer_path(model_path: &Path) -> Option<PathBuf> {
+fn discover_model_path_near(seed_path: &Path) -> Option<PathBuf> {
+    let parent = seed_path.parent()?;
+    let mut candidates: Vec<PathBuf> = fs::read_dir(parent)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && is_onnx_path(path))
+        .collect();
+
+    candidates.sort();
+    candidates.into_iter().next()
+}
+
+fn is_onnx_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("onnx"))
+        .unwrap_or(false)
+}
+
+fn discover_tokenizer_candidates(model_path: &Path) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(parent) = model_path.parent() {
         candidates.push(parent.join("tokenizer.json"));
+
+        if let Ok(entries) = fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+
+                let is_json = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("json"))
+                    .unwrap_or(false);
+                if !is_json {
+                    continue;
+                }
+
+                let has_tokenizer_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.to_ascii_lowercase().contains("tokenizer"))
+                    .unwrap_or(false);
+
+                if has_tokenizer_name {
+                    candidates.push(path);
+                }
+            }
+        }
     }
+
     candidates.push(PathBuf::from("./models/tokenizer.json"));
 
-    candidates.into_iter().find(|path| path.is_file())
+    let mut unique = Vec::new();
+    for candidate in candidates {
+        if !unique.iter().any(|existing| existing == &candidate) {
+            unique.push(candidate);
+        }
+    }
+
+    unique
+}
+
+fn discover_tokenizer_path(model_path: &Path) -> Option<PathBuf> {
+    discover_tokenizer_candidates(model_path)
+        .into_iter()
+        .find(|path| path.is_file())
+}
+
+fn tokenizer_json_health(path: &Path) -> Result<(), &'static str> {
+    let bytes = fs::read(path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::PermissionDenied {
+            "tokenizer_permission_denied"
+        } else {
+            "tokenizer_read_failed"
+        }
+    })?;
+
+    let parsed: Value = serde_json::from_slice(&bytes).map_err(|_| "tokenizer_json_invalid")?;
+    let has_model_key = parsed
+        .as_object()
+        .map(|obj| obj.contains_key("model"))
+        .unwrap_or(false);
+
+    if !has_model_key {
+        return Err("tokenizer_model_key_missing");
+    }
+
+    Ok(())
+}
+
+fn discover_tokenizer_path_with_validation(
+    model_path: &Path,
+    exclude: Option<&Path>,
+) -> Option<PathBuf> {
+    discover_tokenizer_candidates(model_path)
+        .into_iter()
+        .filter(|path| path.is_file())
+        .filter(|path| exclude.map(|blocked| blocked != path.as_path()).unwrap_or(true))
+        .find(|path| tokenizer_json_health(path).is_ok())
 }
 
 fn validate_live_setup_report(report: &DoctorReport) -> Result<()> {
@@ -359,6 +454,9 @@ struct Cli {
 
     #[arg(long, requires = "init_config")]
     force: bool,
+
+    #[arg(long, requires = "doctor")]
+    fix: bool,
 
     #[arg(long)]
     live_setup: bool,
@@ -860,6 +958,8 @@ struct DoctorCheck {
     status: DoctorStatus,
     name: &'static str,
     detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason_code: Option<&'static str>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -869,10 +969,21 @@ struct DoctorReport {
 
 impl DoctorReport {
     fn push(&mut self, status: DoctorStatus, name: &'static str, detail: impl Into<String>) {
+        self.push_with_reason(status, name, detail, None);
+    }
+
+    fn push_with_reason(
+        &mut self,
+        status: DoctorStatus,
+        name: &'static str,
+        detail: impl Into<String>,
+        reason_code: Option<&'static str>,
+    ) {
         self.checks.push(DoctorCheck {
             status,
             name,
             detail: detail.into(),
+            reason_code,
         });
     }
 
@@ -2785,7 +2896,11 @@ fn run_doctor(cli: &Cli) -> DoctorReport {
             file_config_path.as_deref(),
             env_overrides,
         ) {
-            Ok(runtime) => {
+            Ok(mut runtime) => {
+                if cli.fix {
+                    apply_doctor_live_fix_handlers(cli, &mut runtime, &mut report);
+                }
+
                 let mode = if runtime.live { "live" } else { "dry-run" };
                 report.push(
                     DoctorStatus::Pass,
@@ -2834,6 +2949,189 @@ fn run_doctor(cli: &Cli) -> DoctorReport {
     report
 }
 
+fn apply_doctor_live_fix_handlers(cli: &Cli, runtime: &mut RuntimeConfig, report: &mut DoctorReport) {
+    if !runtime.live {
+        report.push_with_reason(
+            DoctorStatus::Warn,
+            "doctor-fix",
+            "--fix was requested, but live mode is disabled in effective settings. Re-run with --doctor --live --fix to apply live remediation handlers.",
+            Some("fix_requires_live_mode"),
+        );
+        return;
+    }
+
+    if runtime.live_fallback_policy == LiveFallbackPolicy::None {
+        runtime.live_fallback_policy = LiveFallbackPolicy::DryRunOnError;
+        report.push_with_reason(
+            DoctorStatus::Pass,
+            "fix-live-fallback-policy",
+            "Set live fallback policy to dry-run-on-error so live failures preserve operator workflow continuity.",
+            Some("fallback_policy_auto_enabled"),
+        );
+    } else {
+        report.push(
+            DoctorStatus::Pass,
+            "fix-live-fallback-policy",
+            format!(
+                "Live fallback policy already set to '{}'.",
+                live_fallback_policy_token(runtime.live_fallback_policy)
+            ),
+        );
+    }
+
+    if !runtime.model.is_file() {
+        if cli.model.is_some() {
+            report.push_with_reason(
+                DoctorStatus::Warn,
+                "fix-live-model-path",
+                format!(
+                    "Explicit --model path was not found: {}. Update --model to a readable .onnx file.",
+                    runtime.model.display()
+                ),
+                Some("model_path_explicit_invalid"),
+            );
+        } else {
+            let discovered = discover_model_path_near(&runtime.model).or_else(discover_model_path);
+            if let Some(path) = discovered {
+                runtime.model = path.clone();
+                report.push_with_reason(
+                    DoctorStatus::Pass,
+                    "fix-live-model-path",
+                    format!("Auto-discovered model path: {}", path.display()),
+                    Some("model_path_auto_discovered"),
+                );
+            } else {
+                report.push_with_reason(
+                    DoctorStatus::Warn,
+                    "fix-live-model-path",
+                    "No fallback model candidate was discovered. Place a .onnx file under ./models or pass --model <PATH>.",
+                    Some("model_path_discovery_failed"),
+                );
+            }
+        }
+    } else if !is_onnx_path(&runtime.model) {
+        if cli.model.is_some() {
+            report.push_with_reason(
+                DoctorStatus::Warn,
+                "fix-live-model-path",
+                format!(
+                    "Explicit --model path is not an ONNX file: {}. Provide a .onnx model file.",
+                    runtime.model.display()
+                ),
+                Some("model_format_explicit_non_onnx"),
+            );
+        } else if let Some(candidate) = discover_model_path_near(&runtime.model) {
+            if candidate != runtime.model {
+                runtime.model = candidate.clone();
+                report.push_with_reason(
+                    DoctorStatus::Pass,
+                    "fix-live-model-path",
+                    format!(
+                        "Switched to nearby ONNX model candidate: {}",
+                        candidate.display()
+                    ),
+                    Some("model_path_auto_corrected"),
+                );
+            }
+        }
+    }
+
+    if runtime.model.is_file() {
+        match fs::File::open(&runtime.model) {
+            Ok(_) => {
+                report.push(
+                    DoctorStatus::Pass,
+                    "fix-live-model-permissions",
+                    format!("Model file is readable: {}", runtime.model.display()),
+                );
+            }
+            Err(err) => {
+                let reason_code = if err.kind() == std::io::ErrorKind::PermissionDenied {
+                    "model_permission_denied"
+                } else {
+                    "model_read_failed"
+                };
+                report.push_with_reason(
+                    DoctorStatus::Warn,
+                    "fix-live-model-permissions",
+                    format!(
+                        "Unable to read model file '{}': {err}. Ensure the account running WraithRun has read permission.",
+                        runtime.model.display()
+                    ),
+                    Some(reason_code),
+                );
+            }
+        }
+    }
+
+    let tokenizer_state = runtime.tokenizer.as_ref().map(|path| {
+        if !path.is_file() {
+            Err("tokenizer_path_missing")
+        } else {
+            tokenizer_json_health(path)
+        }
+    });
+    let tokenizer_needs_fix = runtime.tokenizer.is_none()
+        || tokenizer_state
+            .as_ref()
+            .map(|state| state.is_err())
+            .unwrap_or(false);
+
+    if !tokenizer_needs_fix {
+        if let Some(path) = runtime.tokenizer.as_ref() {
+            report.push(
+                DoctorStatus::Pass,
+                "fix-live-tokenizer-path",
+                format!("Tokenizer already valid: {}", path.display()),
+            );
+        }
+        return;
+    }
+
+    if cli.tokenizer.is_some() {
+        let reason_code = tokenizer_state
+            .as_ref()
+            .and_then(|state| state.as_ref().err().copied())
+            .unwrap_or("tokenizer_path_explicit_invalid");
+        let detail = match runtime.tokenizer.as_ref() {
+            Some(path) => format!(
+                "Explicit --tokenizer path requires manual correction: {}. Update --tokenizer to a readable tokenizer JSON with a top-level model key.",
+                path.display()
+            ),
+            None => "Explicit --tokenizer value was provided but could not be resolved; pass a readable tokenizer JSON path.".to_string(),
+        };
+        report.push_with_reason(
+            DoctorStatus::Warn,
+            "fix-live-tokenizer-path",
+            detail,
+            Some(reason_code),
+        );
+        return;
+    }
+
+    let exclude = runtime.tokenizer.as_deref();
+    if let Some(path) = discover_tokenizer_path_with_validation(&runtime.model, exclude) {
+        runtime.tokenizer = Some(path.clone());
+        report.push_with_reason(
+            DoctorStatus::Pass,
+            "fix-live-tokenizer-path",
+            format!(
+                "Auto-discovered a valid tokenizer JSON: {}",
+                path.display()
+            ),
+            Some("tokenizer_path_auto_discovered"),
+        );
+        return;
+    }
+
+    report.push_with_reason(
+        DoctorStatus::Warn,
+        "fix-live-tokenizer-path",
+        "No valid tokenizer candidate was discovered. Add tokenizer.json beside the model (or under ./models) and retry.",
+        Some("tokenizer_discovery_failed"),
+    );
+}
+
 fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorReport) {
     if !runtime.live {
         return;
@@ -2846,27 +3144,21 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
             format!("Model file found: {}", runtime.model.display()),
         );
 
-        let onnx_extension = runtime
-            .model
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.eq_ignore_ascii_case("onnx"))
-            .unwrap_or(false);
-
-        if onnx_extension {
+        if is_onnx_path(&runtime.model) {
             report.push(
                 DoctorStatus::Pass,
                 "live-model-format",
                 format!("Model extension is .onnx: {}", runtime.model.display()),
             );
         } else {
-            report.push(
+            report.push_with_reason(
                 DoctorStatus::Warn,
                 "live-model-format",
                 format!(
                     "Model file extension is not .onnx (path: {}).",
                     runtime.model.display()
                 ),
+                Some("model_format_non_onnx"),
             );
         }
 
@@ -2879,31 +3171,65 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
                 );
             }
             Ok(_) => {
-                report.push(
+                report.push_with_reason(
                     DoctorStatus::Fail,
                     "live-model-size",
                     format!("Model file is empty: {}", runtime.model.display()),
+                    Some("model_file_empty"),
                 );
             }
             Err(err) => {
-                report.push(
+                let reason_code = if err.kind() == std::io::ErrorKind::PermissionDenied {
+                    "model_metadata_permission_denied"
+                } else {
+                    "model_metadata_unreadable"
+                };
+                report.push_with_reason(
                     DoctorStatus::Fail,
                     "live-model-size",
                     format!(
                         "Unable to read model metadata '{}': {err}",
                         runtime.model.display()
                     ),
+                    Some(reason_code),
+                );
+            }
+        }
+
+        match fs::File::open(&runtime.model) {
+            Ok(_) => {
+                report.push(
+                    DoctorStatus::Pass,
+                    "live-model-readable",
+                    format!("Model file is readable: {}", runtime.model.display()),
+                );
+            }
+            Err(err) => {
+                let reason_code = if err.kind() == std::io::ErrorKind::PermissionDenied {
+                    "model_permission_denied"
+                } else {
+                    "model_read_failed"
+                };
+                report.push_with_reason(
+                    DoctorStatus::Fail,
+                    "live-model-readable",
+                    format!(
+                        "Unable to open model file '{}': {err}",
+                        runtime.model.display()
+                    ),
+                    Some(reason_code),
                 );
             }
         }
     } else {
-        report.push(
+        report.push_with_reason(
             DoctorStatus::Warn,
             "live-model-path",
             format!(
                 "Live mode is enabled but model file was not found at {}.",
                 runtime.model.display()
             ),
+            Some("model_path_missing"),
         );
     }
 
@@ -2924,21 +3250,28 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
                     );
                 }
                 Ok(_) => {
-                    report.push(
+                    report.push_with_reason(
                         DoctorStatus::Fail,
                         "live-tokenizer-size",
                         format!("Tokenizer file is empty: {}", tokenizer.display()),
+                        Some("tokenizer_file_empty"),
                     );
                     return;
                 }
                 Err(err) => {
-                    report.push(
+                    let reason_code = if err.kind() == std::io::ErrorKind::PermissionDenied {
+                        "tokenizer_metadata_permission_denied"
+                    } else {
+                        "tokenizer_metadata_unreadable"
+                    };
+                    report.push_with_reason(
                         DoctorStatus::Fail,
                         "live-tokenizer-size",
                         format!(
                             "Unable to read tokenizer metadata '{}': {err}",
                             tokenizer.display()
                         ),
+                        Some(reason_code),
                     );
                     return;
                 }
@@ -2967,48 +3300,58 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
                                 "Tokenizer JSON contains top-level 'model' key.",
                             );
                         } else {
-                            report.push(
+                            report.push_with_reason(
                                 DoctorStatus::Warn,
                                 "live-tokenizer-shape",
                                 "Tokenizer JSON parsed but top-level 'model' key was not found.",
+                                Some("tokenizer_model_key_missing"),
                             );
                         }
                     }
                     Err(err) => {
-                        report.push(
+                        report.push_with_reason(
                             DoctorStatus::Fail,
                             "live-tokenizer-json",
                             format!(
                                 "Tokenizer JSON parse failed for '{}': {err}",
                                 tokenizer.display()
                             ),
+                            Some("tokenizer_json_invalid"),
                         );
                     }
                 },
                 Err(err) => {
-                    report.push(
+                    let reason_code = if err.kind() == std::io::ErrorKind::PermissionDenied {
+                        "tokenizer_permission_denied"
+                    } else {
+                        "tokenizer_read_failed"
+                    };
+                    report.push_with_reason(
                         DoctorStatus::Fail,
                         "live-tokenizer-json",
                         format!(
                             "Unable to read tokenizer file '{}': {err}",
                             tokenizer.display()
                         ),
+                        Some(reason_code),
                     );
                 }
             }
         }
         Some(tokenizer) => {
-            report.push(
+            report.push_with_reason(
                 DoctorStatus::Warn,
                 "live-tokenizer-path",
                 format!("Tokenizer file not found: {}", tokenizer.display()),
+                Some("tokenizer_path_missing"),
             );
         }
         None => {
-            report.push(
+            report.push_with_reason(
                 DoctorStatus::Warn,
                 "live-tokenizer-path",
                 "No tokenizer path resolved for live mode. The runtime will only work if tokenizer discovery succeeds.",
+                Some("tokenizer_path_missing"),
             );
         }
     }
@@ -3025,13 +3368,24 @@ fn render_doctor_report(report: &DoctorReport) -> String {
     );
 
     for check in &report.checks {
-        let _ = writeln!(
-            output,
-            "[{}] {}: {}",
-            check.status.label(),
-            check.name,
-            check.detail
-        );
+        if let Some(reason_code) = check.reason_code {
+            let _ = writeln!(
+                output,
+                "[{}] {} [{}]: {}",
+                check.status.label(),
+                check.name,
+                reason_code,
+                check.detail
+            );
+        } else {
+            let _ = writeln!(
+                output,
+                "[{}] {}: {}",
+                check.status.label(),
+                check.name,
+                check.detail
+            );
+        }
     }
 
     output.trim_end().to_string()
@@ -3682,6 +4036,7 @@ fn render_summary(report: &RunReport) -> String {
         let _ = writeln!(output, "Live Fallback: {}", decision.fallback_mode);
         let _ = writeln!(output, "Fallback Policy: {}", decision.policy);
         let _ = writeln!(output, "Fallback Reason: {}", decision.reason);
+        let _ = writeln!(output, "Fallback Reason Code: {}", decision.reason_code);
     }
     let _ = writeln!(output, "Turns: {}", report.turns.len());
     let _ = writeln!(output, "Findings: {}", report.findings.len());
@@ -3753,6 +4108,7 @@ fn render_markdown(report: &RunReport) -> String {
         let _ = writeln!(output, "- Live Fallback: {}", decision.fallback_mode);
         let _ = writeln!(output, "- Fallback Policy: {}", decision.policy);
         let _ = writeln!(output, "- Fallback Reason: {}", decision.reason);
+        let _ = writeln!(output, "- Fallback Reason Code: {}", decision.reason_code);
     }
     let _ = writeln!(output, "- Turns: {}", report.turns.len());
     let _ = writeln!(output, "- Findings: {}", report.findings.len());
@@ -3876,6 +4232,7 @@ async fn run_with_live_fallback(runtime: &RuntimeConfig) -> Result<RunReport> {
             }
 
             let live_error = format!("{err:#}");
+            let reason_code = classify_live_error_reason_code(&live_error).to_string();
             let mut report = run_agent_once(runtime, true).await.with_context(|| {
                 format!(
                     "live run failed and fallback dry-run also failed (live error: {live_error})"
@@ -3885,6 +4242,7 @@ async fn run_with_live_fallback(runtime: &RuntimeConfig) -> Result<RunReport> {
             let decision = LiveFallbackDecision {
                 policy: live_fallback_policy_token(runtime.live_fallback_policy).to_string(),
                 reason: "live inference failed and runtime fell back to dry-run".to_string(),
+                reason_code,
                 live_error,
                 fallback_mode: "dry-run".to_string(),
             };
@@ -3939,10 +4297,48 @@ fn append_live_fallback_finding(report: &mut RunReport, decision: &LiveFallbackD
             field: "live_fallback_decision.live_error".to_string(),
         },
         recommended_action: format!(
-            "Review live inference error details and model-pack readiness, then rerun live mode after fixing root cause. Fallback reason: {}.",
-            decision.reason
+            "Review live inference error details and model-pack readiness, then rerun live mode after fixing root cause. Fallback reason: {} (code: {}).",
+            decision.reason,
+            decision.reason_code
         ),
     });
+}
+
+fn classify_live_error_reason_code(live_error: &str) -> &'static str {
+    let normalized = live_error.to_ascii_lowercase();
+
+    if normalized.contains("unable to locate tokenizer")
+        || normalized.contains("tokenizer file not found")
+        || normalized.contains("tokenizer path")
+    {
+        return "tokenizer_path_missing";
+    }
+
+    if normalized.contains("tokenizer")
+        && (normalized.contains("parse")
+            || normalized.contains("json")
+            || normalized.contains("failed to load tokenizer"))
+    {
+        return "tokenizer_json_invalid";
+    }
+
+    if normalized.contains("no such file")
+        || normalized.contains("path does not exist")
+        || normalized.contains("could not read model")
+        || normalized.contains("model file")
+    {
+        return "model_path_missing";
+    }
+
+    if normalized.contains("permission denied") {
+        return "permission_denied";
+    }
+
+    if normalized.contains("vitis") || normalized.contains("onnx") || normalized.contains("ort") {
+        return "live_runtime_error";
+    }
+
+    "unknown_live_error"
 }
 
 fn live_fallback_policy_token(policy: LiveFallbackPolicy) -> &'static str {
@@ -4036,6 +4432,7 @@ mod tests {
             init_config: false,
             init_config_path: None,
             force: false,
+            fix: false,
             live_setup: false,
             config: None,
             profile: None,
@@ -4193,6 +4590,7 @@ mod tests {
         let decision = LiveFallbackDecision {
             policy: "dry-run-on-error".to_string(),
             reason: "live inference failed and runtime fell back to dry-run".to_string(),
+            reason_code: "live_runtime_error".to_string(),
             live_error: "session create failed".to_string(),
             fallback_mode: "dry-run".to_string(),
         };

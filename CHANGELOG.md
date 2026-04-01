@@ -8,15 +8,17 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- `--doctor --live --fix` remediation flow for common live-mode misconfigurations (path discovery, fallback-policy hardening, and operator guidance).
+- Structured `reason_code` values on doctor checks to support machine-actionable failure/warning classification.
 
 ### Changed
 
-- (none yet)
+- `live_fallback_decision` metadata now includes required `reason_code` when fallback is triggered.
+- Summary and markdown output now render fallback reason code alongside fallback reason.
 
 ### Fixed
 
-- (none yet)
+- Live-mode integration coverage now validates fallback reason-code presence and doctor fix-handler behavior.
 
 ## 0.8.0 - 2026-03-31
 

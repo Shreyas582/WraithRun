@@ -253,6 +253,22 @@ fn live_mode_falls_back_to_dry_run_when_policy_enabled() {
         decision.get("fallback_mode").and_then(Value::as_str),
         Some("dry-run")
     );
+    let reason_code = decision
+        .get("reason_code")
+        .and_then(Value::as_str)
+        .expect("fallback reason_code should be present");
+    assert!(
+        [
+            "model_path_missing",
+            "live_runtime_error",
+            "tokenizer_path_missing",
+            "tokenizer_json_invalid",
+            "permission_denied",
+            "unknown_live_error"
+        ]
+        .contains(&reason_code),
+        "unexpected fallback reason code: {reason_code}"
+    );
 
     let findings = json
         .get("findings")
@@ -266,6 +282,113 @@ fn live_mode_falls_back_to_dry_run_when_policy_enabled() {
             .and_then(Value::as_str)
             == Some("live_fallback_decision.live_error")
     }));
+}
+
+#[test]
+fn doctor_live_fix_auto_discovers_tokenizer_and_sets_fallback_policy() {
+    let fixture_dir = unique_temp_dir("wraithrun-doctor-live-fix");
+    fs::create_dir_all(&fixture_dir).expect("fixture directory should be created");
+
+    let model_path = fixture_dir.join("sample-model.onnx");
+    fs::write(&model_path, b"onnx-fixture").expect("model fixture should be written");
+
+    let tokenizer_path = fixture_dir.join("tokenizer.json");
+    fs::write(
+        &tokenizer_path,
+        r#"{"model":{"type":"WordPiece"}}"#,
+    )
+    .expect("tokenizer fixture should be written");
+
+    let model_path_text = model_path.to_string_lossy().to_string();
+    let args = vec![
+        "--doctor",
+        "--live",
+        "--fix",
+        "--model",
+        model_path_text.as_str(),
+        "--introspection-format",
+        "json",
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "doctor fix run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let checks = json
+        .get("checks")
+        .and_then(Value::as_array)
+        .expect("checks should be an array");
+
+    assert!(checks.iter().any(|check| {
+        check.get("name") == Some(&Value::String("fix-live-tokenizer-path".to_string()))
+            && check.get("status") == Some(&Value::String("pass".to_string()))
+            && check.get("reason_code")
+                == Some(&Value::String("tokenizer_path_auto_discovered".to_string()))
+    }));
+
+    assert!(checks.iter().any(|check| {
+        check.get("name") == Some(&Value::String("fix-live-fallback-policy".to_string()))
+            && check.get("status") == Some(&Value::String("pass".to_string()))
+            && check.get("reason_code")
+                == Some(&Value::String("fallback_policy_auto_enabled".to_string()))
+    }));
+
+    assert!(checks.iter().any(|check| {
+        check.get("name") == Some(&Value::String("live-tokenizer-path".to_string()))
+            && check.get("status") == Some(&Value::String("pass".to_string()))
+    }));
+
+    let _ = fs::remove_dir_all(&fixture_dir);
+}
+
+#[test]
+fn doctor_live_fix_emits_reason_code_for_explicit_tokenizer_path_failure() {
+    let fixture_dir = unique_temp_dir("wraithrun-doctor-live-fix-explicit-tokenizer");
+    fs::create_dir_all(&fixture_dir).expect("fixture directory should be created");
+
+    let model_path = fixture_dir.join("sample-model.onnx");
+    fs::write(&model_path, b"onnx-fixture").expect("model fixture should be written");
+
+    let missing_tokenizer = fixture_dir.join("missing-tokenizer.json");
+    let model_path_text = model_path.to_string_lossy().to_string();
+    let missing_tokenizer_text = missing_tokenizer.to_string_lossy().to_string();
+
+    let args = vec![
+        "--doctor",
+        "--live",
+        "--fix",
+        "--model",
+        model_path_text.as_str(),
+        "--tokenizer",
+        missing_tokenizer_text.as_str(),
+        "--introspection-format",
+        "json",
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        output.status.success(),
+        "doctor fix run should complete with warning guidance: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = parse_stdout_json(&output);
+    let checks = json
+        .get("checks")
+        .and_then(Value::as_array)
+        .expect("checks should be an array");
+
+    assert!(checks.iter().any(|check| {
+        check.get("name") == Some(&Value::String("fix-live-tokenizer-path".to_string()))
+            && check.get("status") == Some(&Value::String("warn".to_string()))
+            && check.get("reason_code") == Some(&Value::String("tokenizer_path_missing".to_string()))
+    }));
+
+    let _ = fs::remove_dir_all(&fixture_dir);
 }
 
 #[test]

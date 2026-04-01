@@ -12,6 +12,7 @@ Live-mode note:
 
 - Run report includes optional `live_fallback_decision` when policy-driven fallback is triggered.
 - Findings adapter summary includes optional `live_fallback_decision` for pipeline audit visibility.
+- `live_fallback_decision.reason_code` provides machine-readable fallback classification.
 
 ## Schema Files
 

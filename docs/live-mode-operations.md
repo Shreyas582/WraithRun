@@ -10,6 +10,12 @@ Run doctor in live mode before operational use:
 wraithrun --doctor --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --introspection-format json
 ```
 
+For auto-remediation of common setup issues, run:
+
+```powershell
+wraithrun --doctor --live --fix --model C:/models/llm.onnx --introspection-format json
+```
+
 Required PASS checks for live readiness:
 
 - `live-model-path`
@@ -35,6 +41,8 @@ Policy behavior:
 - `none`: live inference error returns non-zero immediately.
 - `dry-run-on-error`: runtime retries once in dry-run mode and records `live_fallback_decision`.
 
+When fallback is triggered, `live_fallback_decision.reason_code` provides structured classification for automation and alert routing.
+
 ## 3. Pipeline Gating Pattern
 
 For automation pipelines, combine fallback and exit policy:
@@ -57,7 +65,7 @@ If live mode repeatedly falls back:
 2. Confirm model path points to local readable storage.
 3. Confirm tokenizer JSON parses and includes top-level `model`.
 4. Confirm Vitis paths (`--vitis-config`, `--vitis-cache-dir`) are valid when used.
-5. Review `live_fallback_decision.live_error` in run output and capture it in incident notes.
+5. Review `live_fallback_decision.reason_code` and `live_fallback_decision.live_error` in run output and capture both in incident notes.
 
 ## 5. Operator Recording Guidance
 
