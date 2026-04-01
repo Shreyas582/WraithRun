@@ -8,6 +8,21 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 0.9.0 - 2026-04-01
+
+### Added
+
+- `wraithrun live setup` bootstrap flow to discover local model/tokenizer defaults and write a ready-to-run live profile.
 - `--doctor --live --fix` remediation flow for common live-mode misconfigurations (path discovery, fallback-policy hardening, and operator guidance).
 - Structured `reason_code` values on doctor checks to support machine-actionable failure/warning classification.
 - Model-pack manager modes: `wraithrun models list`, `wraithrun models validate`, and `wraithrun models benchmark`.
@@ -23,7 +38,7 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - `live_fallback_decision` metadata now includes required `reason_code` when fallback is triggered.
 - Summary and markdown output now render fallback reason code alongside fallback reason.
 - Summary and markdown output now render run timing and live reliability metrics when available.
-- CLI/README reference examples now include model-pack discovery, validation, and benchmark workflows.
+- CLI/README reference examples now include live setup plus model-pack discovery, validation, and benchmark workflows.
 - Release workflow now runs post-install smoke checks for native installer and archive artifacts before publishing.
 
 ### Fixed

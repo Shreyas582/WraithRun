@@ -1,5 +1,42 @@
 # Upgrade Notes
 
+## v0.9.0
+
+### Breaking/visible changes
+
+- Added `wraithrun live setup` for one-command local live profile bootstrapping.
+- Added `--doctor --live --fix` remediation flow with reason-coded fix guidance.
+- Added model-pack manager operations: `wraithrun models list`, `wraithrun models validate`, and `wraithrun models benchmark`.
+- Added live-mode telemetry in machine-readable output: `run_timing` and `live_run_metrics`.
+- Added cross-platform package builds and smoke checks for Windows (`.zip`, `.msi`), Linux (`.tar.gz`, `.deb`, `.rpm`), and macOS (`.tar.gz`, `.pkg`).
+
+### Migration examples
+
+Bootstrap a local live profile automatically:
+
+```powershell
+.\wraithrun.exe live setup --config .\wraithrun.toml
+```
+
+Run live mode with deterministic fallback and inspect telemetry:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --live --live-fallback-policy dry-run-on-error --format json
+```
+
+Validate and benchmark available model packs:
+
+```powershell
+.\wraithrun.exe models validate --introspection-format json
+.\wraithrun.exe models benchmark --introspection-format json
+```
+
+### Recommended checks after upgrade
+
+- Confirm automation parsers tolerate optional `run_timing` and `live_run_metrics` in run and adapter payloads.
+- Validate any CI/SIEM gates that consume `live_success_rate`, `fallback_rate`, or `top_failure_reasons`.
+- Verify release artifact ingestion processes include installer formats (`.msi`, `.deb`, `.rpm`, `.pkg`) and generated checksum/SBOM assets.
+
 ## v0.8.0
 
 ### Breaking/visible changes
@@ -7,7 +44,6 @@
 - Added live-mode model-pack doctor checks for model and tokenizer readiness (`live-model-format`, `live-model-size`, `live-tokenizer-size`, `live-tokenizer-json`, `live-tokenizer-shape`).
 - Added `--live-fallback-policy <none|dry-run-on-error>` for deterministic live-mode fallback behavior.
 - Run report and findings adapter outputs now include optional `live_fallback_decision` metadata when fallback is triggered.
-- Run report and findings adapter outputs now include optional `run_timing` and `live_run_metrics` telemetry for latency/reliability automation.
 
 ### Migration examples
 
@@ -26,7 +62,6 @@ Validate live model-pack readiness before deployment:
 ### Recommended checks after upgrade
 
 - Confirm automation parsers tolerate optional `live_fallback_decision` in run and adapter payloads.
-- Confirm automation parsers tolerate optional `run_timing` and `live_run_metrics` in run and adapter payloads.
 - Keep `--doctor --live` in preflight runbooks for model-pack readiness checks.
 - Decide whether pipelines should use fallback (`dry-run-on-error`) or fail-fast (`none`) based on incident handling policy.
 

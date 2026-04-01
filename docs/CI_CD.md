@@ -7,6 +7,7 @@ This repository uses GitHub Actions for quality gates, release planning, and art
 - `ci.yml`
   - Runs formatting checks, linting, tests, and cross-platform workspace compilation.
   - Validates feature-gated Vitis build path.
+  - Runs live-mode metrics benchmark regression checks and validates machine-readable telemetry thresholds.
   - Cross-platform checks run on Linux, macOS, and Windows.
 
 - `release-drafter.yml`
@@ -93,6 +94,7 @@ Recommended branch protection settings for `main`:
 Recommended required checks:
 
 - `Quality Gates (ubuntu)`
+- `Live metrics benchmark regression (ubuntu)`
 - `Cross-platform compile (ubuntu-latest)`
 - `Cross-platform compile (macos-latest)`
 - `Cross-platform compile (windows-latest)`

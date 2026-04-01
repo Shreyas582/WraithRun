@@ -107,11 +107,29 @@ Live run:
 cargo run -p wraithrun --features inference_bridge/vitis -- --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
 ```
 
+One-command live setup bootstrap:
+
+```powershell
+cargo run -p wraithrun -- live setup --config .\wraithrun.toml
+```
+
+Model-pack lifecycle checks:
+
+```powershell
+cargo run -p wraithrun -- models list --introspection-format json
+cargo run -p wraithrun -- models validate --introspection-format json
+cargo run -p wraithrun -- models benchmark --introspection-format json
+```
+
 ## Output Format
 
 WraithRun prints a JSON report with:
 
+- contract_version: machine-readable contract version marker.
 - task: your original request.
+- findings: normalized actionable findings.
+- run_timing: optional latency fields (`first_token_latency_ms`, `total_run_duration_ms`).
+- live_run_metrics: optional live reliability/latency fields for live-mode runs.
 - turns: intermediate reasoning and tool observations.
 - final_answer: final response text.
 

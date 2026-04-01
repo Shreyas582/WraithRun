@@ -11,8 +11,11 @@ It is a local-first command-line tool for defenders and security engineers that:
 - supports case-tagged investigations and evidence bundle export (report, raw observations, checksums),
 - verifies evidence bundle integrity against `SHA256SUMS` for auditable evidence handling,
 - includes automation adapter output plus severity-threshold exit policy for CI/SIEM pipelines,
+- includes live setup bootstrap plus model-pack list/validate/benchmark operations for practical live deployments,
 - validates live-mode model-pack readiness in `--doctor` (model extension/size, tokenizer JSON parse/shape),
+- provides `--doctor --live --fix` remediation guidance and reason-coded diagnostics,
 - applies configurable live fallback policy (`dry-run-on-error`) for predictable live-mode recovery,
+- emits live reliability and latency telemetry (`run_timing`, `live_run_metrics`) for machine-consumable operations tracking,
 - keeps evidence on your own machine by default,
 - returns a structured JSON report you can archive, diff, or automate around.
 
@@ -98,6 +101,8 @@ Top-level fields:
 - `task`: your input task string.
 - `case_id`: optional investigation identifier when provided via CLI/config/env.
 - `live_fallback_decision`: optional fallback metadata when live mode errors and policy reroutes execution to dry-run, including machine-readable `reason_code`.
+- `run_timing`: run-level latency fields (`first_token_latency_ms`, `total_run_duration_ms`).
+- `live_run_metrics`: live-mode reliability and timing counters/rates (`live_success_rate`, `fallback_rate`, `top_failure_reasons`).
 - `findings`: normalized actionable findings with severity, confidence, evidence pointer, and recommended action.
 - `turns`: intermediate reasoning/tool interaction history.
 - `final_answer`: the model/runtime conclusion.
@@ -291,6 +296,12 @@ Run live mode with deterministic dry-run fallback:
 cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --live --model C:/models/llm.onnx --live-fallback-policy dry-run-on-error
 ```
 
+Bootstrap a local live profile automatically:
+
+```powershell
+cargo run -p wraithrun -- live setup --config .\wraithrun.toml
+```
+
 List discovered model packs:
 
 ```powershell
@@ -458,6 +469,10 @@ WraithRun currently ships with these local tools:
 - `scan_network`: list active local listening sockets.
 - `hash_binary`: compute SHA-256 for a local file.
 - `check_privilege_escalation_vectors`: collect local privilege-surface indicators.
+- `inspect_persistence_locations`: inventory suspicious persistence entries with baseline drift support.
+- `audit_account_changes`: capture privileged-account drift and unapproved membership changes.
+- `correlate_process_network`: score network exposure risk by process/listener context.
+- `capture_coverage_baseline`: capture reusable baseline arrays for persistence/account/network drift workflows.
 
 The agent decides when to call tools during a run.
 
@@ -534,7 +549,7 @@ Still in progress:
 
 - KV-cache and streaming decode support.
 - Broader end-to-end test coverage.
-- Signed artifacts and SBOM publication.
+- Code-signing and platform trust hardening for released binaries/installers.
 
 ## Responsible Use
 

@@ -72,31 +72,32 @@ Release should be blocked when:
 
 - Open follow-up issues for deferred work.
 - Refresh roadmap in `README.md` if priorities changed.
-- Optionally create next milestone tracking issue.
+- Close the completed milestone tracker issue and milestone.
+- Ensure the next milestone tracking issue is open and linked in release notes.
 
-## Roadmap Milestones (v0.5.0-v0.8.0)
+## Roadmap Milestones (v0.9.0-v1.2.0)
 
-- `v0.5.0` Coverage Expansion:
-   Add high-value host checks beyond current four tools, starting with persistence locations, account/privilege changes, and process-network correlation.
-- `v0.6.0` Case Workflow:
-   Add case-id and evidence bundle export (report + raw observations + checksums) so runs are investigation-ready, shareable, and auditable.
-- `v0.7.0` Automation Integration:
-   Version the output contract and add machine-consumable adapters and exit-code policy for CI/SIEM pipelines.
-- `v0.8.0` Live-Mode Practicality:
-   Add model-pack doctor checks and predictable fallback behavior so live mode is easy to run in real environments, not just labs.
+- `v0.9.0` Live-Mode Convenience First (completed):
+   Delivered one-command live setup, actionable doctor remediation, model-pack lifecycle commands, cross-platform packaging, and live reliability/latency instrumentation.
+- `v1.0.0` Local API and Web UI MVP:
+   Add local API server endpoints plus baseline web UI workflows with secure local operation.
+- `v1.1.0` Workflow Depth and Live Quality:
+   Add policy lifecycle controls, suppressions, and live inference quality controls.
+- `v1.2.0` Integrations and Team Mode:
+   Add connector framework plus team-mode scheduling/backup foundations.
 
-## Immediate Next Steps for v0.8.0
+## Immediate Next Steps for v1.0.0
 
-Use this runbook to execute the next release milestone end-to-end.
+Use this runbook to execute the active next milestone end-to-end.
 
 1. Create a tracking issue from the Release Checklist template.
-2. Apply labels `release`, `milestone:v0.8.0`, and priority labels as needed.
+2. Apply labels `release`, `milestone:v1.0.0`, and priority labels as needed.
 3. Run milestone bootstrap workflow:
    - Workflow: `Milestone Bootstrap`
    - Inputs:
-   - `seed_roadmap`: `true` (upserts canonical milestones `v0.5.0` through `v0.8.0`)
-   - `title`: `v0.8.0`
-   - `description`: `Live-Mode Practicality: add model-pack doctor checks and predictable fallback behavior so live mode is easy to run in real environments, not just labs.`
+   - `seed_roadmap`: `true` (upserts canonical milestones for the active roadmap set)
+   - `title`: `v1.0.0`
+   - `description`: `Local API and Web UI MVP: local server endpoints, security baseline, durable local data model, and initial triage UI.`
      - `due_date`: optional (`YYYY-MM-DD`)
 4. Verify quality gates locally:
    - `cargo check`
@@ -104,8 +105,8 @@ Use this runbook to execute the next release milestone end-to-end.
    - `cargo check -p inference_bridge --features vitis`
 5. Verify GitHub Actions CI is green on latest `main`.
 6. Tag and publish:
-   - `git tag -a v0.8.0 -m "Release v0.8.0"`
-   - `git push origin v0.8.0`
+   - `git tag -a v1.0.0 -m "Release v1.0.0"`
+   - `git push origin v1.0.0`
 7. Confirm `Release` workflow completed and assets are attached.
 8. Close the milestone and open a follow-on milestone.
 9. Open planning issue for the next milestone scope.
