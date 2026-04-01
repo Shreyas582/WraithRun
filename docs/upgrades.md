@@ -4,6 +4,7 @@
 
 ### Breaking/visible changes
 
+- Run and introspection JSON outputs now include top-level `contract_version` (`1.0.0`) for automation compatibility checks.
 - Added case-workflow runbook examples for evidence collection, integrity verification, and retention operations.
 - Expanded evidence-bundle path handling coverage to include direct `SHA256SUMS` verification and path-with-spaces workflows.
 
@@ -23,6 +24,7 @@ Import baseline arrays directly from a `raw_observations.json` file path:
 
 ### Recommended checks after upgrade
 
+- Validate automation parsers check `contract_version` before strict field-level validation.
 - Validate your incident-response runbook uses the documented collection, verify, and retention sequence for case workflows.
 - Add test coverage in downstream wrappers for bundle paths that include spaces or direct checksum-manifest references.
 

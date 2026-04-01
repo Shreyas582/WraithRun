@@ -61,6 +61,7 @@ Each run prints a JSON report:
 
 ```json
 {
+    "contract_version": "1.0.0",
     "task": "Investigate unauthorized SSH keys",
     "findings": [
         {
@@ -88,6 +89,7 @@ Each run prints a JSON report:
 
 Top-level fields:
 
+- `contract_version`: machine-readable JSON contract version for automation compatibility checks.
 - `task`: your input task string.
 - `case_id`: optional investigation identifier when provided via CLI/config/env.
 - `findings`: normalized actionable findings with severity, confidence, evidence pointer, and recommended action.

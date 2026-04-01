@@ -155,6 +155,8 @@ These modes are mutually exclusive with each other and with task execution modes
 
 When `--introspection-format json` is used, the output shape is stable per mode.
 
+All introspection JSON payloads include a top-level `contract_version` string.
+
 `--doctor --introspection-format json`:
 
 ```json
@@ -282,6 +284,8 @@ When `--introspection-format json` is used, the output shape is stable per mode.
 
 Schema compatibility policy:
 
+- `contract_version` identifies the JSON contract family and version (current value: `1.0.0`).
+- Automation should validate `contract_version` before enforcing strict field-level parsing.
 - Patch releases (`0.x.Z`) keep existing JSON keys and meanings stable.
 - Minor releases (`0.Y.0`) may add new JSON fields, but existing documented fields are not removed or renamed without an explicit changelog note.
 - Automation should ignore unknown extra fields to remain forward-compatible.
@@ -290,6 +294,7 @@ Schema compatibility policy:
 
 Default run output (`--format json`) includes:
 
+- `contract_version`: machine-readable JSON contract version.
 - `task`: original task text.
 - `case_id`: optional case identifier when set via runtime settings.
 - `findings`: actionable finding list synthesized from collected evidence.

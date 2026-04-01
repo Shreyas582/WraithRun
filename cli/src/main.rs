@@ -20,6 +20,7 @@ const DEFAULT_MAX_STEPS: usize = 8;
 const DEFAULT_MAX_NEW_TOKENS: usize = 256;
 const DEFAULT_TEMPERATURE: f32 = 0.2;
 const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../../wraithrun.example.toml");
+const JSON_CONTRACT_VERSION: &str = "1.0.0";
 
 #[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -967,7 +968,7 @@ fn render_task_template_list_json() -> Result<String> {
     let view = TaskTemplateListView {
         templates: task_template_descriptors(),
     };
-    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
+    render_json_with_contract(&view)
 }
 
 fn run_list_tools(format: IntrospectionFormat, filter: Option<&str>) -> Result<String> {
@@ -1125,12 +1126,12 @@ fn normalize_tool_query(value: &str) -> String {
 
 fn render_tool_list_json(tools: Vec<ToolSpec>) -> Result<String> {
     let view = ToolListView { tools };
-    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
+    render_json_with_contract(&view)
 }
 
 fn render_tool_detail_json(tool: ToolSpec) -> Result<String> {
     let view = ToolDetailView { tool };
-    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
+    render_json_with_contract(&view)
 }
 
 fn render_tool_list(tools: &[ToolSpec]) -> String {
@@ -2089,18 +2090,31 @@ fn render_profile_list_json(
         selected_profile: selected,
     };
 
-    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
+    render_json_with_contract(&view)
 }
 
 fn render_effective_config_json(runtime: &RuntimeConfig) -> Result<String> {
-    serde_json::to_string_pretty(&RuntimeConfigView::from_runtime(runtime))
-        .map_err(|err| anyhow!(err))
+    render_json_with_contract(&RuntimeConfigView::from_runtime(runtime))
 }
 
 fn render_effective_config_explanation_json(
     explanation: &EffectiveConfigExplanationView,
 ) -> Result<String> {
-    serde_json::to_string_pretty(explanation).map_err(|err| anyhow!(err))
+    render_json_with_contract(explanation)
+}
+
+fn render_json_with_contract<T: Serialize>(view: &T) -> Result<String> {
+    let mut value = serde_json::to_value(view).map_err(|err| anyhow!(err))?;
+    let Some(object) = value.as_object_mut() else {
+        bail!("JSON contract payload must serialize to an object");
+    };
+
+    object.insert(
+        "contract_version".to_string(),
+        Value::String(JSON_CONTRACT_VERSION.to_string()),
+    );
+
+    serde_json::to_string_pretty(&value).map_err(|err| anyhow!(err))
 }
 
 impl RuntimeConfigView {
@@ -2414,12 +2428,12 @@ fn render_doctor_report_json(report: &DoctorReport) -> Result<String> {
         },
         checks: &report.checks,
     };
-    serde_json::to_string_pretty(&view).map_err(|err| anyhow!(err))
+    render_json_with_contract(&view)
 }
 
 fn render_report(report: &RunReport, format: OutputFormat) -> Result<String> {
     match format {
-        OutputFormat::Json => Ok(serde_json::to_string_pretty(report)?),
+        OutputFormat::Json => render_json_with_contract(report),
         OutputFormat::Summary => Ok(render_summary(report)),
         OutputFormat::Markdown => Ok(render_markdown(report)),
     }
@@ -2479,9 +2493,9 @@ fn write_evidence_bundle_archive(archive_path: &Path, report: &RunReport) -> Res
 }
 
 fn build_evidence_bundle_artifacts(report: &RunReport) -> Result<Vec<EvidenceBundleArtifact>> {
-    let report_json = serde_json::to_string_pretty(report)?;
+    let report_json = render_json_with_contract(report)?;
     let raw_bundle = build_raw_observations_bundle(report);
-    let raw_json = serde_json::to_string_pretty(&raw_bundle)?;
+    let raw_json = render_json_with_contract(&raw_bundle)?;
 
     let mut checksums = String::new();
     let _ = writeln!(
@@ -2760,7 +2774,7 @@ fn is_valid_sha256_hex(value: &str) -> bool {
 }
 
 fn render_bundle_verification_report_json(report: &BundleVerificationReport) -> Result<String> {
-    serde_json::to_string_pretty(report).map_err(|err| anyhow!(err))
+    render_json_with_contract(report)
 }
 
 fn render_bundle_verification_report(report: &BundleVerificationReport) -> String {
@@ -3212,6 +3226,7 @@ mod tests {
     fn renders_json_output() {
         let report = sample_report();
         let rendered = render_report(&report, OutputFormat::Json).expect("json render should work");
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"task\""));
         assert!(rendered.contains("\"scan_network\""));
         assert!(rendered.contains("\"findings\""));
@@ -3543,6 +3558,7 @@ mod tests {
 
         let rendered = render_doctor_report_json(&report).expect("json doctor render works");
 
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"summary\""));
         assert!(rendered.contains("\"pass\": 1"));
         assert!(rendered.contains("\"status\": \"fail\""));
@@ -3584,6 +3600,7 @@ mod tests {
         )
         .expect("json profile render works");
 
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"built_in_profiles\""));
         assert!(rendered.contains("\"selected_profile\""));
         assert!(rendered.contains("\"source\": \"config\""));
@@ -3605,6 +3622,7 @@ mod tests {
         let rendered =
             render_effective_config_json(&runtime).expect("effective config rendering works");
 
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"mode\": \"dry-run\""));
         assert!(rendered.contains("\"max_steps\": 8"));
         assert!(rendered.contains("\"model\""));
@@ -3624,6 +3642,7 @@ mod tests {
         let rendered = render_effective_config_explanation_json(&explanation)
             .expect("explanation should serialize");
 
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"sources\""));
         assert!(rendered.contains("\"selected_profile\": \"local-lab\""));
         assert!(rendered.contains("built-in profile 'local-lab'"));
@@ -3796,6 +3815,7 @@ mod tests {
     fn renders_task_template_list_json() {
         let rendered =
             render_task_template_list_json().expect("template list json rendering should work");
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"templates\""));
         assert!(rendered.contains("\"syslog-summary\""));
         assert!(rendered.contains("\"supports_template_lines\": true"));
@@ -3814,6 +3834,7 @@ mod tests {
     fn renders_tool_list_json() {
         let tools = ToolRegistry::with_default_tools().tool_specs();
         let rendered = render_tool_list_json(tools).expect("tool list json rendering should work");
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"tools\""));
         assert!(rendered.contains("\"check_privilege_escalation_vectors\""));
         assert!(rendered.contains("\"args_schema\""));
@@ -3888,6 +3909,7 @@ mod tests {
 
         let rendered =
             render_tool_detail_json(tool).expect("tool detail json rendering should work");
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"tool\""));
         assert!(rendered.contains("\"name\": \"hash_binary\""));
     }

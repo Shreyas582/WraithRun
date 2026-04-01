@@ -89,6 +89,10 @@ fn report_json_contract_contains_findings_layer() {
     );
 
     let json = parse_stdout_json(&output);
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
     let findings = json
         .get("findings")
         .and_then(Value::as_array)
@@ -274,6 +278,10 @@ fn verify_bundle_mode_reports_success_as_json() {
     );
 
     let json = parse_stdout_json(&verify_output);
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
     let summary = json
         .get("summary")
         .and_then(Value::as_object)
@@ -587,6 +595,10 @@ fn doctor_json_contract_contains_summary_and_checks() {
     );
 
     let json = parse_stdout_json(&output);
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
     let summary = json
         .get("summary")
         .and_then(Value::as_object)
@@ -616,6 +628,10 @@ fn task_templates_json_contract_contains_expected_fields() {
     );
 
     let json = parse_stdout_json(&output);
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
     let templates = json
         .get("templates")
         .and_then(Value::as_array)
@@ -658,6 +674,10 @@ fn profiles_json_contract_contains_expected_fields() {
     );
 
     let json = parse_stdout_json(&output);
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
     assert!(
         json.get("built_in_profiles")
             .and_then(Value::as_array)
@@ -687,6 +707,10 @@ fn tools_json_contract_contains_expected_fields() {
     );
 
     let json = parse_stdout_json(&output);
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
     let tools = json
         .get("tools")
         .and_then(Value::as_array)
@@ -823,6 +847,10 @@ fn describe_tool_json_contract_contains_expected_fields() {
     );
 
     let json = parse_stdout_json(&output);
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
     let tool = json
         .get("tool")
         .and_then(Value::as_object)

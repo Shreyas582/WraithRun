@@ -9,10 +9,12 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 ### Added
 
 - Operator case-workflow runbook examples covering collection, verification, and retention sequences.
+- Added top-level `contract_version` field (`1.0.0`) to run and introspection JSON outputs.
 
 ### Changed
 
 - Expanded CLI examples with direct `SHA256SUMS` verification and baseline import via `raw_observations.json` path.
+- JSON schema guidance now requires automation parsers to validate `contract_version` before strict parsing.
 
 ### Fixed
 
