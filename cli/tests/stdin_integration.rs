@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use serde_json::Value;
@@ -49,6 +49,10 @@ fn optional_env(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn optional_env_usize(name: &str) -> Option<usize> {
+    optional_env(name).and_then(|value| value.parse::<usize>().ok())
 }
 
 #[test]
@@ -483,7 +487,13 @@ fn live_mode_e2e_success_without_fallback_when_fixture_is_configured() {
     };
 
     let task = optional_env("WRAITHRUN_LIVE_E2E_TASK")
-        .unwrap_or_else(|| "Investigate unauthorized SSH keys".to_string());
+        .unwrap_or_else(|| "Reply with exactly: OK".to_string());
+    let max_steps = optional_env_usize("WRAITHRUN_LIVE_E2E_MAX_STEPS").unwrap_or(1);
+    let max_new_tokens = optional_env_usize("WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS").unwrap_or(16);
+
+    eprintln!(
+        "live e2e config: max_steps={max_steps}, max_new_tokens={max_new_tokens}, task={task:?}"
+    );
 
     let mut run_args = vec![
         "--task".to_string(),
@@ -497,6 +507,10 @@ fn live_mode_e2e_success_without_fallback_when_fixture_is_configured() {
         "none".to_string(),
         "--format".to_string(),
         "json".to_string(),
+        "--max-steps".to_string(),
+        max_steps.to_string(),
+        "--max-new-tokens".to_string(),
+        max_new_tokens.to_string(),
     ];
 
     if let Some(vitis_config) = optional_env("WRAITHRUN_LIVE_E2E_VITIS_CONFIG") {
@@ -513,7 +527,9 @@ fn live_mode_e2e_success_without_fallback_when_fixture_is_configured() {
     }
 
     let run_arg_refs: Vec<&str> = run_args.iter().map(String::as_str).collect();
+    let run_started = Instant::now();
     let run_output = run_capture(&run_arg_refs);
+    eprintln!("primary live run duration: {:?}", run_started.elapsed());
 
     assert!(
         run_output.status.success(),
@@ -556,7 +572,9 @@ fn live_mode_e2e_success_without_fallback_when_fixture_is_configured() {
     adapter_args.push("--automation-adapter".to_string());
     adapter_args.push("findings-v1".to_string());
     let adapter_arg_refs: Vec<&str> = adapter_args.iter().map(String::as_str).collect();
+    let adapter_started = Instant::now();
     let adapter_output = run_capture(&adapter_arg_refs);
+    eprintln!("adapter live run duration: {:?}", adapter_started.elapsed());
 
     assert!(
         adapter_output.status.success(),
