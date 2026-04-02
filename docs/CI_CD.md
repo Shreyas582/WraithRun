@@ -8,6 +8,7 @@ This repository uses GitHub Actions for quality gates, release planning, and art
   - Runs formatting checks, linting, tests, and cross-platform workspace compilation.
   - Validates feature-gated Vitis build path.
   - Runs live-mode metrics benchmark regression checks and validates machine-readable telemetry thresholds.
+  - Includes an infrastructure-gated live-success e2e lane for Vitis environments (no fallback expected).
   - Cross-platform checks run on Linux, macOS, and Windows.
 
 - `release-drafter.yml`
@@ -46,6 +47,24 @@ Before merge, pull requests should satisfy:
 - `cargo test --workspace`
 - `cargo check --workspace`
 - `cargo check -p inference_bridge --features vitis`
+
+When live-success e2e is enabled (self-hosted Vitis runner), the CI lane also runs:
+
+- `cargo test -p wraithrun --features inference_bridge/vitis --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact`
+
+Live-success lane prerequisites (repository variables):
+
+- `WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED=true`
+- `WRAITHRUN_LIVE_E2E_MODEL`
+- `WRAITHRUN_LIVE_E2E_TOKENIZER`
+- Optional Vitis tuning: `WRAITHRUN_LIVE_E2E_VITIS_CONFIG`, `WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR`, `WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY`
+
+Runner labels expected for this lane:
+
+- `self-hosted`
+- `linux`
+- `x64`
+- `vitis`
 
 ## Release Notes and Labels
 
@@ -104,3 +123,4 @@ Optional checks (advisory, not required for every PR):
 
 - `Dependency Vulnerability Audit` (scheduled/manual security workflow)
 - `Release Drafter` (draft notes maintenance)
+- `Live success e2e (self-hosted vitis)` (runs only when explicitly enabled)

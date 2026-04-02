@@ -44,6 +44,13 @@ fn parse_stdout_json(output: &Output) -> Value {
     serde_json::from_str(&stdout).expect("stdout should be valid JSON")
 }
 
+fn optional_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 #[test]
 fn accepts_task_from_stdin() {
     let output = run_with_stdin(
@@ -414,10 +421,13 @@ fn doctor_live_fix_emits_reason_code_for_explicit_tokenizer_path_failure() {
     let output = run_capture(&args);
 
     assert!(
-        output.status.success(),
-        "doctor fix run should complete with warning guidance: {}",
+        !output.status.success(),
+        "doctor fix run should fail fast with actionable guidance: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("doctor checks reported failures"));
 
     let json = parse_stdout_json(&output);
     let checks = json
@@ -461,6 +471,142 @@ fn live_mode_without_fallback_policy_propagates_error() {
         !stderr.trim().is_empty(),
         "expected non-empty stderr for live failure"
     );
+}
+
+#[test]
+fn live_mode_e2e_success_without_fallback_when_fixture_is_configured() {
+    let Some(model_path) = optional_env("WRAITHRUN_LIVE_E2E_MODEL") else {
+        return;
+    };
+    let Some(tokenizer_path) = optional_env("WRAITHRUN_LIVE_E2E_TOKENIZER") else {
+        return;
+    };
+
+    let task = optional_env("WRAITHRUN_LIVE_E2E_TASK")
+        .unwrap_or_else(|| "Investigate unauthorized SSH keys".to_string());
+
+    let mut run_args = vec![
+        "--task".to_string(),
+        task.clone(),
+        "--live".to_string(),
+        "--model".to_string(),
+        model_path,
+        "--tokenizer".to_string(),
+        tokenizer_path,
+        "--live-fallback-policy".to_string(),
+        "none".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ];
+
+    if let Some(vitis_config) = optional_env("WRAITHRUN_LIVE_E2E_VITIS_CONFIG") {
+        run_args.push("--vitis-config".to_string());
+        run_args.push(vitis_config);
+    }
+    if let Some(vitis_cache_dir) = optional_env("WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR") {
+        run_args.push("--vitis-cache-dir".to_string());
+        run_args.push(vitis_cache_dir);
+    }
+    if let Some(vitis_cache_key) = optional_env("WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY") {
+        run_args.push("--vitis-cache-key".to_string());
+        run_args.push(vitis_cache_key);
+    }
+
+    let run_arg_refs: Vec<&str> = run_args.iter().map(String::as_str).collect();
+    let run_output = run_capture(&run_arg_refs);
+
+    assert!(
+        run_output.status.success(),
+        "live e2e run failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let run_json = parse_stdout_json(&run_output);
+    assert_eq!(
+        run_json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
+    assert!(
+        run_json.get("live_fallback_decision").is_none(),
+        "live_fallback_decision should be absent on successful live run"
+    );
+
+    let run_metrics = run_json
+        .get("live_run_metrics")
+        .and_then(Value::as_object)
+        .expect("live_run_metrics should be present on successful live run");
+    assert_eq!(
+        run_metrics
+            .get("live_attempt_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        run_metrics
+            .get("live_success_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        run_metrics.get("fallback_count").and_then(Value::as_u64),
+        Some(0)
+    );
+
+    let mut adapter_args = run_args.clone();
+    adapter_args.push("--automation-adapter".to_string());
+    adapter_args.push("findings-v1".to_string());
+    let adapter_arg_refs: Vec<&str> = adapter_args.iter().map(String::as_str).collect();
+    let adapter_output = run_capture(&adapter_arg_refs);
+
+    assert!(
+        adapter_output.status.success(),
+        "adapter live e2e run failed: {}",
+        String::from_utf8_lossy(&adapter_output.stderr)
+    );
+
+    let adapter_json = parse_stdout_json(&adapter_output);
+    assert_eq!(
+        adapter_json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
+    assert_eq!(
+        adapter_json.get("adapter").and_then(Value::as_str),
+        Some("findings-v1")
+    );
+
+    let summary = adapter_json
+        .get("summary")
+        .and_then(Value::as_object)
+        .expect("adapter summary should be present");
+    assert!(
+        summary.get("live_fallback_decision").is_none(),
+        "adapter summary should not include live_fallback_decision when live succeeds"
+    );
+    let adapter_metrics = summary
+        .get("live_run_metrics")
+        .and_then(Value::as_object)
+        .expect("adapter summary live_run_metrics should be present");
+    assert_eq!(
+        adapter_metrics
+            .get("live_success_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        adapter_metrics
+            .get("fallback_count")
+            .and_then(Value::as_u64),
+        Some(0)
+    );
+
+    if let Some(artifact_dir) = optional_env("WRAITHRUN_LIVE_E2E_ARTIFACT_DIR") {
+        fs::create_dir_all(&artifact_dir).expect("artifact directory should be created");
+        let run_path = std::path::Path::new(&artifact_dir).join("live-success-run.json");
+        let adapter_path = std::path::Path::new(&artifact_dir).join("live-success-adapter.json");
+        fs::write(&run_path, &run_output.stdout).expect("run artifact should be written");
+        fs::write(&adapter_path, &adapter_output.stdout)
+            .expect("adapter artifact should be written");
+    }
 }
 
 #[test]

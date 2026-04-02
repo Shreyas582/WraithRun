@@ -370,6 +370,7 @@ use core_engine::{
     LiveFallbackDecision, LiveRunMetrics, RunReport,
 };
 use cyber_tools::{ToolRegistry, ToolSpec};
+use inference_bridge::onnx_vitis::{inspect_runtime_compatibility, RuntimeCompatibilitySeverity};
 use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -2836,7 +2837,7 @@ fn run_models_validate(
         total_pass += pass_count;
         total_warn += warn_count;
         total_fail += fail_count;
-        if fail_count > 0 || warn_count > 0 {
+        if fail_count > 0 {
             has_failures = true;
         }
 
@@ -3785,6 +3786,8 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
         return;
     }
 
+    let mut model_readable = false;
+
     if runtime.model.is_file() {
         report.push(
             DoctorStatus::Pass,
@@ -3846,6 +3849,7 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
 
         match fs::File::open(&runtime.model) {
             Ok(_) => {
+                model_readable = true;
                 report.push(
                     DoctorStatus::Pass,
                     "live-model-readable",
@@ -3871,7 +3875,7 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
         }
     } else {
         report.push_with_reason(
-            DoctorStatus::Warn,
+            DoctorStatus::Fail,
             "live-model-path",
             format!(
                 "Live mode is enabled but model file was not found at {}.",
@@ -3949,7 +3953,7 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
                             );
                         } else {
                             report.push_with_reason(
-                                DoctorStatus::Warn,
+                                DoctorStatus::Fail,
                                 "live-tokenizer-shape",
                                 "Tokenizer JSON parsed but top-level 'model' key was not found.",
                                 Some("tokenizer_model_key_missing"),
@@ -3988,7 +3992,7 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
         }
         Some(tokenizer) => {
             report.push_with_reason(
-                DoctorStatus::Warn,
+                DoctorStatus::Fail,
                 "live-tokenizer-path",
                 format!("Tokenizer file not found: {}", tokenizer.display()),
                 Some("tokenizer_path_missing"),
@@ -3996,12 +4000,56 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
         }
         None => {
             report.push_with_reason(
-                DoctorStatus::Warn,
+                DoctorStatus::Fail,
                 "live-tokenizer-path",
                 "No tokenizer path resolved for live mode. The runtime will only work if tokenizer discovery succeeds.",
                 Some("tokenizer_path_missing"),
             );
         }
+    }
+
+    if !model_readable {
+        return;
+    }
+
+    let compatibility = inspect_runtime_compatibility(
+        &ModelConfig {
+            model_path: runtime.model.clone(),
+            tokenizer_path: runtime.tokenizer.clone(),
+            max_new_tokens: 1,
+            temperature: runtime.temperature,
+            dry_run: false,
+            vitis_config: build_vitis_config(runtime),
+        },
+        true,
+    );
+
+    if compatibility.issues.is_empty() {
+        report.push(
+            DoctorStatus::Pass,
+            "live-runtime-compatibility",
+            format!(
+                "Runtime compatibility checks passed (cache_inputs={}, cache_outputs={}, smoke_check={}).",
+                compatibility.cache_input_count,
+                compatibility.cache_output_count,
+                compatibility.smoke_check_ran
+            ),
+        );
+        return;
+    }
+
+    for issue in compatibility.issues {
+        let status = match issue.severity {
+            RuntimeCompatibilitySeverity::Warn => DoctorStatus::Warn,
+            RuntimeCompatibilitySeverity::Fail => DoctorStatus::Fail,
+        };
+
+        report.push_with_reason(
+            status,
+            "live-runtime-compatibility",
+            issue.detail,
+            Some(issue.reason_code),
+        );
     }
 }
 
@@ -5108,6 +5156,15 @@ fn append_live_fallback_finding(report: &mut RunReport, decision: &LiveFallbackD
 
 fn classify_live_error_reason_code(live_error: &str) -> &'static str {
     let normalized = live_error.to_ascii_lowercase();
+
+    if normalized.contains("runtime compatibility")
+        || normalized.contains("unsupported runtime inputs")
+        || normalized.contains("cache output")
+        || normalized.contains("cache input")
+        || normalized.contains("runtime_forward_smoke_failed")
+    {
+        return "model_runtime_incompatible";
+    }
 
     if normalized.contains("unable to locate tokenizer")
         || normalized.contains("tokenizer file not found")

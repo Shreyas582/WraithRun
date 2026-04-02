@@ -193,3 +193,50 @@ jobs:
               },
           )
           PY
+
+  live-success-e2e:
+    name: Live success e2e (self-hosted vitis)
+    if: ${{ vars.WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED == 'true' }}
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - vitis
+    timeout-minutes: 45
+    env:
+      WRAITHRUN_LIVE_E2E_MODEL: ${{ vars.WRAITHRUN_LIVE_E2E_MODEL }}
+      WRAITHRUN_LIVE_E2E_TOKENIZER: ${{ vars.WRAITHRUN_LIVE_E2E_TOKENIZER }}
+      WRAITHRUN_LIVE_E2E_TASK: ${{ vars.WRAITHRUN_LIVE_E2E_TASK }}
+      WRAITHRUN_LIVE_E2E_VITIS_CONFIG: ${{ vars.WRAITHRUN_LIVE_E2E_VITIS_CONFIG }}
+      WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR: ${{ vars.WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR }}
+      WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY: ${{ vars.WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY }}
+      WRAITHRUN_LIVE_E2E_ARTIFACT_DIR: live-e2e-artifacts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate live e2e fixture configuration
+        run: |
+          if [ -z "$WRAITHRUN_LIVE_E2E_MODEL" ] || [ -z "$WRAITHRUN_LIVE_E2E_TOKENIZER" ]; then
+            echo "WRAITHRUN_LIVE_E2E_MODEL and WRAITHRUN_LIVE_E2E_TOKENIZER must be configured when WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED=true"
+            exit 1
+          fi
+
+      - name: Run live success e2e test (no fallback)
+        run: |
+          cargo test -p wraithrun --features inference_bridge/vitis --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact --nocapture
+
+      - name: Upload live success e2e artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-success-e2e-artifacts
+          path: live-e2e-artifacts/*.json
+          if-no-files-found: error
