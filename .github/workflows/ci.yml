@@ -214,8 +214,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain (pwsh)
-        shell: pwsh
+      - name: Install Rust toolchain (powershell)
+        shell: powershell
         run: |
           rustup toolchain install 1.92.0 --profile minimal
           rustup default 1.92.0
@@ -225,7 +225,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Validate live e2e fixture configuration
-        shell: pwsh
+        shell: powershell
         run: |
           if ([string]::IsNullOrWhiteSpace($env:WRAITHRUN_LIVE_E2E_MODEL) -or [string]::IsNullOrWhiteSpace($env:WRAITHRUN_LIVE_E2E_TOKENIZER)) {
             Write-Error "WRAITHRUN_LIVE_E2E_MODEL and WRAITHRUN_LIVE_E2E_TOKENIZER must be configured when WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED=true"
@@ -233,7 +233,7 @@ jobs:
           }
 
       - name: Run live success e2e test (no fallback)
-        shell: pwsh
+        shell: powershell
         run: |
           cargo test -p wraithrun --features inference_bridge/vitis --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact --nocapture
 
