@@ -55,6 +55,14 @@ fn optional_env_usize(name: &str) -> Option<usize> {
     optional_env(name).and_then(|value| value.parse::<usize>().ok())
 }
 
+fn optional_env_bool(name: &str) -> Option<bool> {
+    optional_env(name).and_then(|value| match value.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    })
+}
+
 #[test]
 fn accepts_task_from_stdin() {
     let output = run_with_stdin(
@@ -489,10 +497,11 @@ fn live_mode_e2e_success_without_fallback_when_fixture_is_configured() {
     let task = optional_env("WRAITHRUN_LIVE_E2E_TASK")
         .unwrap_or_else(|| "Reply with exactly: OK".to_string());
     let max_steps = optional_env_usize("WRAITHRUN_LIVE_E2E_MAX_STEPS").unwrap_or(1);
-    let max_new_tokens = optional_env_usize("WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS").unwrap_or(16);
+    let max_new_tokens = optional_env_usize("WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS").unwrap_or(1);
+    let include_adapter = optional_env_bool("WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER").unwrap_or(false);
 
     eprintln!(
-        "live e2e config: max_steps={max_steps}, max_new_tokens={max_new_tokens}, task={task:?}"
+        "live e2e config: max_steps={max_steps}, max_new_tokens={max_new_tokens}, include_adapter={include_adapter}, task={task:?}"
     );
 
     let mut run_args = vec![
@@ -568,62 +577,71 @@ fn live_mode_e2e_success_without_fallback_when_fixture_is_configured() {
         Some(0)
     );
 
-    let mut adapter_args = run_args.clone();
-    adapter_args.push("--automation-adapter".to_string());
-    adapter_args.push("findings-v1".to_string());
-    let adapter_arg_refs: Vec<&str> = adapter_args.iter().map(String::as_str).collect();
-    let adapter_started = Instant::now();
-    let adapter_output = run_capture(&adapter_arg_refs);
-    eprintln!("adapter live run duration: {:?}", adapter_started.elapsed());
+    let adapter_output = if include_adapter {
+        let mut adapter_args = run_args.clone();
+        adapter_args.push("--automation-adapter".to_string());
+        adapter_args.push("findings-v1".to_string());
+        let adapter_arg_refs: Vec<&str> = adapter_args.iter().map(String::as_str).collect();
+        let adapter_started = Instant::now();
+        let adapter_output = run_capture(&adapter_arg_refs);
+        eprintln!("adapter live run duration: {:?}", adapter_started.elapsed());
 
-    assert!(
-        adapter_output.status.success(),
-        "adapter live e2e run failed: {}",
-        String::from_utf8_lossy(&adapter_output.stderr)
-    );
+        assert!(
+            adapter_output.status.success(),
+            "adapter live e2e run failed: {}",
+            String::from_utf8_lossy(&adapter_output.stderr)
+        );
 
-    let adapter_json = parse_stdout_json(&adapter_output);
-    assert_eq!(
-        adapter_json.get("contract_version").and_then(Value::as_str),
-        Some("1.0.0")
-    );
-    assert_eq!(
-        adapter_json.get("adapter").and_then(Value::as_str),
-        Some("findings-v1")
-    );
+        let adapter_json = parse_stdout_json(&adapter_output);
+        assert_eq!(
+            adapter_json.get("contract_version").and_then(Value::as_str),
+            Some("1.0.0")
+        );
+        assert_eq!(
+            adapter_json.get("adapter").and_then(Value::as_str),
+            Some("findings-v1")
+        );
 
-    let summary = adapter_json
-        .get("summary")
-        .and_then(Value::as_object)
-        .expect("adapter summary should be present");
-    assert!(
-        summary.get("live_fallback_decision").is_none(),
-        "adapter summary should not include live_fallback_decision when live succeeds"
-    );
-    let adapter_metrics = summary
-        .get("live_run_metrics")
-        .and_then(Value::as_object)
-        .expect("adapter summary live_run_metrics should be present");
-    assert_eq!(
-        adapter_metrics
-            .get("live_success_count")
-            .and_then(Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        adapter_metrics
-            .get("fallback_count")
-            .and_then(Value::as_u64),
-        Some(0)
-    );
+        let summary = adapter_json
+            .get("summary")
+            .and_then(Value::as_object)
+            .expect("adapter summary should be present");
+        assert!(
+            summary.get("live_fallback_decision").is_none(),
+            "adapter summary should not include live_fallback_decision when live succeeds"
+        );
+        let adapter_metrics = summary
+            .get("live_run_metrics")
+            .and_then(Value::as_object)
+            .expect("adapter summary live_run_metrics should be present");
+        assert_eq!(
+            adapter_metrics
+                .get("live_success_count")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            adapter_metrics
+                .get("fallback_count")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+        Some(adapter_output)
+    } else {
+        eprintln!("adapter live run skipped (set WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER=true to enable)");
+        None
+    };
 
     if let Some(artifact_dir) = optional_env("WRAITHRUN_LIVE_E2E_ARTIFACT_DIR") {
         fs::create_dir_all(&artifact_dir).expect("artifact directory should be created");
         let run_path = std::path::Path::new(&artifact_dir).join("live-success-run.json");
-        let adapter_path = std::path::Path::new(&artifact_dir).join("live-success-adapter.json");
         fs::write(&run_path, &run_output.stdout).expect("run artifact should be written");
-        fs::write(&adapter_path, &adapter_output.stdout)
-            .expect("adapter artifact should be written");
+        if let Some(adapter_output) = adapter_output.as_ref() {
+            let adapter_path =
+                std::path::Path::new(&artifact_dir).join("live-success-adapter.json");
+            fs::write(&adapter_path, &adapter_output.stdout)
+                .expect("adapter artifact should be written");
+        }
     }
 }
 

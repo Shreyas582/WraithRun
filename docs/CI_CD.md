@@ -58,6 +58,7 @@ Live-success lane prerequisites (repository variables):
 - `WRAITHRUN_LIVE_E2E_MODEL`
 - `WRAITHRUN_LIVE_E2E_TOKENIZER`
 - Optional runtime budget controls: `WRAITHRUN_LIVE_E2E_MAX_STEPS`, `WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS`
+- Optional adapter coverage toggle: `WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER` (defaults to disabled in CI when unset)
 - Optional Vitis tuning: `WRAITHRUN_LIVE_E2E_VITIS_CONFIG`, `WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR`, `WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY`
 
 Runner labels expected for this lane:
