@@ -20,3 +20,6 @@ Thumbs.db
 /launch-assets/generated/
 /launch-assets/reports/
 /launch-assets/*.json
+
+# Local GitHub Actions runner
+/actions-runner/

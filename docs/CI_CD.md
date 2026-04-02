@@ -62,9 +62,9 @@ Live-success lane prerequisites (repository variables):
 Runner labels expected for this lane:
 
 - `self-hosted`
-- `linux`
-- `x64`
-- `vitis`
+- `Windows`
+- `X64`
+- `vitis windows/x64`
 
 ## Release Notes and Labels
 
@@ -123,4 +123,4 @@ Optional checks (advisory, not required for every PR):
 
 - `Dependency Vulnerability Audit` (scheduled/manual security workflow)
 - `Release Drafter` (draft notes maintenance)
-- `Live success e2e (self-hosted vitis)` (runs only when explicitly enabled)
+- `Live success e2e (self-hosted vitis windows)` (runs only when explicitly enabled)

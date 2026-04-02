@@ -195,13 +195,13 @@ jobs:
           PY
 
   live-success-e2e:
-    name: Live success e2e (self-hosted vitis)
+    name: Live success e2e (self-hosted vitis windows)
     if: ${{ vars.WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED == 'true' }}
     runs-on:
       - self-hosted
-      - linux
-      - x64
-      - vitis
+      - Windows
+      - X64
+      - vitis windows/x64
     timeout-minutes: 45
     env:
       WRAITHRUN_LIVE_E2E_MODEL: ${{ vars.WRAITHRUN_LIVE_E2E_MODEL }}
@@ -224,13 +224,15 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Validate live e2e fixture configuration
+        shell: pwsh
         run: |
-          if [ -z "$WRAITHRUN_LIVE_E2E_MODEL" ] || [ -z "$WRAITHRUN_LIVE_E2E_TOKENIZER" ]; then
-            echo "WRAITHRUN_LIVE_E2E_MODEL and WRAITHRUN_LIVE_E2E_TOKENIZER must be configured when WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED=true"
+          if ([string]::IsNullOrWhiteSpace($env:WRAITHRUN_LIVE_E2E_MODEL) -or [string]::IsNullOrWhiteSpace($env:WRAITHRUN_LIVE_E2E_TOKENIZER)) {
+            Write-Error "WRAITHRUN_LIVE_E2E_MODEL and WRAITHRUN_LIVE_E2E_TOKENIZER must be configured when WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED=true"
             exit 1
-          fi
+          }
 
       - name: Run live success e2e test (no fallback)
+        shell: pwsh
         run: |
           cargo test -p wraithrun --features inference_bridge/vitis --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact --nocapture
 
