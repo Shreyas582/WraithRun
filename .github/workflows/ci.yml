@@ -217,6 +217,11 @@ jobs:
       - name: Install Rust toolchain (powershell)
         shell: powershell
         run: |
+          $cargobin = "$env:USERPROFILE\.cargo\bin"
+          if (-not ($env:Path -split ';' | Where-Object { $_ -eq $cargobin })) {
+            $env:Path = "$cargobin;$env:Path"
+            echo "$cargobin" >> $env:GITHUB_PATH
+          }
           rustup toolchain install 1.92.0 --profile minimal
           rustup default 1.92.0
           rustup show active-toolchain
