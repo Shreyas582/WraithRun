@@ -35,7 +35,8 @@
       "status": "warn",
       "name": "vitis-config",
       "detail": "Vitis config is set but file was not found: ./models/vitis_ep.json",
-      "reason_code": "vitis_config_missing"
+      "reason_code": "vitis_config_missing",
+      "remediation": "Install the RyzenAI SDK or set ORT_DYLIB_PATH to a Vitis-enabled ONNX Runtime build."
     }
   ]
 }

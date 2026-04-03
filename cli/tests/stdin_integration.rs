@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use serde_json::Value;
@@ -42,6 +42,25 @@ fn run_capture(args: &[&str]) -> Output {
 fn parse_stdout_json(output: &Output) -> Value {
     let stdout = String::from_utf8_lossy(&output.stdout);
     serde_json::from_str(&stdout).expect("stdout should be valid JSON")
+}
+
+fn optional_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn optional_env_usize(name: &str) -> Option<usize> {
+    optional_env(name).and_then(|value| value.parse::<usize>().ok())
+}
+
+fn optional_env_bool(name: &str) -> Option<bool> {
+    optional_env(name).and_then(|value| match value.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    })
 }
 
 #[test]
@@ -354,12 +373,8 @@ fn doctor_live_fix_auto_discovers_tokenizer_and_sets_fallback_policy() {
     ];
     let output = run_capture(&args);
 
-    assert!(
-        output.status.success(),
-        "doctor fix run failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
+    // With onnx enabled, doctor exits non-zero because the stub model file
+    // fails runtime compatibility. JSON output is still printed to stdout.
     let json = parse_stdout_json(&output);
     let checks = json
         .get("checks")
@@ -414,10 +429,13 @@ fn doctor_live_fix_emits_reason_code_for_explicit_tokenizer_path_failure() {
     let output = run_capture(&args);
 
     assert!(
-        output.status.success(),
-        "doctor fix run should complete with warning guidance: {}",
+        !output.status.success(),
+        "doctor fix run should fail fast with actionable guidance: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("doctor checks reported failures"));
 
     let json = parse_stdout_json(&output);
     let checks = json
@@ -461,6 +479,168 @@ fn live_mode_without_fallback_policy_propagates_error() {
         !stderr.trim().is_empty(),
         "expected non-empty stderr for live failure"
     );
+}
+
+#[test]
+fn live_mode_e2e_success_without_fallback_when_fixture_is_configured() {
+    let Some(model_path) = optional_env("WRAITHRUN_LIVE_E2E_MODEL") else {
+        return;
+    };
+    let Some(tokenizer_path) = optional_env("WRAITHRUN_LIVE_E2E_TOKENIZER") else {
+        return;
+    };
+
+    let task = optional_env("WRAITHRUN_LIVE_E2E_TASK")
+        .unwrap_or_else(|| "Reply with exactly: OK".to_string());
+    let max_steps = optional_env_usize("WRAITHRUN_LIVE_E2E_MAX_STEPS").unwrap_or(1);
+    let max_new_tokens = optional_env_usize("WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS").unwrap_or(1);
+    let include_adapter = optional_env_bool("WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER").unwrap_or(false);
+
+    eprintln!(
+        "live e2e config: max_steps={max_steps}, max_new_tokens={max_new_tokens}, include_adapter={include_adapter}, task={task:?}"
+    );
+
+    let mut run_args = vec![
+        "--task".to_string(),
+        task.clone(),
+        "--live".to_string(),
+        "--model".to_string(),
+        model_path,
+        "--tokenizer".to_string(),
+        tokenizer_path,
+        "--live-fallback-policy".to_string(),
+        "none".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+        "--max-steps".to_string(),
+        max_steps.to_string(),
+        "--max-new-tokens".to_string(),
+        max_new_tokens.to_string(),
+    ];
+
+    if let Some(vitis_config) = optional_env("WRAITHRUN_LIVE_E2E_VITIS_CONFIG") {
+        run_args.push("--vitis-config".to_string());
+        run_args.push(vitis_config);
+    }
+    if let Some(vitis_cache_dir) = optional_env("WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR") {
+        run_args.push("--vitis-cache-dir".to_string());
+        run_args.push(vitis_cache_dir);
+    }
+    if let Some(vitis_cache_key) = optional_env("WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY") {
+        run_args.push("--vitis-cache-key".to_string());
+        run_args.push(vitis_cache_key);
+    }
+
+    let run_arg_refs: Vec<&str> = run_args.iter().map(String::as_str).collect();
+    let run_started = Instant::now();
+    let run_output = run_capture(&run_arg_refs);
+    eprintln!("primary live run duration: {:?}", run_started.elapsed());
+
+    assert!(
+        run_output.status.success(),
+        "live e2e run failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let run_json = parse_stdout_json(&run_output);
+    assert_eq!(
+        run_json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0")
+    );
+    assert!(
+        run_json.get("live_fallback_decision").is_none(),
+        "live_fallback_decision should be absent on successful live run"
+    );
+
+    let run_metrics = run_json
+        .get("live_run_metrics")
+        .and_then(Value::as_object)
+        .expect("live_run_metrics should be present on successful live run");
+    assert_eq!(
+        run_metrics
+            .get("live_attempt_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        run_metrics
+            .get("live_success_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        run_metrics.get("fallback_count").and_then(Value::as_u64),
+        Some(0)
+    );
+
+    let adapter_output = if include_adapter {
+        let mut adapter_args = run_args.clone();
+        adapter_args.push("--automation-adapter".to_string());
+        adapter_args.push("findings-v1".to_string());
+        let adapter_arg_refs: Vec<&str> = adapter_args.iter().map(String::as_str).collect();
+        let adapter_started = Instant::now();
+        let adapter_output = run_capture(&adapter_arg_refs);
+        eprintln!("adapter live run duration: {:?}", adapter_started.elapsed());
+
+        assert!(
+            adapter_output.status.success(),
+            "adapter live e2e run failed: {}",
+            String::from_utf8_lossy(&adapter_output.stderr)
+        );
+
+        let adapter_json = parse_stdout_json(&adapter_output);
+        assert_eq!(
+            adapter_json.get("contract_version").and_then(Value::as_str),
+            Some("1.0.0")
+        );
+        assert_eq!(
+            adapter_json.get("adapter").and_then(Value::as_str),
+            Some("findings-v1")
+        );
+
+        let summary = adapter_json
+            .get("summary")
+            .and_then(Value::as_object)
+            .expect("adapter summary should be present");
+        assert!(
+            summary.get("live_fallback_decision").is_none(),
+            "adapter summary should not include live_fallback_decision when live succeeds"
+        );
+        let adapter_metrics = summary
+            .get("live_run_metrics")
+            .and_then(Value::as_object)
+            .expect("adapter summary live_run_metrics should be present");
+        assert_eq!(
+            adapter_metrics
+                .get("live_success_count")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            adapter_metrics
+                .get("fallback_count")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+        Some(adapter_output)
+    } else {
+        eprintln!(
+            "adapter live run skipped (set WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER=true to enable)"
+        );
+        None
+    };
+
+    if let Some(artifact_dir) = optional_env("WRAITHRUN_LIVE_E2E_ARTIFACT_DIR") {
+        fs::create_dir_all(&artifact_dir).expect("artifact directory should be created");
+        let run_path = std::path::Path::new(&artifact_dir).join("live-success-run.json");
+        fs::write(&run_path, &run_output.stdout).expect("run artifact should be written");
+        if let Some(adapter_output) = adapter_output.as_ref() {
+            let adapter_path =
+                std::path::Path::new(&artifact_dir).join("live-success-adapter.json");
+            fs::write(&adapter_path, &adapter_output.stdout)
+                .expect("adapter artifact should be written");
+        }
+    }
 }
 
 #[test]
@@ -1033,12 +1213,8 @@ fn doctor_json_contract_includes_model_pack_checks_for_live_mode() {
     ];
     let output = run_capture(&args);
 
-    assert!(
-        output.status.success(),
-        "process failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
+    // With onnx enabled, doctor exits non-zero because stub model fails
+    // runtime compatibility. JSON is still printed to stdout.
     let json = parse_stdout_json(&output);
     let checks = json
         .get("checks")
@@ -1089,11 +1265,17 @@ fn live_setup_command_writes_live_profile_to_config() {
     ];
     let output = run_capture(&args);
 
-    assert!(
-        output.status.success(),
-        "process failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    // With onnx enabled, the stub model fails runtime compatibility checks,
+    // so setup legitimately rejects it. Skip the success assertions in that case.
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("live-runtime-compatibility"),
+            "unexpected failure reason: {stderr}"
+        );
+        let _ = fs::remove_dir_all(&temp_dir);
+        return;
+    }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Live setup complete"));
@@ -1325,11 +1507,30 @@ fn models_validate_command_passes_with_valid_fixture_pack() {
     ];
     let output = run_capture(&args);
 
-    assert!(
-        output.status.success(),
-        "process failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    // With onnx enabled, the stub model fails runtime compatibility checks,
+    // so validation legitimately reports failures. Verify the failure is from
+    // runtime-compat rather than an unexpected issue.
+    if !output.status.success() {
+        let json = parse_stdout_json(&output);
+        let packs = json
+            .get("packs")
+            .and_then(Value::as_array)
+            .expect("packs should be an array");
+        let checks = packs
+            .first()
+            .and_then(|pack| pack.get("checks"))
+            .and_then(Value::as_array)
+            .expect("first pack should have checks");
+        assert!(
+            checks.iter().any(|check| {
+                check.get("name").and_then(Value::as_str) == Some("live-runtime-compatibility")
+                    && check.get("status").and_then(Value::as_str) == Some("fail")
+            }),
+            "unexpected failure; checks: {checks:?}"
+        );
+        let _ = fs::remove_dir_all(&fixture_dir);
+        return;
+    }
 
     let json = parse_stdout_json(&output);
     let summary = json
@@ -1644,6 +1845,232 @@ fn list_tools_filter_rejects_separator_only_query() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("at least one alphanumeric term"));
+}
+
+#[test]
+fn doctor_json_includes_remediation_for_missing_model() {
+    let args = vec![
+        "--doctor",
+        "--introspection-format",
+        "json",
+        "--live",
+        "--model",
+        "/nonexistent/path/to/model.onnx",
+    ];
+    let output = run_capture(&args);
+
+    // Doctor exits non-zero when there are FAILs, but JSON is still on stdout.
+    let json = parse_stdout_json(&output);
+    let checks = json
+        .get("checks")
+        .and_then(Value::as_array)
+        .expect("checks should be an array");
+
+    let model_fail = checks.iter().find(|check| {
+        check.get("reason_code").and_then(Value::as_str) == Some("model_path_missing")
+    });
+    assert!(
+        model_fail.is_some(),
+        "should have a check with reason_code=model_path_missing"
+    );
+
+    let model_fail = model_fail.unwrap();
+    assert_eq!(
+        model_fail.get("status").and_then(Value::as_str),
+        Some("fail")
+    );
+    assert!(
+        model_fail
+            .get("remediation")
+            .and_then(Value::as_str)
+            .is_some(),
+        "model_path_missing check should include remediation guidance"
+    );
+}
+
+#[test]
+#[cfg(feature = "onnx")]
+fn doctor_json_includes_remediation_for_incompatible_model() {
+    let fixture_dir = unique_temp_dir("wraithrun-doctor-incompatible-model");
+    fs::create_dir_all(&fixture_dir).expect("fixture dir should be created");
+
+    // Write a corrupt model file that is not valid ONNX but is non-empty.
+    let model_path = fixture_dir.join("corrupt.onnx");
+    fs::write(&model_path, b"this-is-not-a-valid-onnx-model-file-at-all")
+        .expect("corrupt model fixture should be written");
+
+    // Write a valid tokenizer so we get past tokenizer checks.
+    let tokenizer_path = fixture_dir.join("tokenizer.json");
+    fs::write(
+        &tokenizer_path,
+        r#"{"model":{"type":"WordPiece"},"version":"1.0"}"#,
+    )
+    .expect("tokenizer fixture should be written");
+
+    let model_path_text = model_path.to_string_lossy().to_string();
+    let tokenizer_path_text = tokenizer_path.to_string_lossy().to_string();
+
+    let args = vec![
+        "--doctor",
+        "--introspection-format",
+        "json",
+        "--live",
+        "--model",
+        model_path_text.as_str(),
+        "--tokenizer",
+        tokenizer_path_text.as_str(),
+    ];
+    let output = run_capture(&args);
+
+    // Doctor exits non-zero because the corrupt model causes runtime FAIL checks.
+    let json = parse_stdout_json(&output);
+    let checks = json
+        .get("checks")
+        .and_then(Value::as_array)
+        .expect("checks should be an array");
+
+    // The corrupt model should trigger a runtime compatibility failure.
+    let runtime_fail = checks.iter().find(|check| {
+        check.get("name").and_then(Value::as_str) == Some("live-runtime-compatibility")
+            && check.get("status").and_then(Value::as_str) == Some("fail")
+    });
+    assert!(
+        runtime_fail.is_some(),
+        "should have a runtime compatibility FAIL for corrupt model; checks: {checks:?}"
+    );
+
+    let runtime_fail = runtime_fail.unwrap();
+    let reason_code = runtime_fail
+        .get("reason_code")
+        .and_then(Value::as_str)
+        .expect("runtime fail should have a reason_code");
+
+    // The reason code should be deterministic and machine-readable.
+    assert!(
+        reason_code
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_'),
+        "reason_code should match pattern ^[a-z0-9_]+$: got '{reason_code}'"
+    );
+
+    // Should include remediation metadata for automation.
+    assert!(
+        runtime_fail
+            .get("remediation")
+            .and_then(Value::as_str)
+            .is_some(),
+        "runtime compatibility FAIL should include remediation guidance"
+    );
+
+    let _ = fs::remove_dir_all(&fixture_dir);
+}
+
+#[test]
+#[cfg(feature = "onnx")]
+fn live_setup_fails_for_incompatible_model_with_reason_code() {
+    let fixture_dir = unique_temp_dir("wraithrun-setup-incompatible-model");
+    fs::create_dir_all(&fixture_dir).expect("fixture dir should be created");
+
+    let model_path = fixture_dir.join("corrupt.onnx");
+    fs::write(&model_path, b"this-is-not-a-valid-onnx-model-file-at-all")
+        .expect("model fixture should be written");
+
+    let tokenizer_path = fixture_dir.join("tokenizer.json");
+    fs::write(
+        &tokenizer_path,
+        r#"{"model":{"type":"WordPiece"},"version":"1.0"}"#,
+    )
+    .expect("tokenizer fixture should be written");
+
+    let config_path = fixture_dir.join("wraithrun.toml");
+    let model_path_text = model_path.to_string_lossy().to_string();
+    let tokenizer_path_text = tokenizer_path.to_string_lossy().to_string();
+    let config_path_text = config_path.to_string_lossy().to_string();
+
+    let args = vec![
+        "live",
+        "setup",
+        "--model",
+        model_path_text.as_str(),
+        "--tokenizer",
+        tokenizer_path_text.as_str(),
+        "--config",
+        config_path_text.as_str(),
+    ];
+    let output = run_capture(&args);
+
+    assert!(
+        !output.status.success(),
+        "live setup should fail for an incompatible model"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Live setup validation failed"),
+        "stderr should mention validation failure: {stderr}"
+    );
+    assert!(
+        stderr.contains("live-runtime-compatibility"),
+        "stderr should mention the runtime compatibility check: {stderr}"
+    );
+
+    // Config should NOT have been written.
+    assert!(
+        !config_path.is_file(),
+        "config should not be persisted when model is incompatible"
+    );
+
+    let _ = fs::remove_dir_all(&fixture_dir);
+}
+
+#[test]
+fn doctor_remediation_fields_present_for_missing_tokenizer() {
+    let fixture_dir = unique_temp_dir("wraithrun-doctor-remediation-tokenizer");
+    fs::create_dir_all(&fixture_dir).expect("fixture dir should be created");
+
+    let model_path = fixture_dir.join("some-model.onnx");
+    fs::write(&model_path, b"onnx-model-bytes").expect("model fixture should be written");
+
+    let model_path_text = model_path.to_string_lossy().to_string();
+
+    let args = vec![
+        "--doctor",
+        "--introspection-format",
+        "json",
+        "--live",
+        "--model",
+        model_path_text.as_str(),
+        "--tokenizer",
+        "/nonexistent/tokenizer.json",
+    ];
+    let output = run_capture(&args);
+
+    // Doctor exits non-zero when there are FAILs, but JSON is still on stdout.
+    let json = parse_stdout_json(&output);
+    let checks = json
+        .get("checks")
+        .and_then(Value::as_array)
+        .expect("checks should be an array");
+
+    let tokenizer_fail = checks.iter().find(|check| {
+        check.get("reason_code").and_then(Value::as_str) == Some("tokenizer_path_missing")
+    });
+    assert!(
+        tokenizer_fail.is_some(),
+        "should have tokenizer_path_missing check"
+    );
+
+    let tokenizer_fail = tokenizer_fail.unwrap();
+    let remediation = tokenizer_fail
+        .get("remediation")
+        .and_then(Value::as_str)
+        .expect("tokenizer_path_missing should include remediation");
+    assert!(
+        remediation.to_ascii_lowercase().contains("tokenizer"),
+        "remediation should mention tokenizer: {remediation}"
+    );
+
+    let _ = fs::remove_dir_all(&fixture_dir);
 }
 
 fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {

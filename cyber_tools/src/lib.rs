@@ -360,6 +360,20 @@ impl ToolRegistry {
         serde_json::to_string_pretty(&self.sorted_specs()).unwrap_or_else(|_| "[]".to_string())
     }
 
+    /// Compact manifest with just tool names and descriptions (no arg schemas).
+    /// Better for small models that get overwhelmed by verbose JSON.
+    pub fn manifest_compact(&self) -> String {
+        self.sorted_specs()
+            .iter()
+            .map(|spec| format!("- {}: {}", spec.name, spec.description))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools.keys().cloned().collect()
+    }
+
     pub async fn execute(&self, tool_name: &str, args: Value) -> Result<Value, ToolError> {
         let tool = self
             .tools

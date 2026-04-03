@@ -75,16 +75,22 @@ Release should be blocked when:
 - Close the completed milestone tracker issue and milestone.
 - Ensure the next milestone tracking issue is open and linked in release notes.
 
-## Roadmap Milestones (v0.9.0-v1.2.0)
+## Roadmap Milestones (v0.9.0-v1.4.0)
 
 - `v0.9.0` Live-Mode Convenience First (completed):
    Delivered one-command live setup, actionable doctor remediation, model-pack lifecycle commands, cross-platform packaging, and live reliability/latency instrumentation.
+- `v0.10.0` Runtime Compatibility and E2E Test Coverage (completed):
+   KV-cache live inference (#37), runtime compatibility checks with ~30 deterministic reason codes (#38), E2E live-success test lane (#39), zero-guess setup with structured remediation metadata (#44), and release gate closure (#36). Tracker: #45.
 - `v1.0.0` Local API and Web UI MVP:
    Add local API server endpoints plus baseline web UI workflows with secure local operation.
 - `v1.1.0` Workflow Depth and Live Quality:
    Add policy lifecycle controls, suppressions, and live inference quality controls.
 - `v1.2.0` Integrations and Team Mode:
    Add connector framework plus team-mode scheduling/backup foundations.
+- `v1.3.0` Multi-Backend Inference Abstraction (milestone #16, tracking: #46):
+   Define `ExecutionProviderBackend` trait, provider registry, provider-agnostic config, extract Vitis/CPU backends, provider-aware doctor, CLI `--backend` flag, and multi-backend test harness.
+- `v1.4.0` Concrete Hardware Backends (milestone #17, tracking: #55):
+   DirectML (Windows GPU), CoreML (macOS/Apple Silicon), CUDA/TensorRT (NVIDIA), QNN (Qualcomm Hexagon), non-ONNX formats (GGUF/SafeTensors), and quantization-aware loading.
 
 ## Immediate Next Steps for v1.0.0
 

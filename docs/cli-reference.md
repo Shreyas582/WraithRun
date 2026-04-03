@@ -54,7 +54,7 @@ wraithrun models benchmark [OPTIONS]
 - `--profile <PROFILE>`: named profile from built-ins or config file.
 - `--model <MODEL>`: model path for live mode. Default fallback: `./models/llm.onnx`.
 - `--tokenizer <TOKENIZER>`: tokenizer path used in live mode.
-- `--max-steps <MAX_STEPS>`: max agent iterations. Default fallback: `8`.
+- `--max-steps <MAX_STEPS>`: max tools executed in the investigation plan. Default fallback: `8`.
 - `--max-new-tokens <MAX_NEW_TOKENS>`: generation cap per model response. Default fallback: `256`.
 - `--temperature <TEMPERATURE>`: generation temperature. Default fallback: `0.2`.
 - `--live`: enable ONNX/Vitis live inference mode.
@@ -75,6 +75,8 @@ wraithrun models benchmark [OPTIONS]
 - `--vitis-cache-dir <VITIS_CACHE_DIR>`: Vitis cache directory.
 - `--vitis-cache-key <VITIS_CACHE_KEY>`: Vitis cache key.
 - `-h, --help`: print help.
+
+When Vitis cache settings are omitted, WraithRun attempts to auto-discover them from model-adjacent artifacts (`dd_metastate_*`, `.cache`, `cache`, and `*_meta.json`).
 
 ## Resolution Order
 
@@ -719,6 +721,7 @@ Runtime control variables:
 - `WRAITHRUN_VITIS_CONFIG`
 - `WRAITHRUN_VITIS_CACHE_DIR`
 - `WRAITHRUN_VITIS_CACHE_KEY`
+- `WRAITHRUN_ORT_DYLIB_PATH`
 
 Example:
 

@@ -93,24 +93,36 @@ Live inference requires:
 
 - A compatible ONNX model.
 - A matching tokenizer.json.
-- ONNX Runtime with Vitis execution provider support.
+- ONNX Runtime (bundled or via `ORT_DYLIB_PATH`).
+
+Two feature flags are available for source builds:
+
+- `inference_bridge/onnx`: CPU execution provider (works on any platform with ONNX Runtime).
+- `inference_bridge/vitis`: AMD RyzenAI Vitis execution provider (requires RyzenAI SDK).
 
 Feature check:
 
 ```powershell
+cargo check -p inference_bridge --features onnx
 cargo check -p inference_bridge --features vitis
 ```
 
-Live run:
+Live run (CPU):
+
+```powershell
+cargo run -p wraithrun --features inference_bridge/onnx -- --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
+```
+
+Live run (RyzenAI NPU):
 
 ```powershell
 cargo run -p wraithrun --features inference_bridge/vitis -- --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
 ```
 
-One-command live setup bootstrap:
+One-command live setup bootstrap (validates model compatibility before writing config):
 
 ```powershell
-cargo run -p wraithrun -- live setup --config .\wraithrun.toml
+cargo run -p wraithrun -- live setup --model C:/models/llm.onnx --config .\wraithrun.toml
 ```
 
 Model-pack lifecycle checks:

@@ -8,6 +8,7 @@ This repository uses GitHub Actions for quality gates, release planning, and art
   - Runs formatting checks, linting, tests, and cross-platform workspace compilation.
   - Validates feature-gated Vitis build path.
   - Runs live-mode metrics benchmark regression checks and validates machine-readable telemetry thresholds.
+  - Includes an infrastructure-gated live-success e2e lane using ONNX CPU inference on a self-hosted runner (no fallback expected).
   - Cross-platform checks run on Linux, macOS, and Windows.
 
 - `release-drafter.yml`
@@ -46,6 +47,31 @@ Before merge, pull requests should satisfy:
 - `cargo test --workspace`
 - `cargo check --workspace`
 - `cargo check -p inference_bridge --features vitis`
+
+When live-success e2e is enabled (self-hosted runner), the CI lane also runs:
+
+- `cargo test -p wraithrun --features inference_bridge/onnx --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact`
+
+Live-success lane prerequisites (repository variables):
+
+- `WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED=true`
+- `WRAITHRUN_LIVE_E2E_MODEL`
+- `WRAITHRUN_LIVE_E2E_TOKENIZER`
+- Optional runtime budget controls: `WRAITHRUN_LIVE_E2E_MAX_STEPS`, `WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS`
+- Optional adapter coverage toggle: `WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER` (defaults to disabled in CI when unset)
+- Optional Vitis tuning: `WRAITHRUN_LIVE_E2E_VITIS_CONFIG`, `WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR`, `WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY`
+- Optional ONNX runtime override: `WRAITHRUN_LIVE_E2E_ORT_DYLIB_PATH` (exported to the test process as `WRAITHRUN_ORT_DYLIB_PATH`)
+
+If `WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR` is not set, WraithRun auto-discovers a cache directory from model-pack artifacts (preferring model-adjacent `dd_metastate_*` files, then `.cache` or `cache`).
+
+If `WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY` is not set, WraithRun also attempts to infer a cache key from `dd_metastate_*` or `*_meta.json` files near the model.
+
+Runner labels expected for this lane:
+
+- `self-hosted`
+- `Windows`
+- `X64`
+- `vitis windows/x64`
 
 ## Release Notes and Labels
 
@@ -104,3 +130,4 @@ Optional checks (advisory, not required for every PR):
 
 - `Dependency Vulnerability Audit` (scheduled/manual security workflow)
 - `Release Drafter` (draft notes maintenance)
+- `Live success e2e (self-hosted windows)` (runs only when explicitly enabled)

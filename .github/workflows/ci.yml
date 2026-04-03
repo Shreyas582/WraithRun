@@ -63,13 +63,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.92.0
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+      - name: Install Rust toolchain (pwsh)
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.92.0 --profile minimal
+          rustup default 1.92.0
+          rustup show active-toolchain
 
       - name: Run stdin integration tests
         run: cargo test -p wraithrun --test stdin_integration
@@ -193,3 +192,59 @@ jobs:
               },
           )
           PY
+
+  live-success-e2e:
+    name: Live success e2e (self-hosted windows)
+    if: ${{ vars.WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED == 'true' }}
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    timeout-minutes: 45
+    env:
+      WRAITHRUN_LIVE_E2E_MODEL: ${{ vars.WRAITHRUN_LIVE_E2E_MODEL }}
+      WRAITHRUN_LIVE_E2E_TOKENIZER: ${{ vars.WRAITHRUN_LIVE_E2E_TOKENIZER }}
+      WRAITHRUN_LIVE_E2E_TASK: ${{ vars.WRAITHRUN_LIVE_E2E_TASK }}
+      WRAITHRUN_LIVE_E2E_MAX_STEPS: ${{ vars.WRAITHRUN_LIVE_E2E_MAX_STEPS }}
+      WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS: ${{ vars.WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS }}
+      WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER: ${{ vars.WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER }}
+      WRAITHRUN_ORT_DYLIB_PATH: ${{ vars.WRAITHRUN_LIVE_E2E_ORT_DYLIB_PATH }}
+      WRAITHRUN_LIVE_E2E_ARTIFACT_DIR: live-e2e-artifacts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (powershell)
+        shell: powershell
+        run: |
+          $cargobin = "$env:USERPROFILE\.cargo\bin"
+          if (-not ($env:Path -split ';' | Where-Object { $_ -eq $cargobin })) {
+            $env:Path = "$cargobin;$env:Path"
+            echo "$cargobin" >> $env:GITHUB_PATH
+          }
+          rustup toolchain install 1.92.0 --profile minimal
+          rustup default 1.92.0
+          rustup show active-toolchain
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate live e2e fixture configuration
+        shell: powershell
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WRAITHRUN_LIVE_E2E_MODEL) -or [string]::IsNullOrWhiteSpace($env:WRAITHRUN_LIVE_E2E_TOKENIZER)) {
+            Write-Error "WRAITHRUN_LIVE_E2E_MODEL and WRAITHRUN_LIVE_E2E_TOKENIZER must be configured when WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED=true"
+            exit 1
+          }
+
+      - name: Run live success e2e test (no fallback)
+        shell: powershell
+        run: |
+          cargo test -p wraithrun --features inference_bridge/onnx --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact --nocapture
+
+      - name: Upload live success e2e artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-success-e2e-artifacts
+          path: cli/live-e2e-artifacts/*.json
+          if-no-files-found: error

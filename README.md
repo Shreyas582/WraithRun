@@ -133,11 +133,21 @@ wraithrun --task "Check suspicious listener ports and summarize risk" --dry-run 
 
 Early-stage but production-minded for controlled defensive workflows.
 
+Completed in v0.10.0:
+
+- KV-cache and shared-buffer IO binding for live inference with GQO models
+- Runtime compatibility checks with ~30 deterministic reason codes and structured remediation
+- Zero-guess live setup with automatic model compatibility validation
+- E2E live-success test lane (feature-gated)
+- Cross-platform inference split: `onnx` (CPU EP) and `vitis` (AMD RyzenAI EP)
+- Batch prefill prompt ingestion replacing token-by-token loop (~4× first-token-latency improvement)
+- Deterministic two-phase agent architecture: investigation plan execution followed by LLM synthesis
+
 In progress:
 
-- KV-cache and streaming decode support
-- Broader end-to-end test coverage
 - Code-signing and platform trust hardening for released binaries/installers
+- Multi-backend inference abstraction (v1.3.0: DirectML, CoreML, CUDA/TensorRT, QNN)
+- Local API server and web UI MVP (v1.0.0)
 
 ## Responsible Use
 

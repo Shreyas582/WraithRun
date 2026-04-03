@@ -1,6 +1,6 @@
 # Tool Reference
 
-WraithRun includes a local tool registry used by the agent during the ReAct loop.
+WraithRun includes a local tool registry used by the agent during the deterministic investigation phase.
 
 ## Case Workflow Artifacts
 
