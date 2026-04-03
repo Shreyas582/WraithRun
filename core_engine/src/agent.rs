@@ -98,7 +98,7 @@ impl<B: InferenceEngine> Agent<B> {
         let tool_plan = investigation_plan(task);
         let mut turns = Vec::new();
 
-        for tool_name in &tool_plan {
+        for tool_name in tool_plan.iter().take(self.max_steps) {
             let mut call = ToolCall {
                 tool: tool_name.to_string(),
                 args: Value::Object(Map::new()),
