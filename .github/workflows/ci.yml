@@ -222,6 +222,13 @@ jobs:
             $env:Path = "$cargobin;$env:Path"
             echo "$cargobin" >> $env:GITHUB_PATH
           }
+          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            Write-Host "rustup not found, installing..."
+            Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
+            .\rustup-init.exe -y --default-toolchain 1.92.0 --profile minimal
+            Remove-Item .\rustup-init.exe
+            $env:Path = "$cargobin;$env:Path"
+          }
           rustup toolchain install 1.92.0 --profile minimal
           rustup default 1.92.0
           rustup show active-toolchain

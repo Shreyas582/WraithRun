@@ -1032,6 +1032,8 @@ fn baseline_bundle_import_populates_drift_tool_arguments() {
         "Audit account change activity in admin group membership",
         "--baseline-bundle",
         baseline_path_text.as_str(),
+        "--output-mode",
+        "full",
     ];
     let output = run_capture(&args);
 
@@ -1103,6 +1105,8 @@ fn baseline_bundle_import_accepts_raw_file_path_with_spaces() {
         "Audit account change activity in admin group membership",
         "--baseline-bundle",
         raw_path_text.as_str(),
+        "--output-mode",
+        "full",
     ];
     let output = run_capture(&args);
 
