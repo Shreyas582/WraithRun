@@ -76,6 +76,8 @@ wraithrun models benchmark [OPTIONS]
 - `--vitis-cache-key <VITIS_CACHE_KEY>`: Vitis cache key.
 - `-h, --help`: print help.
 
+When Vitis cache settings are omitted, WraithRun attempts to auto-discover them from model-adjacent artifacts (`dd_metastate_*`, `.cache`, `cache`, and `*_meta.json`).
+
 ## Resolution Order
 
 Settings are resolved in this order:
@@ -719,6 +721,7 @@ Runtime control variables:
 - `WRAITHRUN_VITIS_CONFIG`
 - `WRAITHRUN_VITIS_CACHE_DIR`
 - `WRAITHRUN_VITIS_CACHE_KEY`
+- `WRAITHRUN_ORT_DYLIB_PATH`
 
 Example:
 

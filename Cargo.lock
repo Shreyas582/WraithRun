@@ -534,6 +534,7 @@ dependencies = [
  "half",
  "ort",
  "serde",
+ "serde_json",
  "tokenizers",
  "tracing",
 ]

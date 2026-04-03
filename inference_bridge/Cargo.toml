@@ -6,13 +6,15 @@ license.workspace = true
 
 [features]
 default = []
-vitis = ["dep:ort", "dep:tokenizers", "dep:half"]
+onnx = ["dep:ort", "dep:tokenizers", "dep:half"]
+vitis = ["onnx", "ort/vitis"]
 
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
-ort = { version = "2.0.0-rc.12", optional = true, default-features = false, features = ["std", "load-dynamic", "api-22", "vitis", "half"] }
+ort = { version = "2.0.0-rc.12", optional = true, default-features = false, features = ["std", "load-dynamic", "api-22", "half"] }
 tokenizers = { version = "0.22.2", optional = true }
 half = { version = "2", optional = true }
