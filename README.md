@@ -85,10 +85,14 @@ cargo run -p wraithrun --features inference_bridge/vitis -- --task "Investigate 
 
 Each run emits structured output that is useful to both analysts and automation:
 
-- `findings`: severity-scored, actionable observations with evidence pointers.
+- `max_severity`: highest severity level across all deduplicated findings.
+- `findings`: severity-scored, actionable observations with evidence pointers (deduplicated and sorted).
+- `model_capability`: capability tier, estimated parameters, execution provider, latency, and vocab size (live mode).
 - `live_fallback_decision`: machine-readable reason codes when fallback triggers.
 - `run_timing` and `live_run_metrics`: latency and reliability telemetry for operations.
 - `case_id` and evidence bundle artifacts for case tracking and auditability.
+
+Default output uses compact mode (omits intermediate reasoning). Use `--output-mode full` for complete turn-by-turn output.
 
 ## Common Operational Commands
 
@@ -109,6 +113,10 @@ wraithrun --task "Check suspicious listener ports and summarize risk" --dry-run 
 
 ## Advanced Features
 
+- Model capability tiering: automatic probe classifies models as Basic/Moderate/Strong and adapts agent behavior (deterministic summary, reduced evidence, or full synthesis).
+- `--capability-override` to manually set tier classification.
+- Compact output mode (default) with `--output-mode full` for verbose turn-by-turn output.
+- Findings deduplication, severity sorting, and quality-checked summaries.
 - Live preflight validation in runtime path to fail fast on missing model or tokenizer assets.
 - Deterministic fallback controls with `--live-fallback-policy` and machine-readable fallback reason codes.
 - Model-pack lifecycle operations: discover, validate, and benchmark candidate live packs.
@@ -133,6 +141,25 @@ wraithrun --task "Check suspicious listener ports and summarize risk" --dry-run 
 
 Early-stage but production-minded for controlled defensive workflows.
 
+Completed in v0.12.0:
+
+- Model capability probe: file-size parameter estimation, execution provider detection, smoke latency measurement, vocab size detection
+- Capability tier classification (Basic / Moderate / Strong) with const-threshold rules
+- Agent adapts Phase 2 by tier: Basic skips LLM, Moderate reduces evidence window, Strong runs full synthesis
+- `--capability-override` CLI flag for manual tier selection
+- `model_capability` object in JSON run report
+
+Completed in v0.11.0:
+
+- Findings deduplication across overlapping tools with authority-based ranking
+- Findings sorted by severity descending with confidence tiebreaker
+- `max_severity` field in JSON run report
+- Compact output mode (default) omitting turns array from JSON
+- Deterministic executive summary fallback for low-quality LLM output
+- Confidence score rounding to two decimal places
+- Tool precondition checking to skip known-failing tools
+- `--output-mode` CLI flag
+
 Completed in v0.10.0:
 
 - KV-cache and shared-buffer IO binding for live inference with GQO models
@@ -140,7 +167,7 @@ Completed in v0.10.0:
 - Zero-guess live setup with automatic model compatibility validation
 - E2E live-success test lane (feature-gated)
 - Cross-platform inference split: `onnx` (CPU EP) and `vitis` (AMD RyzenAI EP)
-- Batch prefill prompt ingestion replacing token-by-token loop (~4× first-token-latency improvement)
+- Batch prefill prompt ingestion replacing token-by-token loop (~4x first-token-latency improvement)
 - Deterministic two-phase agent architecture: investigation plan execution followed by LLM synthesis
 
 In progress:

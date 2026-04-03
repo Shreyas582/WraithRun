@@ -140,3 +140,42 @@ Fix:
 - Run `--doctor --live --model <PATH> --introspection-format json` to see the full check results with `remediation` guidance.
 - If `live-runtime-compatibility` shows `onnx_feature_disabled`, rebuild with `--features inference_bridge/onnx`.
 - If the model is corrupt or incompatible, obtain a valid ONNX model file.
+
+## JSON output is missing the turns array
+
+Symptom:
+
+- JSON output does not contain intermediate reasoning steps (the `turns` array is absent).
+
+Fix:
+
+- This is expected. Since v0.11.0, the default output mode is `compact`, which omits `turns` to reduce payload size.
+- Use `--output-mode full` to restore the complete output including all intermediate turns.
+
+## Model classified as wrong capability tier
+
+Symptom:
+
+- Agent behavior does not match what you expect for your model (e.g., skipping LLM synthesis when the model is capable).
+
+Fix:
+
+- WraithRun automatically probes model size and latency to classify capability as Basic, Moderate, or Strong.
+- Override automatic classification with `--capability-override`:
+
+```powershell
+wraithrun --task "Investigate ..." --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --capability-override strong
+```
+
+- Tier thresholds: Basic ≤2B params or ≥200ms latency; Strong ≥10B params and ≤50ms latency; Moderate is everything in between.
+
+## Final answer looks generic or templated
+
+Symptom:
+
+- The executive summary in `final_answer` is a structured SUMMARY/FINDINGS/RISK/ACTIONS block instead of natural language.
+
+Fix:
+
+- This happens when the model is classified as Basic tier (deterministic summary) or when LLM output quality is detected as low.
+- If your model is capable, use `--capability-override moderate` or `--capability-override strong` to force LLM synthesis.

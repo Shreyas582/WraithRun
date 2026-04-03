@@ -133,17 +133,35 @@ cargo run -p wraithrun -- models validate --introspection-format json
 cargo run -p wraithrun -- models benchmark --introspection-format json
 ```
 
+## Model Capability Tiering
+
+When running in live mode, WraithRun automatically probes the loaded model to classify it into a capability tier:
+
+- **Basic**: small models (≤2B params or ≥200ms latency). Agent skips LLM synthesis and uses a deterministic structured summary.
+- **Moderate**: medium models. Agent reduces evidence window to top-5 findings before LLM synthesis.
+- **Strong**: large models (≥10B params and ≤50ms latency). Agent runs full evidence synthesis.
+
+Override automatic classification when you know your model's capability:
+
+```powershell
+cargo run -p wraithrun -- --task "Investigate unauthorized SSH keys" --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --capability-override strong
+```
+
 ## Output Format
 
 WraithRun prints a JSON report with:
 
 - contract_version: machine-readable contract version marker.
 - task: your original request.
-- findings: normalized actionable findings.
+- max_severity: highest severity level across all findings (when findings are present).
+- model_capability: capability tier, estimated parameters, execution provider, latency, and vocab size (live mode).
+- findings: normalized actionable findings (deduplicated, sorted by severity).
 - run_timing: optional latency fields (`first_token_latency_ms`, `total_run_duration_ms`).
 - live_run_metrics: optional live reliability/latency fields for live-mode runs.
-- turns: intermediate reasoning and tool observations.
+- turns: intermediate reasoning and tool observations (included when `--output-mode full` is used).
 - final_answer: final response text.
+
+By default, output uses compact mode which omits the `turns` array to reduce payload size. Use `--output-mode full` to include all intermediate reasoning steps.
 
 ## Configuration and Profiles
 

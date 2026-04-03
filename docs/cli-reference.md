@@ -65,6 +65,8 @@ wraithrun models benchmark [OPTIONS]
 - `--exit-policy <EXIT_POLICY>`: run exit behavior. Values: `none`, `severity-threshold`. Default: `none`.
 - `--exit-threshold <EXIT_THRESHOLD>`: severity threshold for `severity-threshold` policy. Values: `info`, `low`, `medium`, `high`, `critical`. Default when policy is set: `medium`.
 - `--output-file <OUTPUT_FILE>`: write rendered output to file.
+- `--output-mode <OUTPUT_MODE>`: JSON output verbosity. Values: `compact`, `full`. Default: `compact`. Compact mode omits the `turns` array to reduce payload size.
+- `--capability-override <CAPABILITY_OVERRIDE>`: manually set model capability tier, bypassing automatic probe classification. Values: `basic`, `moderate`, `strong`.
 - `--case-id <CASE_ID>`: optional investigation case identifier. Allowed chars: alphanumeric plus `- _ . :`.
 - `--evidence-bundle-dir <PATH>`: optional bundle export directory for `report.json`, `raw_observations.json`, and `SHA256SUMS`.
 - `--evidence-bundle-archive <PATH>`: optional deterministic tar archive export path containing `report.json`, `raw_observations.json`, and `SHA256SUMS`.

@@ -1,5 +1,61 @@
 # Upgrade Notes
 
+## v0.12.0
+
+### Breaking/visible changes
+
+- Agent Phase 2 now adapts behavior based on model capability tier. Basic-tier models skip LLM synthesis entirely and produce deterministic structured output. Moderate-tier models receive a reduced evidence window (top-5 findings). This may change output format and content compared to previous versions where full synthesis was always attempted.
+- JSON run report now includes a `model_capability` object with tier classification, estimated parameters, execution provider, smoke latency, vocab size, and override flag.
+
+### Migration examples
+
+Automatic capability tiering is enabled by default in live mode. No action required unless you want to override:
+
+```powershell
+wraithrun --task "Check suspicious processes" --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --capability-override strong
+```
+
+The `model_capability` field appears in JSON output:
+
+```json
+{
+  "model_capability": {
+    "tier": "moderate",
+    "estimated_params_b": 3.5,
+    "execution_provider": "CpuExecutionProvider",
+    "smoke_latency_ms": 120,
+    "vocab_size": 32000,
+    "override": false
+  }
+}
+```
+
+## v0.11.0
+
+### Breaking/visible changes
+
+- Default JSON output is now **compact mode**, which omits the `turns` array. Use `--output-mode full` to restore the previous behavior that included intermediate reasoning steps.
+- Findings are now automatically deduplicated across overlapping tools and sorted by severity descending. Previously, duplicate findings from multiple tools could appear in results.
+- `max_severity` field is now included in the JSON run report.
+- Confidence scores are now rounded to two decimal places. Previously, raw floating-point values were emitted.
+- The agent now skips tools whose preconditions are known to fail (e.g., `read_syslog` when the log file does not exist), which may change the set of tools executed compared to previous runs.
+- When LLM output is low quality or empty, a deterministic executive summary is generated instead of passing through the raw text.
+
+### Migration examples
+
+Restore full output with turns:
+
+```powershell
+wraithrun --task "Investigate unauthorized SSH keys" --output-mode full
+```
+
+Compact output (default) omits turns:
+
+```powershell
+wraithrun --task "Investigate unauthorized SSH keys"
+# JSON output will not contain "turns" array
+```
+
 ## v0.10.0
 
 ### Breaking/visible changes

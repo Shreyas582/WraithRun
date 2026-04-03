@@ -18,6 +18,41 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 0.12.0 - 2026-04-05
+
+### Added
+
+- Model capability probe (`ModelCapabilityProbe`) that estimates parameter count from ONNX file size, detects execution provider, measures smoke-inference latency, and reads tokenizer vocab size.
+- `ModelCapabilityTier` enum (`Basic`, `Moderate`, `Strong`) with const-threshold classification based on estimated params and observed latency.
+- Agent Phase 2 adapts behavior to capability tier: `Basic` skips LLM and uses deterministic summary, `Moderate` reduces evidence window (top-5 findings), `Strong` runs full synthesis.
+- `basic_tier_summary()` for structured SUMMARY / FINDINGS / RISK / ACTIONS output when a Basic-tier model is detected.
+- `model_capability` object in JSON run report including tier, estimated params, execution provider, latency, vocab size, and override flag.
+- `--capability-override <basic|moderate|strong>` CLI flag to manually set capability tier, bypassing automatic probe classification.
+- 18 new unit tests covering probe, classification, tier summary, report serialisation, and CLI override.
+
+### Changed
+
+- Run report JSON schema updated with `model_capability` object definition.
+- Agent Phase 2 no longer assumes full model capability; tier-aware branching is now the default path.
+
+## 0.11.0 - 2026-04-04
+
+### Added
+
+- Findings deduplication across overlapping tools using authority-based ranking (`deduplicate_findings`).
+- Findings sorted by severity descending with confidence tiebreaker (`sort_findings`).
+- `max_severity` field in JSON run report reflecting the highest severity across all findings.
+- Compact output mode (default): omits `turns` array from JSON output to reduce payload size.
+- `--output-mode <compact|full>` CLI flag to select between compact and full JSON output.
+- Deterministic executive summary fallback when LLM output is low quality or empty (`quality_checked_final_answer`).
+- Confidence scores rounded to two decimal places for consistency.
+- Tool precondition checking to skip tools with known-failing prerequisites (e.g., `read_syslog` when log file does not exist).
+
+### Changed
+
+- Default JSON output is now compact mode (turns array omitted). Use `--output-mode full` to restore previous behavior.
+- Agent Phase 2 now applies deduplication, sorting, quality checking, and max-severity derivation before emitting results.
+
 ## 0.10.0 - 2026-04-03
 
 ### Added
