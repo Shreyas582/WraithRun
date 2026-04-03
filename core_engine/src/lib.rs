@@ -575,16 +575,15 @@ fn is_suspicious_log_line(line: &str) -> bool {
         .any(|needle| lower.contains(needle))
 }
 
-pub fn format_system_prompt(tool_manifest_json: &str) -> String {
+pub fn format_system_prompt(tool_manifest: &str) -> String {
     format!(
-        "You are a local-first cyber operations agent.\n\
-         Reason carefully, use tools when needed, and keep outputs machine-parseable.\n\n\
-         Available tools JSON:\n\
-         {tool_manifest_json}\n\n\
-         Output contract:\n\
-         - Tool call format: <call>{{\"tool\":\"tool_name\",\"args\":{{...}}}}</call>\n\
-         - Final answer format: <final>your conclusion</final>\n\
-         - Never emit both <call> and <final> in the same response."
+        "You are an autonomous security investigation agent. Act independently.\n\
+         TOOLS:\n\
+         {tool_manifest}\n\
+         FORMAT: Respond with ONLY one XML tag per turn.\n\
+         To call a tool: <call>{{\"tool\":\"TOOL_NAME\",\"args\":{{}}}}</call>\n\
+         To finish: <final>SUMMARY: ...\nFINDINGS: ...\nRISK: ...\nACTIONS: ...</final>\n\
+         RULES: Your first response MUST be <call>. Call 2+ tools before <final>."
     )
 }
 
@@ -600,20 +599,7 @@ pub fn extract_tag(text: &str, tag: &str) -> Option<String> {
 
 pub fn parse_tool_call(text: &str) -> Option<ToolCall> {
     let body = extract_tag(text, "call")?;
-
-    if let Ok(call) = serde_json::from_str::<ToolCall>(&body) {
-        return Some(call);
-    }
-
-    let trimmed = body.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    Some(ToolCall {
-        tool: trimmed.to_string(),
-        args: Value::Object(serde_json::Map::new()),
-    })
+    serde_json::from_str::<ToolCall>(&body).ok()
 }
 
 #[cfg(test)]

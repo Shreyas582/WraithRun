@@ -7,8 +7,8 @@ use cyber_tools::ToolRegistry;
 use inference_bridge::InferenceEngine;
 
 use crate::{
-    derive_findings, extract_tag, format_system_prompt, parse_tool_call, AgentTurn,
-    CoverageBaseline, RunReport, RunTimingMetrics, ToolCall,
+    derive_findings, extract_tag, AgentTurn, CoverageBaseline, RunReport, RunTimingMetrics,
+    ToolCall,
 };
 
 pub struct Agent<B: InferenceEngine> {
@@ -92,88 +92,44 @@ impl<B: InferenceEngine> Agent<B> {
     }
 
     pub async fn run(&self, task: &str) -> Result<RunReport> {
-        let mut turns = Vec::new();
-        let mut transcript = format!("Task: {task}\n");
-        let system_prompt = format_system_prompt(&self.tools.manifest_json_pretty());
         let run_started_at = Instant::now();
-        let mut first_token_latency_ms = None;
 
-        for step in 0..self.max_steps {
-            let prompt = format!(
-                "{system_prompt}\n\
-                 ReAct transcript so far:\n\
-                 {transcript}\n\
-                 Decide your next action."
-            );
+        // Phase 1: deterministic tool execution — gather evidence.
+        let tool_plan = investigation_plan(task);
+        let mut turns = Vec::new();
 
-            let output = self.brain.generate(&prompt).await?;
-            if first_token_latency_ms.is_none() {
-                first_token_latency_ms = Some(elapsed_ms_since(run_started_at));
-            }
-            info!(step = step + 1, output = %output, "agent brain output");
+        for tool_name in &tool_plan {
+            let mut call = ToolCall {
+                tool: tool_name.to_string(),
+                args: Value::Object(Map::new()),
+            };
+            self.apply_coverage_baseline_to_call(&mut call);
 
-            if let Some(final_answer) = extract_tag(&output, "final") {
-                let findings = derive_findings(&turns, &final_answer);
-                return Ok(RunReport {
-                    task: task.to_string(),
-                    case_id: None,
-                    live_fallback_decision: None,
-                    run_timing: Some(build_run_timing_metrics(
-                        run_started_at,
-                        first_token_latency_ms,
-                    )),
-                    live_run_metrics: None,
-                    turns,
-                    final_answer,
-                    findings,
-                });
-            }
+            let observation = match self.tools.execute(&call.tool, call.args.clone()).await {
+                Ok(value) => value,
+                Err(err) => json!({ "error": err.to_string() }),
+            };
 
-            if let Some(mut call) = parse_tool_call(&output) {
-                self.apply_coverage_baseline_to_call(&mut call);
-
-                let observation = match self.tools.execute(&call.tool, call.args.clone()).await {
-                    Ok(value) => value,
-                    Err(err) => json!({ "error": err.to_string() }),
-                };
-
-                transcript.push_str(&format!(
-                    "Assistant: {output}\nObservation: {observation}\n"
-                ));
-
-                turns.push(AgentTurn {
-                    thought: output,
-                    tool_call: Some(call),
-                    observation: Some(observation),
-                });
-
-                continue;
-            }
+            info!(tool = %call.tool, "tool executed");
 
             turns.push(AgentTurn {
-                thought: output.clone(),
-                tool_call: None,
-                observation: None,
-            });
-
-            let findings = derive_findings(&turns, &output);
-
-            return Ok(RunReport {
-                task: task.to_string(),
-                case_id: None,
-                live_fallback_decision: None,
-                run_timing: Some(build_run_timing_metrics(
-                    run_started_at,
-                    first_token_latency_ms,
-                )),
-                live_run_metrics: None,
-                turns,
-                final_answer: output,
-                findings,
+                thought: format!("Executing {} to gather evidence.", call.tool),
+                tool_call: Some(call),
+                observation: Some(observation),
             });
         }
 
-        let final_answer = "Maximum step count reached before receiving <final>.".to_string();
+        // Phase 2: LLM synthesis — analyze evidence and produce findings.
+        let evidence_summary = build_evidence_summary(&turns);
+        let synthesis_prompt = format_synthesis_prompt(task, &evidence_summary);
+
+        let output = self.brain.generate(&synthesis_prompt).await?;
+        let first_token_latency_ms = Some(elapsed_ms_since(run_started_at));
+        info!(output = %output, "agent synthesis output");
+
+        let final_answer = extract_tag(&output, "final").unwrap_or(output);
+
+        // Structured findings from tool observations (rule-based extraction).
         let findings = derive_findings(&turns, &final_answer);
 
         Ok(RunReport {
@@ -198,6 +154,104 @@ fn elapsed_ms_since(started_at: Instant) -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+/// Select tools to run based on the task description.
+/// All tools are cheap local introspection, so we run a broad set by default.
+fn investigation_plan(task: &str) -> Vec<&'static str> {
+    let lower = task.to_lowercase();
+    let mut plan = Vec::new();
+
+    // Always start with broad evidence gathering.
+    plan.push("audit_account_changes");
+    plan.push("inspect_persistence_locations");
+    plan.push("read_syslog");
+
+    // Network-related tasks.
+    if lower.contains("network")
+        || lower.contains("connection")
+        || has_word(&lower, "port")
+        || lower.contains("listen")
+        || lower.contains("ssh")
+        || lower.contains("lateral")
+        || lower.contains("beacon")
+    {
+        plan.push("scan_network");
+        plan.push("correlate_process_network");
+    }
+
+    // Privilege / escalation tasks.
+    if lower.contains("privilege")
+        || lower.contains("escalat")
+        || lower.contains("admin")
+        || lower.contains("root")
+        || lower.contains("sudo")
+        || lower.contains("unauthori")
+    {
+        plan.push("check_privilege_escalation_vectors");
+    }
+
+    // If the plan is still small (generic task), add more tools.
+    if plan.len() <= 3 {
+        plan.push("scan_network");
+        plan.push("check_privilege_escalation_vectors");
+    }
+
+    plan
+}
+
+/// Check whether `word` appears as a standalone word in `text` (not as a substring of another word).
+fn has_word(text: &str, word: &str) -> bool {
+    for (idx, _) in text.match_indices(word) {
+        let before_ok = idx == 0 || !text.as_bytes()[idx - 1].is_ascii_alphanumeric();
+        let after_idx = idx + word.len();
+        let after_ok =
+            after_idx >= text.len() || !text.as_bytes()[after_idx].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
+}
+
+/// Build a concise evidence summary from tool observations for LLM synthesis.
+fn build_evidence_summary(turns: &[AgentTurn]) -> String {
+    let mut summary = String::new();
+    for turn in turns {
+        let tool_name = turn
+            .tool_call
+            .as_ref()
+            .map(|c| c.tool.as_str())
+            .unwrap_or("unknown");
+        if let Some(obs) = &turn.observation {
+            // Truncate large observations to keep within model context limits.
+            let obs_str = serde_json::to_string(obs).unwrap_or_default();
+            let truncated = if obs_str.len() > 1500 {
+                format!("{}...(truncated)", &obs_str[..1500])
+            } else {
+                obs_str
+            };
+            summary.push_str(&format!("[{tool_name}] {truncated}\n\n"));
+        }
+    }
+    summary
+}
+
+/// Format the synthesis prompt that asks the LLM to analyze collected evidence.
+fn format_synthesis_prompt(task: &str, evidence: &str) -> String {
+    format!(
+        "You are a security analyst. Analyze the evidence below and write a report.\n\
+         Task: {task}\n\n\
+         Evidence from host investigation tools:\n\
+         {evidence}\n\
+         Write your report inside <final>...</final> tags.\n\
+         Format:\n\
+         SUMMARY: One-line verdict.\n\
+         FINDINGS: Numbered list of specific observations from the evidence.\n\
+         RISK: critical/high/medium/low/info\n\
+         ACTIONS: Numbered remediation steps.\n\n\
+         <final>"
+    )
 }
 
 fn build_run_timing_metrics(
@@ -345,70 +399,76 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn executes_tool_then_finalizes() {
+    async fn executes_investigation_plan_and_synthesizes() {
         let engine = MockEngine::new(vec![
-            r#"<call>{"tool":"unknown_tool","args":{}}</call>"#,
-            "<final>investigation completed</final>",
+            "<final>SUMMARY: Found 1 non-default privileged account.\nRISK: high</final>",
         ]);
 
-        let agent = Agent::new(engine, ToolRegistry::with_default_tools()).with_max_steps(4);
+        let agent = Agent::new(engine, ToolRegistry::with_default_tools());
         let report = agent
             .run("Investigate suspicious account behavior")
             .await
             .expect("agent run should succeed");
 
-        assert_eq!(report.final_answer, "investigation completed");
-        assert_eq!(report.turns.len(), 1);
-        assert_eq!(
-            report.turns[0]
-                .tool_call
-                .as_ref()
-                .expect("tool call should exist")
-                .tool,
-            "unknown_tool"
+        assert!(
+            report
+                .final_answer
+                .contains("non-default privileged account"),
+            "final answer should contain synthesis: {}",
+            report.final_answer
         );
-        assert!(report.turns[0]
-            .observation
-            .as_ref()
-            .expect("observation should exist")
-            .get("error")
-            .is_some());
+        // Agent should have run multiple tools from the investigation plan.
+        assert!(
+            report.turns.len() >= 3,
+            "expected at least 3 tool turns, got {}",
+            report.turns.len()
+        );
+        // All turns should have tool calls with observations.
+        for turn in &report.turns {
+            assert!(
+                turn.tool_call.is_some(),
+                "every turn should have a tool call"
+            );
+            assert!(
+                turn.observation.is_some(),
+                "every turn should have an observation"
+            );
+        }
     }
 
     #[tokio::test]
-    async fn returns_direct_output_when_no_tags_are_present() {
+    async fn falls_back_to_raw_output_when_no_final_tag() {
         let engine = MockEngine::new(vec!["No significant anomalies detected."]);
 
-        let agent = Agent::new(engine, ToolRegistry::with_default_tools()).with_max_steps(3);
+        let agent = Agent::new(engine, ToolRegistry::with_default_tools());
         let report = agent
             .run("Perform a quick triage")
             .await
             .expect("agent run should succeed");
 
         assert_eq!(report.final_answer, "No significant anomalies detected.");
-        assert_eq!(report.turns.len(), 1);
-        assert!(report.turns[0].tool_call.is_none());
-        assert!(report.turns[0].observation.is_none());
+        // Investigation plan tools should still have been executed.
+        assert!(
+            report.turns.len() >= 3,
+            "expected at least 3 tool turns, got {}",
+            report.turns.len()
+        );
     }
 
     #[tokio::test]
-    async fn stops_when_max_steps_is_reached() {
-        let engine = MockEngine::new(vec![
-            r#"<call>{"tool":"unknown_tool","args":{}}</call>"#,
-            r#"<call>{"tool":"unknown_tool","args":{}}</call>"#,
-            r#"<call>{"tool":"unknown_tool","args":{}}</call>"#,
-        ]);
+    async fn derives_structured_findings_from_tool_observations() {
+        let engine = MockEngine::new(vec!["<final>summary</final>"]);
 
-        let agent = Agent::new(engine, ToolRegistry::with_default_tools()).with_max_steps(2);
+        let agent = Agent::new(engine, ToolRegistry::with_default_tools());
         let report = agent
-            .run("Keep collecting observations")
+            .run("Investigate unauthorized access")
             .await
             .expect("agent run should succeed");
 
-        assert_eq!(report.turns.len(), 2);
-        assert_eq!(
-            report.final_answer,
-            "Maximum step count reached before receiving <final>."
+        // derive_findings should produce findings from real tool observations.
+        assert!(
+            !report.findings.is_empty(),
+            "expected at least one finding from tool observations"
         );
     }
 }
