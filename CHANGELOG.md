@@ -18,6 +18,31 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 0.10.0 - 2026-04-03
+
+### Added
+
+- Structured `remediation` field on doctor and model-pack validation checks, providing actionable fix guidance for every `reason_code`.
+- `remediation_for_reason_code()` mapper covering ~30 reason codes across model path, tokenizer, runtime/session init, IO signature, and feature-gate scenarios.
+- `validate_live_setup_report` now gates on `live-runtime-compatibility` FAIL checks in addition to required file passes—setup rejects incompatible models before writing config.
+- Doctor text output now renders "Fix:" lines with remediation guidance after each non-PASS check.
+- Integration tests for incompatible-model detection (onnx-gated), missing-model remediation, missing-tokenizer remediation, and setup rejection for corrupt models.
+- KV-cache (past/present) live inference with shared-buffer IO binding for GQO models (#37).
+- Runtime compatibility inspector (`inspect_runtime_compatibility`) with deterministic reason codes and `RuntimeCompatibilityReport` (#38).
+- Feature-gated live-success E2E integration test lane (#39).
+- Cross-platform inference split: `onnx` feature (CPU EP) and `vitis` feature (AMD RyzenAI EP).
+
+### Changed
+
+- Doctor JSON schema now includes an optional `remediation` field on check items.
+- `live-runtime-compatibility` check is now a hard gate in `live setup`—previously it was informational only.
+- Pre-existing integration tests updated to tolerate runtime-compatibility results across onnx/non-onnx builds.
+- Test suite now covers 149 tests (no features) and 148 tests (onnx feature) with 0 failures.
+
+### Fixed
+
+- `validate_live_setup_report` previously only checked file presence; now also rejects models that fail ONNX session initialization.
+
 ## 0.9.1 - 2026-04-01
 
 ### Added

@@ -1,5 +1,60 @@
 # Upgrade Notes
 
+## v0.10.0
+
+### Breaking/visible changes
+
+- `validate_live_setup_report` now gates on `live-runtime-compatibility` FAIL checks. Previously, `live setup` only checked file presence; now it also rejects models that fail ONNX session initialization. Existing scripts that relied on setup succeeding with invalid models will see failures.
+- Doctor JSON output now includes an optional `remediation` field on check items, providing actionable fix guidance for every `reason_code`.
+- Doctor text output now renders "Fix:" lines after each non-PASS check.
+- Cross-platform inference features are now split: `onnx` (CPU execution provider) and `vitis` (AMD RyzenAI execution provider). Use `--features inference_bridge/onnx` for generic CPU inference or `--features inference_bridge/vitis` for RyzenAI NPU acceleration.
+
+### Migration examples
+
+Bootstrap live setup with automatic model compatibility validation:
+
+```powershell
+.\wraithrun.exe live setup --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --config .\wraithrun.toml
+```
+
+If setup fails with `live-runtime-compatibility`, the error output now includes remediation guidance:
+
+```
+Live setup validation failed. Missing passing checks: live-runtime-compatibility
+- [FAIL] live-runtime-compatibility: Unable to initialize ONNX session: ...
+  Fix: Verify the model file is a valid ONNX model. Re-download if corrupted.
+```
+
+Doctor JSON now includes remediation metadata for automation consumers:
+
+```powershell
+.\wraithrun.exe --doctor --live --model C:/models/llm.onnx --introspection-format json
+```
+
+Each check with a `reason_code` now also carries a `remediation` string:
+
+```json
+{
+  "status": "fail",
+  "name": "live-runtime-compatibility",
+  "reason_code": "runtime_session_init_failed",
+  "remediation": "Verify the model file is a valid ONNX model. Re-download if corrupted."
+}
+```
+
+Build with CPU-only ONNX inference (no RyzenAI NPU):
+
+```powershell
+cargo run -p wraithrun --features inference_bridge/onnx -- --live --model C:/models/llm.onnx --task "Investigate ..."
+```
+
+### Recommended checks after upgrade
+
+- Validate compatible models pass doctor checks: `wraithrun --doctor --live --model <PATH> --introspection-format json`.
+- If automation parsers consume doctor JSON, update them to handle the optional `remediation` field.
+- If CI/CD pipelines invoke `live setup`, verify they handle the new runtime-compatibility gating (non-zero exit when model is incompatible).
+- Review the `--features inference_bridge/onnx` vs `--features inference_bridge/vitis` split if building from source.
+
 ## v0.9.1
 
 ### Breaking/visible changes

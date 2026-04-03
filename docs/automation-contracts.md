@@ -15,6 +15,7 @@ Live-mode note:
 - `live_fallback_decision.reason_code` provides machine-readable fallback classification.
 - Run report includes optional `run_timing` and `live_run_metrics` for latency and reliability telemetry.
 - Findings adapter summary includes optional `live_run_metrics` for downstream alerting and scoring.
+- Doctor introspection checks now include an optional `remediation` field with actionable fix guidance for each `reason_code`.
 
 ## Schema Files
 
