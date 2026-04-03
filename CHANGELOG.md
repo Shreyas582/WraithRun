@@ -18,6 +18,30 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 0.13.0 - 2026-04-05
+
+### Added
+
+- Discrete confidence label model (`FindingConfidence` enum: Informational, Possible, Likely, Confirmed) derived from continuous confidence float using calibrated thresholds (#85).
+- `confidence_label` field on all findings, auto-derived from confidence float via `confidence_to_label()`.
+- `Finding::new()` constructor that auto-populates confidence label; `with_derived_label()` backfill method for existing findings.
+- Declarative investigation templates replacing hardcoded keyword matching in `investigation_plan()` (#84).
+- Six built-in investigation templates: broad-host-triage, ssh-key-investigation, persistence-analysis, network-exposure-audit, privilege-escalation-check, file-integrity-check.
+- `resolve_investigation_template()` scores templates by keyword match count and falls back to broad-host-triage.
+- Investigation templates shown in `--list-task-templates` output with tool lists.
+- Task scope validation: detects out-of-scope tasks (cloud/AWS/Azure/GCP/Kubernetes/etc.) and emits an info finding instead of misleading host data (#83).
+- `FindingRelevance` enum (Primary/Supplementary) for tagging finding relevance to the user's task (#86).
+- `relevance` field on all findings; template-primary tools produce Primary findings, others produce Supplementary.
+- `supplementary_findings` array in run report for findings separated in compact mode.
+- Compact output mode now moves supplementary findings to `supplementary_findings` array; full mode shows all with relevance tags.
+- 22 new tests covering confidence labels, template resolution, scope validation, and finding filtering.
+
+### Changed
+
+- `investigation_plan()` replaced by template-based `resolve_investigation_template()` — tool selection is now declarative and extensible.
+- Run report JSON schema updated with `confidence_label`, `relevance`, and `supplementary_findings` fields.
+- Integration tests updated to find tool turns by tool name rather than assuming fixed order.
+
 ## 0.12.0 - 2026-04-05
 
 ### Added

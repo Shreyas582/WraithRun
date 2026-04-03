@@ -7,8 +7,9 @@ use cyber_tools::ToolRegistry;
 use inference_bridge::InferenceEngine;
 
 use crate::{
-    basic_tier_summary, deduplicate_findings, derive_findings, extract_tag, max_severity,
-    quality_checked_final_answer, sort_findings, AgentTurn, CoverageBaseline,
+    basic_tier_summary, builtin_investigation_templates, deduplicate_findings, derive_findings,
+    extract_tag, max_severity, quality_checked_final_answer, sort_findings, AgentTurn,
+    CoverageBaseline, EvidencePointer, Finding, FindingSeverity, InvestigationTemplate,
     ModelCapabilityReport, ModelCapabilityTier, RunReport, RunTimingMetrics, ToolCall,
 };
 
@@ -109,11 +110,29 @@ impl<B: InferenceEngine> Agent<B> {
     pub async fn run(&self, task: &str) -> Result<RunReport> {
         let run_started_at = Instant::now();
 
+        // Scope validation (#83): detect out-of-scope tasks before tool execution.
+        if let Some(scope_finding) = check_task_scope(task) {
+            info!("task is out of scope for host-local tools");
+            return Ok(RunReport {
+                task: task.to_string(),
+                case_id: None,
+                max_severity: Some(FindingSeverity::Info),
+                model_capability: self.model_capability_report.clone(),
+                live_fallback_decision: None,
+                run_timing: Some(build_run_timing_metrics(run_started_at, None)),
+                live_run_metrics: None,
+                turns: Vec::new(),
+                final_answer: "Task is outside the scope of available host-local investigation tools. No tools were executed.".to_string(),
+                findings: vec![scope_finding],
+                supplementary_findings: Vec::new(),
+            });
+        }
+
         // Phase 1: deterministic tool execution — gather evidence.
-        let tool_plan = investigation_plan(task);
+        let template = resolve_investigation_template(task);
         let mut turns = Vec::new();
 
-        for tool_name in tool_plan.iter().take(self.max_steps) {
+        for tool_name in template.tools.iter().take(self.max_steps) {
             // #74: skip tools with known-failing preconditions.
             if !self.check_tool_precondition(tool_name) {
                 debug!(tool = %tool_name, "skipping tool: precondition not met");
@@ -144,6 +163,17 @@ impl<B: InferenceEngine> Agent<B> {
         let raw_findings = derive_findings(&turns, "");
         let mut findings = deduplicate_findings(raw_findings);
         sort_findings(&mut findings);
+
+        // Tag finding relevance based on template's primary tool set (#86).
+        let primary_tools: std::collections::HashSet<&str> =
+            template.tools.iter().copied().collect();
+        for finding in &mut findings {
+            if let Some(tool) = finding.evidence_pointer.tool.as_deref() {
+                if !primary_tools.contains(tool) {
+                    finding.relevance = crate::FindingRelevance::Supplementary;
+                }
+            }
+        }
 
         let (final_answer, first_token_latency_ms) = match self.capability_tier {
             ModelCapabilityTier::Basic => {
@@ -192,6 +222,7 @@ impl<B: InferenceEngine> Agent<B> {
             turns,
             final_answer,
             findings,
+            supplementary_findings: Vec::new(),
         })
     }
 
@@ -224,48 +255,109 @@ fn elapsed_ms_since(started_at: Instant) -> u64 {
         .unwrap_or(u64::MAX)
 }
 
-/// Select tools to run based on the task description.
-/// All tools are cheap local introspection, so we run a broad set by default.
-fn investigation_plan(task: &str) -> Vec<&'static str> {
+/// Keywords that indicate a task is within scope of host-local investigation tools.
+const IN_SCOPE_KEYWORDS: &[&str] = &[
+    "host",
+    "account",
+    "persistence",
+    "network",
+    "process",
+    "privilege",
+    "ssh",
+    "listener",
+    "port",
+    "autorun",
+    "hash",
+    "integrity",
+    "log",
+];
+
+/// Keywords that indicate a task targets capabilities outside the local toolset.
+const OUT_OF_SCOPE_INDICATORS: &[&str] = &[
+    "cloud", "aws", "azure", "gcp", "s3", "iam", "kubernetes", "container", "api", "email",
+    "phishing", "siem",
+];
+
+/// Check whether a task is within the scope of available host-local tools.
+///
+/// Returns `Some(finding)` if the task is out of scope, `None` if in scope.
+pub fn check_task_scope(task: &str) -> Option<Finding> {
     let lower = task.to_lowercase();
-    let mut plan = Vec::new();
 
-    // Always start with broad evidence gathering.
-    plan.push("audit_account_changes");
-    plan.push("inspect_persistence_locations");
-    plan.push("read_syslog");
+    let has_in_scope = IN_SCOPE_KEYWORDS
+        .iter()
+        .any(|kw| has_word(&lower, kw));
 
-    // Network-related tasks.
-    if lower.contains("network")
-        || lower.contains("connection")
-        || has_word(&lower, "port")
-        || lower.contains("listen")
-        || lower.contains("ssh")
-        || lower.contains("lateral")
-        || lower.contains("beacon")
-    {
-        plan.push("scan_network");
-        plan.push("correlate_process_network");
+    if has_in_scope {
+        return None;
     }
 
-    // Privilege / escalation tasks.
-    if lower.contains("privilege")
-        || lower.contains("escalat")
-        || lower.contains("admin")
-        || lower.contains("root")
-        || lower.contains("sudo")
-        || lower.contains("unauthori")
-    {
-        plan.push("check_privilege_escalation_vectors");
+    let matched_domains: Vec<&&str> = OUT_OF_SCOPE_INDICATORS
+        .iter()
+        .filter(|kw| has_word(&lower, kw))
+        .collect();
+
+    if matched_domains.is_empty() {
+        return None;
     }
 
-    // If the plan is still small (generic task), add more tools.
-    if plan.len() <= 3 {
-        plan.push("scan_network");
-        plan.push("check_privilege_escalation_vectors");
+    let domain_hint = matched_domains
+        .iter()
+        .map(|kw| **kw)
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    Some(Finding::new(
+        "Task is outside the scope of available host-local investigation tools".to_string(),
+        FindingSeverity::Info,
+        1.0,
+        EvidencePointer {
+            turn: None,
+            tool: None,
+            field: "scope_check".to_string(),
+        },
+        format!(
+            "This task requires capabilities not present in the current toolset. Consider tools for: {domain_hint}."
+        ),
+    ))
+}
+
+/// Resolve the best-matching investigation template for a task.
+///
+/// Scores each built-in template by counting keyword matches in the task
+/// description. Returns the highest scoring template, or the `broad-host-triage`
+/// fallback if no template matches.
+pub fn resolve_investigation_template(task: &str) -> &'static InvestigationTemplate {
+    let lower = task.to_lowercase();
+    let templates = builtin_investigation_templates();
+
+    let mut best: Option<(&InvestigationTemplate, usize)> = None;
+
+    for template in templates {
+        if template.match_keywords.is_empty() {
+            continue; // fallback template, skip scoring
+        }
+
+        let score = template
+            .match_keywords
+            .iter()
+            .filter(|kw| has_word(&lower, kw))
+            .count();
+
+        if score > 0 {
+            if let Some((_, best_score)) = best {
+                if score > best_score {
+                    best = Some((template, score));
+                }
+            } else {
+                best = Some((template, score));
+            }
+        }
     }
 
-    plan
+    let selected = best.map(|(t, _)| t).unwrap_or(&templates[0]);
+    info!(template = %selected.name, "investigation template selected");
+    selected
 }
 
 /// Check whether `word` appears as a standalone word in `text` (not as a substring of another word).
@@ -549,5 +641,120 @@ mod tests {
             !report.findings.is_empty(),
             "expected at least one finding from tool observations"
         );
+    }
+
+    // ── Investigation template resolution tests (#84) ──
+
+    use super::resolve_investigation_template;
+
+    #[test]
+    fn resolves_ssh_template_for_ssh_task() {
+        let template = resolve_investigation_template("Investigate unauthorized SSH keys");
+        assert_eq!(template.name, "ssh-key-investigation");
+    }
+
+    #[test]
+    fn resolves_network_template_for_listener_task() {
+        let template = resolve_investigation_template("Check suspicious listener ports");
+        assert_eq!(template.name, "network-exposure-audit");
+    }
+
+    #[test]
+    fn resolves_persistence_template() {
+        let template = resolve_investigation_template("Analyze autorun persistence entries");
+        assert_eq!(template.name, "persistence-analysis");
+    }
+
+    #[test]
+    fn resolves_privilege_escalation_template() {
+        let template =
+            resolve_investigation_template("Review local privilege escalation indicators");
+        assert_eq!(template.name, "privilege-escalation-check");
+    }
+
+    #[test]
+    fn resolves_file_integrity_template() {
+        let template = resolve_investigation_template("Verify hash integrity of system binaries");
+        assert_eq!(template.name, "file-integrity-check");
+    }
+
+    #[test]
+    fn falls_back_to_broad_triage_for_generic_task() {
+        let template = resolve_investigation_template("Perform a quick triage of this host");
+        assert_eq!(template.name, "broad-host-triage");
+    }
+
+    #[test]
+    fn template_resolution_is_case_insensitive() {
+        let template = resolve_investigation_template("CHECK SSH ACCESS NOW");
+        assert_eq!(template.name, "ssh-key-investigation");
+    }
+
+    #[test]
+    fn higher_keyword_count_wins() {
+        // "network lateral" matches network-exposure-audit with 2 keywords
+        let template =
+            resolve_investigation_template("Investigate network lateral movement indicators");
+        assert_eq!(template.name, "network-exposure-audit");
+    }
+
+    // ── Scope validation tests (#83) ──
+
+    use super::check_task_scope;
+
+    #[test]
+    fn out_of_scope_cloud_task_returns_finding() {
+        let finding = check_task_scope("Check if my AWS S3 buckets are misconfigured");
+        assert!(finding.is_some());
+        let f = finding.unwrap();
+        assert_eq!(f.severity, crate::FindingSeverity::Info);
+        assert!(f.title.contains("outside the scope"));
+        assert!(f.recommended_action.contains("aws"));
+    }
+
+    #[test]
+    fn out_of_scope_kubernetes_task_returns_finding() {
+        let finding = check_task_scope("Analyze Kubernetes pod security policies");
+        assert!(finding.is_some());
+    }
+
+    #[test]
+    fn in_scope_host_task_returns_none() {
+        let finding = check_task_scope("Investigate unauthorized SSH keys on this host");
+        assert!(finding.is_none());
+    }
+
+    #[test]
+    fn in_scope_network_task_returns_none() {
+        let finding = check_task_scope("Check network listener ports for suspicious activity");
+        assert!(finding.is_none());
+    }
+
+    #[test]
+    fn mixed_scope_with_in_scope_keyword_returns_none() {
+        // Has both "cloud" (out-of-scope) and "host" (in-scope) — in-scope wins
+        let finding = check_task_scope("Check host logs for cloud credential leaks");
+        assert!(finding.is_none());
+    }
+
+    #[test]
+    fn generic_task_without_scope_keywords_returns_none() {
+        // No in-scope AND no out-of-scope keywords → proceed normally
+        let finding = check_task_scope("Perform a general security assessment");
+        assert!(finding.is_none());
+    }
+
+    #[tokio::test]
+    async fn out_of_scope_task_skips_tool_execution() {
+        let engine = MockEngine::new(vec![]);
+        let agent = Agent::new(engine, ToolRegistry::with_default_tools());
+        let report = agent
+            .run("Check if my AWS S3 buckets are misconfigured")
+            .await
+            .expect("agent run should succeed");
+
+        assert!(report.turns.is_empty(), "no tools should be executed");
+        assert_eq!(report.findings.len(), 1);
+        assert!(report.findings[0].title.contains("outside the scope"));
     }
 }

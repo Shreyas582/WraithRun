@@ -335,6 +335,39 @@ export WRAITHRUN_COMMAND_DENYLIST="bash,sh,python,curl,wget"
 - `Review local privilege escalation indicators`
 - `Read and summarize last 200 lines from C:/Logs/agent.log`
 
+## Investigation Templates and Scope Validation
+
+The agent resolves a declarative investigation template based on task keywords. Templates determine tool selection and execution order.
+
+List investigation templates:
+
+```powershell
+.\wraithrun.exe --list-task-templates
+```
+
+Tasks outside supported scope (cloud, Kubernetes, email, SIEM) return an informational scoping finding:
+
+```powershell
+.\wraithrun.exe --task "Check our AWS S3 bucket permissions"
+# Returns informational finding: task is outside host-level investigation scope
+```
+
+## Finding Confidence Labels and Relevance
+
+Findings include a discrete `confidence_label` derived from the numeric score:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys" --output-mode full
+# Each finding includes: "confidence_label": "confirmed", "relevance": "primary"
+```
+
+In compact mode (default), supplementary findings from non-primary tools are separated:
+
+```powershell
+.\wraithrun.exe --task "Investigate unauthorized SSH keys"
+# JSON contains "findings": [...] and "supplementary_findings": [...]
+```
+
 ## Troubleshooting Quick Checks
 
 - `Vitis inference is disabled`:

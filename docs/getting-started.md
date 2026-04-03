@@ -155,7 +155,8 @@ WraithRun prints a JSON report with:
 - task: your original request.
 - max_severity: highest severity level across all findings (when findings are present).
 - model_capability: capability tier, estimated parameters, execution provider, latency, and vocab size (live mode).
-- findings: normalized actionable findings (deduplicated, sorted by severity).
+- findings: normalized actionable findings (deduplicated, sorted by severity). Each finding includes a discrete `confidence_label` and `relevance` tag.
+- supplementary_findings: lower-relevance findings from non-primary tools (compact mode only).
 - run_timing: optional latency fields (`first_token_latency_ms`, `total_run_duration_ms`).
 - live_run_metrics: optional live reliability/latency fields for live-mode runs.
 - turns: intermediate reasoning and tool observations (included when `--output-mode full` is used).

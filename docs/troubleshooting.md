@@ -178,4 +178,26 @@ Symptom:
 Fix:
 
 - This happens when the model is classified as Basic tier (deterministic summary) or when LLM output quality is detected as low.
+
+## Task returned a scope-boundary finding instead of running
+
+Symptom:
+
+- The agent returns a single informational finding about the task being outside host-level investigation scope, without executing any tools.
+
+Fix:
+
+- WraithRun validates that tasks fall within its supported domain (host-level cyber investigation). Tasks referencing cloud infrastructure (AWS, Azure, GCP), container orchestration (Kubernetes), email/phishing, or SIEM are rejected.
+- Rephrase your task to focus on host-level analysis: accounts, processes, persistence, network listeners, file integrity, or logs.
+
+## Some findings appear in supplementary_findings instead of findings
+
+Symptom:
+
+- In compact JSON output, some findings are in a `supplementary_findings` array instead of the main `findings` array.
+
+Fix:
+
+- This is expected. Since v0.13.0, the agent tags findings by relevance to the resolved investigation template. Findings from non-primary tools are classified as `supplementary` and separated in compact mode.
+- Use `--output-mode full` to keep all findings in the main `findings` array with their `relevance` tag.
 - If your model is capable, use `--capability-override moderate` or `--capability-override strong` to force LLM synthesis.

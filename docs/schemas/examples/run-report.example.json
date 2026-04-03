@@ -56,6 +56,8 @@
       "title": "Privilege escalation indicators detected (1)",
       "severity": "medium",
       "confidence": 0.74,
+      "confidence_label": "likely",
+      "relevance": "primary",
       "evidence_pointer": {
         "turn": 1,
         "tool": "check_privilege_escalation_vectors",
@@ -67,6 +69,8 @@
       "title": "Live mode fallback applied after inference failure",
       "severity": "info",
       "confidence": 1.0,
+      "confidence_label": "confirmed",
+      "relevance": "primary",
       "evidence_pointer": {
         "turn": null,
         "tool": null,
