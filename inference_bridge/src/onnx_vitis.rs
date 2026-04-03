@@ -2479,27 +2479,24 @@ fn run_prompt_shared_buffer(
     // missing output bindings.  We don't use them.
     // (the cache outputs are already bound by bind_shared_cache_buffers)
 
-    // --- Prompt ingestion: feed one token at a time ---
-    for (prompt_index, prompt_token) in context_ids.iter().copied().enumerate() {
-        let step_started = Instant::now();
-        let use_cache = prompt_index > 0;
-        let step_input_ids = vec![prompt_token];
-        let attention_len = prompt_index + 1;
+    // --- Prompt ingestion: batch prefill in a single forward pass ---
+    {
+        let prefill_started = Instant::now();
+        let attention_len = context_ids.len();
 
         debug!(
-            step = prompt_index + 1,
-            use_cache,
+            prompt_tokens = context_ids.len(),
             attention_len,
-            "shared-buffer prompt-ingest step"
+            "shared-buffer batch prefill"
         );
 
-        rebind_step_inputs(&mut binding, layout, &step_input_ids, attention_len, use_cache)?;
+        rebind_step_inputs(&mut binding, layout, context_ids, attention_len, false)?;
 
         let outputs = ort_result(session.run_binding(&binding))?;
         debug!(
-            step = prompt_index + 1,
-            elapsed_ms = step_started.elapsed().as_millis(),
-            "shared-buffer prompt-ingest step completed"
+            prompt_tokens = context_ids.len(),
+            elapsed_ms = prefill_started.elapsed().as_millis(),
+            "shared-buffer batch prefill completed"
         );
 
         // Verify logits are present (don't need the value yet).
@@ -2649,50 +2646,45 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
     }
 
     if cache_enabled {
-        for (prompt_index, prompt_token) in context_ids.iter().copied().enumerate() {
-            let step_started = Instant::now();
-            let decode_with_cache = prompt_index > 0;
-            let step_input_ids = vec![prompt_token];
-            let attention_len = prompt_index + 1;
+        // Batch prefill: ingest the entire prompt in a single forward pass.
+        let prefill_started = Instant::now();
+        let attention_len = context_ids.len();
 
-            debug!(
-                step = prompt_index + 1,
-                decode_with_cache,
-                step_input_len = step_input_ids.len(),
-                attention_len,
-                "running Vitis prompt-ingest forward pass"
-            );
+        debug!(
+            prompt_tokens = context_ids.len(),
+            attention_len,
+            "running batch prefill forward pass"
+        );
 
-            let model_inputs = build_model_inputs(
-                &layout,
-                &step_input_ids,
-                attention_len,
-                decode_with_cache,
-                &cache_state,
-            )?;
+        let model_inputs = build_model_inputs(
+            &layout,
+            &context_ids,
+            attention_len,
+            false,
+            &cache_state,
+        )?;
 
-            let mut outputs = ort_result(session.run(model_inputs))?;
-            debug!(
-                step = prompt_index + 1,
-                elapsed_ms = step_started.elapsed().as_millis(),
-                "Vitis prompt-ingest forward pass completed"
-            );
+        let mut outputs = ort_result(session.run(model_inputs))?;
+        debug!(
+            prompt_tokens = context_ids.len(),
+            elapsed_ms = prefill_started.elapsed().as_millis(),
+            "batch prefill forward pass completed"
+        );
 
-            let _ = outputs
-                .get(&layout.logits_output_name)
-                .or_else(|| outputs.get("logits"))
-                .or_else(|| outputs.get("lm_logits"))
-                .unwrap_or(&outputs[0]);
+        let _ = outputs
+            .get(&layout.logits_output_name)
+            .or_else(|| outputs.get("logits"))
+            .or_else(|| outputs.get("lm_logits"))
+            .unwrap_or(&outputs[0]);
 
-            let mut next_cache = HashMap::new();
-            for spec in &layout.cache_specs {
-                let cache_value = outputs.remove(&spec.output_name).ok_or_else(|| {
-                    anyhow!("cache output '{}' missing while ingesting prompt", spec.output_name)
-                })?;
-                next_cache.insert(spec.input.name.clone(), cache_value);
-            }
-            cache_state = next_cache;
+        let mut next_cache = HashMap::new();
+        for spec in &layout.cache_specs {
+            let cache_value = outputs.remove(&spec.output_name).ok_or_else(|| {
+                anyhow!("cache output '{}' missing while ingesting prompt", spec.output_name)
+            })?;
+            next_cache.insert(spec.input.name.clone(), cache_value);
         }
+        cache_state = next_cache;
     }
 
     for step in 0..config.max_new_tokens.max(1) {
