@@ -241,5 +241,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: live-success-e2e-artifacts
-          path: live-e2e-artifacts/*.json
+          path: cli/live-e2e-artifacts/*.json
           if-no-files-found: error
