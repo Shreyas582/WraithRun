@@ -7,8 +7,9 @@ use cyber_tools::ToolRegistry;
 use inference_bridge::InferenceEngine;
 
 use crate::{
-    deduplicate_findings, derive_findings, extract_tag, max_severity, quality_checked_final_answer,
-    sort_findings, AgentTurn, CoverageBaseline, RunReport, RunTimingMetrics, ToolCall,
+    basic_tier_summary, deduplicate_findings, derive_findings, extract_tag, max_severity,
+    quality_checked_final_answer, sort_findings, AgentTurn, CoverageBaseline,
+    ModelCapabilityReport, ModelCapabilityTier, RunReport, RunTimingMetrics, ToolCall,
 };
 
 pub struct Agent<B: InferenceEngine> {
@@ -16,6 +17,8 @@ pub struct Agent<B: InferenceEngine> {
     tools: ToolRegistry,
     max_steps: usize,
     coverage_baseline: Option<CoverageBaseline>,
+    capability_tier: ModelCapabilityTier,
+    model_capability_report: Option<ModelCapabilityReport>,
 }
 
 impl<B: InferenceEngine> Agent<B> {
@@ -25,6 +28,8 @@ impl<B: InferenceEngine> Agent<B> {
             tools,
             max_steps: 8,
             coverage_baseline: None,
+            capability_tier: ModelCapabilityTier::Strong,
+            model_capability_report: None,
         }
     }
 
@@ -39,6 +44,16 @@ impl<B: InferenceEngine> Agent<B> {
         } else {
             Some(coverage_baseline)
         };
+        self
+    }
+
+    pub fn with_capability_tier(mut self, tier: ModelCapabilityTier) -> Self {
+        self.capability_tier = tier;
+        self
+    }
+
+    pub fn with_model_capability_report(mut self, report: ModelCapabilityReport) -> Self {
+        self.model_capability_report = Some(report);
         self
     }
 
@@ -125,29 +140,49 @@ impl<B: InferenceEngine> Agent<B> {
             });
         }
 
-        // Phase 2: LLM synthesis — analyze evidence and produce findings.
-        let evidence_summary = build_evidence_summary(&turns);
-        let synthesis_prompt = format_synthesis_prompt(task, &evidence_summary);
-
-        let output = self.brain.generate(&synthesis_prompt).await?;
-        let first_token_latency_ms = Some(elapsed_ms_since(run_started_at));
-        info!(output = %output, "agent synthesis output");
-
-        let raw_final_answer = extract_tag(&output, "final").unwrap_or(output);
-
-        // Structured findings from tool observations (rule-based extraction).
-        let raw_findings = derive_findings(&turns, &raw_final_answer);
+        // Phase 2: synthesis — behavior depends on capability tier.
+        let raw_findings = derive_findings(&turns, "");
         let mut findings = deduplicate_findings(raw_findings);
         sort_findings(&mut findings);
 
-        // Quality-check LLM output; replace with deterministic summary if low quality.
-        let final_answer = quality_checked_final_answer(&raw_final_answer, &findings);
+        let (final_answer, first_token_latency_ms) = match self.capability_tier {
+            ModelCapabilityTier::Basic => {
+                // Skip LLM entirely; build deterministic summary from findings.
+                debug!("Basic tier: skipping LLM synthesis");
+                let answer = basic_tier_summary(&findings);
+                (answer, None)
+            }
+            ModelCapabilityTier::Moderate => {
+                // Call LLM with reduced evidence (top-5 observations).
+                let evidence_summary = build_evidence_summary_limited(&turns, 5);
+                let synthesis_prompt = format_synthesis_prompt(task, &evidence_summary);
+                let output = self.brain.generate(&synthesis_prompt).await?;
+                let latency = Some(elapsed_ms_since(run_started_at));
+                info!(output = %output, "agent synthesis output (moderate)");
+                let raw = extract_tag(&output, "final").unwrap_or(output);
+                let answer = quality_checked_final_answer(&raw, &findings);
+                (answer, latency)
+            }
+            ModelCapabilityTier::Strong => {
+                // Full evidence, full synthesis.
+                let evidence_summary = build_evidence_summary(&turns);
+                let synthesis_prompt = format_synthesis_prompt(task, &evidence_summary);
+                let output = self.brain.generate(&synthesis_prompt).await?;
+                let latency = Some(elapsed_ms_since(run_started_at));
+                info!(output = %output, "agent synthesis output (strong)");
+                let raw = extract_tag(&output, "final").unwrap_or(output);
+                let answer = quality_checked_final_answer(&raw, &findings);
+                (answer, latency)
+            }
+        };
+
         let report_max_severity = max_severity(&findings);
 
         Ok(RunReport {
             task: task.to_string(),
             case_id: None,
             max_severity: report_max_severity,
+            model_capability: self.model_capability_report.clone(),
             live_fallback_decision: None,
             run_timing: Some(build_run_timing_metrics(
                 run_started_at,
@@ -249,8 +284,18 @@ fn has_word(text: &str, word: &str) -> bool {
 
 /// Build a concise evidence summary from tool observations for LLM synthesis.
 fn build_evidence_summary(turns: &[AgentTurn]) -> String {
+    build_evidence_summary_limited(turns, usize::MAX)
+}
+
+/// Build an evidence summary limited to the first `max_turns` observations.
+/// Used by Moderate tier to reduce prompt size.
+fn build_evidence_summary_limited(turns: &[AgentTurn], max_turns: usize) -> String {
     let mut summary = String::new();
+    let mut count = 0;
     for turn in turns {
+        if count >= max_turns {
+            break;
+        }
         let tool_name = turn
             .tool_call
             .as_ref()
@@ -265,6 +310,7 @@ fn build_evidence_summary(turns: &[AgentTurn]) -> String {
                 obs_str
             };
             summary.push_str(&format!("[{tool_name}] {truncated}\n\n"));
+            count += 1;
         }
     }
     summary

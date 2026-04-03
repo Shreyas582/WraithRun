@@ -2,8 +2,71 @@ pub mod agent;
 
 use std::collections::HashSet;
 
+use inference_bridge::ModelCapabilityProbe;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
+
+// ── Capability tiering thresholds (const, easy to tune) ──
+
+/// Models below this parameter count (billions) are classified as Basic.
+const PARAM_BASIC_CEILING_B: f32 = 2.0;
+/// Models above this parameter count (billions) are classified as Strong.
+const PARAM_STRONG_FLOOR_B: f32 = 10.0;
+/// Latency above this (ms/tok) demotes to Basic.
+const LATENCY_BASIC_FLOOR_MS: u64 = 200;
+/// Latency below this (ms/tok) promotes to Strong.
+const LATENCY_STRONG_CEILING_MS: u64 = 50;
+
+/// Model capability tier that determines agent behavior in Phase 2.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelCapabilityTier {
+    Basic,
+    Moderate,
+    Strong,
+}
+
+impl ModelCapabilityTier {
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::Basic => "basic",
+            Self::Moderate => "moderate",
+            Self::Strong => "strong",
+        }
+    }
+}
+
+impl std::fmt::Display for ModelCapabilityTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.token())
+    }
+}
+
+/// Classify a model's capability probe signals into a tier.
+///
+/// Final tier = min(param_tier, latency_tier).
+/// A 13B model on a slow CPU is Moderate (latency-constrained).
+/// A 1B model on a fast GPU is Basic (param-constrained).
+pub fn classify_capability(probe: &ModelCapabilityProbe) -> ModelCapabilityTier {
+    let param_tier = if probe.estimated_param_billions < PARAM_BASIC_CEILING_B {
+        ModelCapabilityTier::Basic
+    } else if probe.estimated_param_billions > PARAM_STRONG_FLOOR_B {
+        ModelCapabilityTier::Strong
+    } else {
+        ModelCapabilityTier::Moderate
+    };
+
+    let latency_tier = if probe.smoke_latency_ms > LATENCY_BASIC_FLOOR_MS {
+        ModelCapabilityTier::Basic
+    } else if probe.smoke_latency_ms < LATENCY_STRONG_CEILING_MS {
+        ModelCapabilityTier::Strong
+    } else {
+        ModelCapabilityTier::Moderate
+    };
+
+    // min() works because of the PartialOrd derive: Basic < Moderate < Strong.
+    param_tier.min(latency_tier)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -131,6 +194,8 @@ pub struct RunReport {
     pub case_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_severity: Option<FindingSeverity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_capability: Option<ModelCapabilityReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_fallback_decision: Option<LiveFallbackDecision>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -713,6 +778,76 @@ fn deterministic_summary(findings: &[Finding]) -> String {
     )
 }
 
+/// Build a rich deterministic summary for Basic-tier runs (no LLM).
+///
+/// Format follows the spec from issue #79 — byte-identical across runs
+/// with the same findings.
+pub fn basic_tier_summary(findings: &[Finding]) -> String {
+    if findings.is_empty() {
+        return "SUMMARY: 0 findings detected. Maximum severity: info.\nFINDINGS:\n(none)\nRISK: info\nACTIONS:\n(none)".to_string();
+    }
+
+    let max_sev = findings
+        .iter()
+        .map(|f| f.severity)
+        .max()
+        .unwrap_or(FindingSeverity::Info);
+
+    let mut out = format!(
+        "SUMMARY: {} findings detected. Maximum severity: {}.\nFINDINGS:\n",
+        findings.len(),
+        max_sev.token()
+    );
+
+    for (i, f) in findings.iter().enumerate() {
+        out.push_str(&format!(
+            "{}. {} [{}] — {}\n",
+            i + 1,
+            f.title,
+            f.severity.token(),
+            f.recommended_action
+        ));
+    }
+
+    out.push_str(&format!("RISK: {}\nACTIONS:\n", max_sev.token()));
+
+    for (i, f) in findings.iter().enumerate() {
+        out.push_str(&format!("{}. {}\n", i + 1, f.recommended_action));
+    }
+
+    // Remove trailing newline for clean output.
+    if out.ends_with('\n') {
+        out.truncate(out.len() - 1);
+    }
+
+    out
+}
+
+/// Model capability report for JSON output (#80).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelCapabilityReport {
+    pub tier: ModelCapabilityTier,
+    pub estimated_params_b: f32,
+    pub execution_provider: String,
+    pub smoke_latency_ms: u64,
+    pub vocab_size: usize,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub r#override: bool,
+}
+
+impl ModelCapabilityReport {
+    pub fn from_probe(probe: &ModelCapabilityProbe, tier: ModelCapabilityTier) -> Self {
+        Self {
+            tier,
+            estimated_params_b: probe.estimated_param_billions,
+            execution_provider: probe.execution_provider.clone(),
+            smoke_latency_ms: probe.smoke_latency_ms,
+            vocab_size: probe.vocab_size,
+            r#override: false,
+        }
+    }
+}
+
 fn confidence_from_count(base: f32, count: u64, slope: f32, ceiling: f32) -> f32 {
     let raw = (base + (count as f32 * slope)).min(ceiling);
     (raw * 100.0).round() / 100.0
@@ -1096,5 +1231,198 @@ mod tests {
         assert!(FindingSeverity::High > FindingSeverity::Medium);
         assert!(FindingSeverity::Medium > FindingSeverity::Low);
         assert!(FindingSeverity::Low > FindingSeverity::Info);
+    }
+
+    // ── Capability tiering tests (#77) ──
+
+    use super::{
+        basic_tier_summary, classify_capability, ModelCapabilityReport, ModelCapabilityTier,
+    };
+    use inference_bridge::ModelCapabilityProbe;
+
+    #[test]
+    fn classify_small_model_as_basic() {
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 1.2,
+            execution_provider: "CPUExecutionProvider".to_string(),
+            smoke_latency_ms: 80,
+            vocab_size: 32000,
+        };
+        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Basic);
+    }
+
+    #[test]
+    fn classify_medium_model_moderate_latency_as_moderate() {
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 7.0,
+            execution_provider: "CPUExecutionProvider".to_string(),
+            smoke_latency_ms: 120,
+            vocab_size: 32000,
+        };
+        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Moderate);
+    }
+
+    #[test]
+    fn classify_large_model_fast_gpu_as_strong() {
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 13.0,
+            execution_provider: "CUDAExecutionProvider".to_string(),
+            smoke_latency_ms: 30,
+            vocab_size: 128256,
+        };
+        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Strong);
+    }
+
+    #[test]
+    fn classify_large_model_slow_cpu_as_basic() {
+        // 13B model but 250ms/tok latency → latency-constrained → Basic.
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 13.0,
+            execution_provider: "CPUExecutionProvider".to_string(),
+            smoke_latency_ms: 250,
+            vocab_size: 32000,
+        };
+        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Basic);
+    }
+
+    #[test]
+    fn classify_small_model_fast_gpu_as_basic() {
+        // 1B model on fast GPU → param-constrained → Basic.
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 0.8,
+            execution_provider: "CUDAExecutionProvider".to_string(),
+            smoke_latency_ms: 10,
+            vocab_size: 32000,
+        };
+        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Basic);
+    }
+
+    #[test]
+    fn classify_boundary_2b_model_as_moderate() {
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 2.0,
+            execution_provider: "CPUExecutionProvider".to_string(),
+            smoke_latency_ms: 100,
+            vocab_size: 32000,
+        };
+        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Moderate);
+    }
+
+    #[test]
+    fn classify_boundary_latency_200ms_as_moderate() {
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 5.0,
+            execution_provider: "CPUExecutionProvider".to_string(),
+            smoke_latency_ms: 200,
+            vocab_size: 32000,
+        };
+        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Moderate);
+    }
+
+    #[test]
+    fn tier_ordering() {
+        assert!(ModelCapabilityTier::Basic < ModelCapabilityTier::Moderate);
+        assert!(ModelCapabilityTier::Moderate < ModelCapabilityTier::Strong);
+    }
+
+    #[test]
+    fn tier_serializes_lowercase() {
+        let json = serde_json::to_string(&ModelCapabilityTier::Basic).unwrap();
+        assert_eq!(json, "\"basic\"");
+        let json = serde_json::to_string(&ModelCapabilityTier::Strong).unwrap();
+        assert_eq!(json, "\"strong\"");
+    }
+
+    #[test]
+    fn tier_deserializes_from_lowercase() {
+        let tier: ModelCapabilityTier = serde_json::from_str("\"moderate\"").unwrap();
+        assert_eq!(tier, ModelCapabilityTier::Moderate);
+    }
+
+    // ── Basic tier summary tests (#79) ──
+
+    #[test]
+    fn basic_tier_summary_empty_findings() {
+        let summary = basic_tier_summary(&[]);
+        assert!(summary.starts_with("SUMMARY: 0 findings detected."));
+        assert!(summary.contains("RISK: info"));
+    }
+
+    #[test]
+    fn basic_tier_summary_with_findings() {
+        let findings = vec![
+            make_finding(
+                "Active listeners",
+                FindingSeverity::High,
+                0.80,
+                "scan_network",
+                "observation.listener_count",
+            ),
+            make_finding(
+                "Suspicious persistence",
+                FindingSeverity::Medium,
+                0.70,
+                "inspect_persistence_locations",
+                "observation.suspicious_entry_count",
+            ),
+        ];
+
+        let summary = basic_tier_summary(&findings);
+        assert!(summary.starts_with("SUMMARY: 2 findings detected. Maximum severity: high."));
+        assert!(summary.contains("FINDINGS:"));
+        assert!(summary.contains("1. Active listeners [high]"));
+        assert!(summary.contains("2. Suspicious persistence [medium]"));
+        assert!(summary.contains("RISK: high"));
+        assert!(summary.contains("ACTIONS:"));
+    }
+
+    #[test]
+    fn basic_tier_summary_is_deterministic() {
+        let findings = vec![make_finding(
+            "Test",
+            FindingSeverity::Low,
+            0.50,
+            "scan_network",
+            "a",
+        )];
+        let a = basic_tier_summary(&findings);
+        let b = basic_tier_summary(&findings);
+        assert_eq!(a, b);
+    }
+
+    // ── ModelCapabilityReport tests (#80) ──
+
+    #[test]
+    fn capability_report_from_probe_roundtrips_json() {
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 1.2,
+            execution_provider: "CPUExecutionProvider".to_string(),
+            smoke_latency_ms: 350,
+            vocab_size: 32000,
+        };
+        let report = ModelCapabilityReport::from_probe(&probe, ModelCapabilityTier::Basic);
+        let json = serde_json::to_string_pretty(&report).unwrap();
+        assert!(json.contains("\"tier\": \"basic\""));
+        assert!(json.contains("\"estimated_params_b\""));
+        assert!(json.contains("\"execution_provider\""));
+        assert!(json.contains("\"smoke_latency_ms\""));
+        assert!(json.contains("\"vocab_size\""));
+        // override should be absent when false
+        assert!(!json.contains("\"override\""));
+    }
+
+    #[test]
+    fn capability_report_override_flag_serialized() {
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 1.2,
+            execution_provider: "CPUExecutionProvider".to_string(),
+            smoke_latency_ms: 350,
+            vocab_size: 32000,
+        };
+        let mut report = ModelCapabilityReport::from_probe(&probe, ModelCapabilityTier::Strong);
+        report.r#override = true;
+        let json = serde_json::to_string_pretty(&report).unwrap();
+        assert!(json.contains("\"override\": true"));
+        assert!(json.contains("\"tier\": \"strong\""));
     }
 }

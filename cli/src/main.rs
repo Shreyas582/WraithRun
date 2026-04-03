@@ -478,12 +478,13 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use core_engine::agent::Agent;
 use core_engine::{
-    CoverageBaseline, EvidencePointer, Finding, FindingSeverity, LiveFailureReasonCount,
-    LiveFallbackDecision, LiveRunMetrics, RunReport,
+    classify_capability, CoverageBaseline, EvidencePointer, Finding, FindingSeverity,
+    LiveFailureReasonCount, LiveFallbackDecision, LiveRunMetrics, ModelCapabilityReport,
+    ModelCapabilityTier, RunReport,
 };
 use cyber_tools::{ToolRegistry, ToolSpec};
 use inference_bridge::onnx_vitis::{inspect_runtime_compatibility, RuntimeCompatibilitySeverity};
-use inference_bridge::{ModelConfig, OnnxVitisEngine, VitisEpConfig};
+use inference_bridge::{probe_model_capability, ModelConfig, OnnxVitisEngine, VitisEpConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -577,6 +578,24 @@ enum OutputMode {
     #[default]
     Compact,
     Full,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum CapabilityOverride {
+    Basic,
+    Moderate,
+    Strong,
+}
+
+impl CapabilityOverride {
+    fn to_tier(self) -> ModelCapabilityTier {
+        match self {
+            Self::Basic => ModelCapabilityTier::Basic,
+            Self::Moderate => ModelCapabilityTier::Moderate,
+            Self::Strong => ModelCapabilityTier::Strong,
+        }
+    }
 }
 
 #[derive(Debug, Parser, Clone)]
@@ -728,6 +747,9 @@ struct Cli {
 
     #[arg(long)]
     vitis_cache_key: Option<String>,
+
+    #[arg(long, value_enum)]
+    capability_override: Option<CapabilityOverride>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -788,6 +810,7 @@ struct RuntimeConfig {
     vitis_config: Option<String>,
     vitis_cache_dir: Option<String>,
     vitis_cache_key: Option<String>,
+    capability_override: Option<CapabilityOverride>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1104,6 +1127,7 @@ impl RuntimeConfig {
             vitis_config: None,
             vitis_cache_dir: None,
             vitis_cache_key: None,
+            capability_override: None,
         }
     }
 
@@ -2437,6 +2461,9 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     if let Some(vitis_cache_key) = &cli.vitis_cache_key {
         runtime.vitis_cache_key = Some(vitis_cache_key.clone());
     }
+    if let Some(capability_override) = cli.capability_override {
+        runtime.capability_override = Some(capability_override);
+    }
 }
 
 fn apply_fragment_with_source(
@@ -2627,6 +2654,9 @@ fn apply_cli_overrides_with_source(
     if let Some(vitis_cache_key) = &cli.vitis_cache_key {
         runtime.vitis_cache_key = Some(vitis_cache_key.clone());
         sources.vitis_cache_key = "cli --vitis-cache-key".to_string();
+    }
+    if let Some(capability_override) = cli.capability_override {
+        runtime.capability_override = Some(capability_override);
     }
 }
 
@@ -5355,9 +5385,31 @@ async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunRep
         vitis_config,
     };
 
+    // Determine capability tier: override > probe > default.
+    let (tier, capability_report) = if let Some(cap_override) = runtime.capability_override {
+        let tier = cap_override.to_tier();
+        let probe = probe_model_capability(&model_config);
+        let mut report = ModelCapabilityReport::from_probe(&probe, tier);
+        report.r#override = true;
+        (tier, Some(report))
+    } else if dry_run {
+        (ModelCapabilityTier::Strong, None)
+    } else {
+        let probe = probe_model_capability(&model_config);
+        let tier = classify_capability(&probe);
+        let report = ModelCapabilityReport::from_probe(&probe, tier);
+        (tier, Some(report))
+    };
+
     let brain = OnnxVitisEngine::new(model_config);
     let tools = ToolRegistry::with_default_tools();
-    let mut agent = Agent::new(brain, tools).with_max_steps(runtime.max_steps);
+    let mut agent = Agent::new(brain, tools)
+        .with_max_steps(runtime.max_steps)
+        .with_capability_tier(tier);
+
+    if let Some(report) = capability_report {
+        agent = agent.with_model_capability_report(report);
+    }
 
     if let Some(baseline_bundle) = runtime.baseline_bundle.as_deref() {
         let coverage_baseline = load_coverage_baseline_from_bundle(baseline_bundle)?;
@@ -5565,6 +5617,7 @@ mod tests {
             vitis_config: None,
             vitis_cache_dir: None,
             vitis_cache_key: None,
+            capability_override: None,
         }
     }
 
@@ -5573,6 +5626,7 @@ mod tests {
             task: "Check suspicious listener ports and summarize risk".to_string(),
             case_id: Some("CASE-2026-0001".to_string()),
             max_severity: Some(FindingSeverity::Medium),
+            model_capability: None,
             live_fallback_decision: None,
             run_timing: None,
             live_run_metrics: None,
