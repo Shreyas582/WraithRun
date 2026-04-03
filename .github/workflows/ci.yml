@@ -194,13 +194,12 @@ jobs:
           PY
 
   live-success-e2e:
-    name: Live success e2e (self-hosted vitis windows)
+    name: Live success e2e (self-hosted windows)
     if: ${{ vars.WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED == 'true' }}
     runs-on:
       - self-hosted
       - Windows
       - X64
-      - vitis windows/x64
     timeout-minutes: 45
     env:
       WRAITHRUN_LIVE_E2E_MODEL: ${{ vars.WRAITHRUN_LIVE_E2E_MODEL }}
@@ -209,9 +208,6 @@ jobs:
       WRAITHRUN_LIVE_E2E_MAX_STEPS: ${{ vars.WRAITHRUN_LIVE_E2E_MAX_STEPS }}
       WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS: ${{ vars.WRAITHRUN_LIVE_E2E_MAX_NEW_TOKENS }}
       WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER: ${{ vars.WRAITHRUN_LIVE_E2E_INCLUDE_ADAPTER }}
-      WRAITHRUN_LIVE_E2E_VITIS_CONFIG: ${{ vars.WRAITHRUN_LIVE_E2E_VITIS_CONFIG }}
-      WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR: ${{ vars.WRAITHRUN_LIVE_E2E_VITIS_CACHE_DIR }}
-      WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY: ${{ vars.WRAITHRUN_LIVE_E2E_VITIS_CACHE_KEY }}
       WRAITHRUN_ORT_DYLIB_PATH: ${{ vars.WRAITHRUN_LIVE_E2E_ORT_DYLIB_PATH }}
       WRAITHRUN_LIVE_E2E_ARTIFACT_DIR: live-e2e-artifacts
     steps:
@@ -239,7 +235,7 @@ jobs:
       - name: Run live success e2e test (no fallback)
         shell: powershell
         run: |
-          cargo test -p wraithrun --features inference_bridge/vitis --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact --nocapture
+          cargo test -p wraithrun --features inference_bridge/onnx --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact --nocapture
 
       - name: Upload live success e2e artifacts
         uses: actions/upload-artifact@v4

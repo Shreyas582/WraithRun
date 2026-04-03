@@ -27,19 +27,13 @@ use half::f16;
 
 #[cfg(feature = "onnx")]
 use ort::{
-    session::{
-        builder::GraphOptimizationLevel,
-        IoBinding, Session, SessionInputValue,
-    },
+    session::{builder::GraphOptimizationLevel, IoBinding, Session, SessionInputValue},
     value::{DynValue, Outlet, Tensor, TensorElementType, ValueType},
     AsPointer,
 };
 
 #[cfg(feature = "vitis")]
-use ort::{
-    ep,
-    session::builder::SessionBuilder,
-};
+use ort::{ep, session::builder::SessionBuilder};
 
 #[cfg(feature = "onnx")]
 use serde::Deserialize;
@@ -275,9 +269,7 @@ fn classify_session_init_reason_code(error_text: &str) -> &'static str {
         return "runtime_custom_ops_unavailable";
     }
 
-    if normalized.contains("com.ryzenai")
-        && normalized.contains("not a registered function/op")
-    {
+    if normalized.contains("com.ryzenai") && normalized.contains("not a registered function/op") {
         return "runtime_custom_ops_unavailable";
     }
 
@@ -953,10 +945,7 @@ fn should_prefer_disk_external_data_resolution(resolved_external_data_file: &Pat
 
 #[cfg(feature = "vitis")]
 fn is_pb_external_manifest_file(path: &Path) -> bool {
-    let Some(file_name) = path
-        .file_name()
-        .and_then(|name| name.to_str())
-    else {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
 
@@ -1095,23 +1084,22 @@ fn apply_model_pack_session_options(
 
     let mut merged_config_entries = resolve_model_pack_config_entries(&options);
     if let Some(external_data_file) = external_data_file.as_deref() {
-        let external_data_value = if let Some(resolved_external) =
-            resolved_external_data_for_config.as_ref()
-        {
-            if resolved_external.is_file() {
-                resolved_external.to_string_lossy().to_string()
+        let external_data_value =
+            if let Some(resolved_external) = resolved_external_data_for_config.as_ref() {
+                if resolved_external.is_file() {
+                    resolved_external.to_string_lossy().to_string()
+                } else {
+                    external_data_file.to_string()
+                }
             } else {
-                external_data_file.to_string()
-            }
-        } else {
-            let resolved_external =
-                resolve_model_companion_path(&config.model_path, external_data_file);
-            if resolved_external.is_file() {
-                resolved_external.to_string_lossy().to_string()
-            } else {
-                external_data_file.to_string()
-            }
-        };
+                let resolved_external =
+                    resolve_model_companion_path(&config.model_path, external_data_file);
+                if resolved_external.is_file() {
+                    resolved_external.to_string_lossy().to_string()
+                } else {
+                    external_data_file.to_string()
+                }
+            };
 
         merged_config_entries
             .entry("external_data_file".to_string())
@@ -2058,8 +2046,7 @@ fn bind_shared_cache_buffers(
     ))?;
 
     for spec in &layout.cache_specs {
-        let cache_shape =
-            materialize_cache_shape(&spec.input.shape, spec.past_axis, max_seq_len);
+        let cache_shape = materialize_cache_shape(&spec.input.shape, spec.past_axis, max_seq_len);
         let buffer = build_zero_tensor(cache_shape, spec.input.element_type)?;
 
         // Bind as input (borrows the value).
@@ -2073,13 +2060,8 @@ fn bind_shared_cache_buffers(
         // input, satisfying the GQO shared-buffer check.
         let c_name = CString::new(spec.output_name.as_str())
             .map_err(|e| anyhow!("invalid cache output name: {e}"))?;
-        let status = unsafe {
-            (ort::api().BindOutput)(
-                binding.ptr_mut(),
-                c_name.as_ptr(),
-                buffer.ptr(),
-            )
-        };
+        let status =
+            unsafe { (ort::api().BindOutput)(binding.ptr_mut(), c_name.as_ptr(), buffer.ptr()) };
         unsafe {
             ort::error::Error::result_from_status(status)
                 .map_err(|e| anyhow!("BindOutput for '{}' failed: {e}", spec.output_name))?;
@@ -2246,8 +2228,8 @@ fn build_model_inputs<'a>(
         model_inputs.push((Cow::Owned(spec.name.clone()), use_cache_tensor.into()));
     }
 
-    let include_cache_inputs = (use_cache_branch || layout.use_cache.is_none())
-        && !cache_state.is_empty();
+    let include_cache_inputs =
+        (use_cache_branch || layout.use_cache.is_none()) && !cache_state.is_empty();
     if include_cache_inputs {
         for spec in &layout.cache_specs {
             let Some(value) = cache_state.get(&spec.input.name) else {
@@ -2402,10 +2384,7 @@ pub fn inspect_runtime_compatibility(
                 (reason_code, detail)
             };
 
-            report.push_fail(
-                reason_code,
-                detail,
-            );
+            report.push_fail(reason_code, detail);
             return report;
         }
     };
@@ -2458,10 +2437,7 @@ fn run_prompt_shared_buffer(
     max_seq_len: usize,
     run_started: &Instant,
 ) -> Result<Vec<i64>> {
-    debug!(
-        max_seq_len,
-        "using shared-buffer IO binding for KV cache"
-    );
+    debug!(max_seq_len, "using shared-buffer IO binding for KV cache");
 
     let stop_ids = discover_stop_token_ids(tokenizer);
     let mut generated_ids: Vec<i64> = Vec::new();
@@ -2486,8 +2462,7 @@ fn run_prompt_shared_buffer(
 
         debug!(
             prompt_tokens = context_ids.len(),
-            attention_len,
-            "shared-buffer batch prefill"
+            attention_len, "shared-buffer batch prefill"
         );
 
         rebind_step_inputs(&mut binding, layout, context_ids, attention_len, false)?;
@@ -2518,11 +2493,7 @@ fn run_prompt_shared_buffer(
         let step_input_ids = vec![last_token];
         let attention_len = all_ids.len().max(1);
 
-        debug!(
-            step = step + 1,
-            attention_len,
-            "shared-buffer decode step"
-        );
+        debug!(step = step + 1, attention_len, "shared-buffer decode step");
 
         rebind_step_inputs(&mut binding, layout, &step_input_ids, attention_len, true)?;
 
@@ -2588,8 +2559,8 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
 
     // Check if the model requires shared-buffer KV cache (RyzenAI hybrid GQO).
     let search_config = load_genai_search_config(config);
-    let use_shared_buffer = search_config.past_present_share_buffer.unwrap_or(false)
-        && !layout.cache_specs.is_empty();
+    let use_shared_buffer =
+        search_config.past_present_share_buffer.unwrap_or(false) && !layout.cache_specs.is_empty();
 
     if use_shared_buffer {
         let context_ids = encode_prompt(&tokenizer, prompt)?;
@@ -2652,17 +2623,11 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
 
         debug!(
             prompt_tokens = context_ids.len(),
-            attention_len,
-            "running batch prefill forward pass"
+            attention_len, "running batch prefill forward pass"
         );
 
-        let model_inputs = build_model_inputs(
-            &layout,
-            &context_ids,
-            attention_len,
-            false,
-            &cache_state,
-        )?;
+        let model_inputs =
+            build_model_inputs(&layout, &context_ids, attention_len, false, &cache_state)?;
 
         let mut outputs = ort_result(session.run(model_inputs))?;
         debug!(
@@ -2680,7 +2645,10 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
         let mut next_cache = HashMap::new();
         for spec in &layout.cache_specs {
             let cache_value = outputs.remove(&spec.output_name).ok_or_else(|| {
-                anyhow!("cache output '{}' missing while ingesting prompt", spec.output_name)
+                anyhow!(
+                    "cache output '{}' missing while ingesting prompt",
+                    spec.output_name
+                )
             })?;
             next_cache.insert(spec.input.name.clone(), cache_value);
         }

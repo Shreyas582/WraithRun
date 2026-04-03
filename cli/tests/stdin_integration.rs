@@ -1880,7 +1880,10 @@ fn doctor_json_includes_remediation_for_missing_model() {
         Some("fail")
     );
     assert!(
-        model_fail.get("remediation").and_then(Value::as_str).is_some(),
+        model_fail
+            .get("remediation")
+            .and_then(Value::as_str)
+            .is_some(),
         "model_path_missing check should include remediation guidance"
     );
 }
@@ -1944,13 +1947,18 @@ fn doctor_json_includes_remediation_for_incompatible_model() {
 
     // The reason code should be deterministic and machine-readable.
     assert!(
-        reason_code.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_'),
+        reason_code
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_'),
         "reason_code should match pattern ^[a-z0-9_]+$: got '{reason_code}'"
     );
 
     // Should include remediation metadata for automation.
     assert!(
-        runtime_fail.get("remediation").and_then(Value::as_str).is_some(),
+        runtime_fail
+            .get("remediation")
+            .and_then(Value::as_str)
+            .is_some(),
         "runtime compatibility FAIL should include remediation guidance"
     );
 
