@@ -199,7 +199,7 @@ jobs:
           docker run --rm -v "$PWD/dist:/dist:ro" fedora:40 bash -lc "dnf -y install /dist/wraithrun-linux-x86_64.rpm && wraithrun --help > /dev/null"
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-linux-assets
           path: |
@@ -258,7 +258,7 @@ jobs:
           /usr/local/bin/wraithrun --help > /dev/null
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-macos-assets
           path: |
@@ -325,7 +325,7 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/x `"$msiPath`" /qn /norestart" -Wait -NoNewWindow
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-windows-assets
           path: |
