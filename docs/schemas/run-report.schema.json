@@ -231,6 +231,15 @@
             "minimum": 0.0,
             "maximum": 1.0
           },
+          "confidence_label": {
+            "type": "string",
+            "enum": ["informational", "possible", "likely", "confirmed"]
+          },
+          "relevance": {
+            "type": "string",
+            "enum": ["primary", "supplementary"],
+            "default": "primary"
+          },
           "evidence_pointer": {
             "type": "object",
             "required": ["turn", "tool", "field"],
@@ -253,6 +262,12 @@
           }
         },
         "additionalProperties": false
+      }
+    },
+    "supplementary_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/properties/findings/items"
       }
     }
   },

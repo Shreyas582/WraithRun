@@ -1048,20 +1048,26 @@ fn baseline_bundle_import_populates_drift_tool_arguments() {
         .get("turns")
         .and_then(Value::as_array)
         .expect("turns should be an array");
-    let first_args = turns
-        .first()
+    let audit_turn_args = turns
+        .iter()
+        .find(|turn| {
+            turn.get("tool_call")
+                .and_then(|call| call.get("tool"))
+                .and_then(Value::as_str)
+                == Some("audit_account_changes")
+        })
         .and_then(|turn| turn.get("tool_call"))
         .and_then(|call| call.get("args"))
         .and_then(Value::as_object)
-        .expect("first tool call args should be an object");
+        .expect("audit_account_changes tool call args should be present");
 
-    let baseline_accounts = first_args
+    let baseline_accounts = audit_turn_args
         .get("baseline_privileged_accounts")
         .and_then(Value::as_array)
         .expect("baseline_privileged_accounts should be present");
     assert!(baseline_accounts.iter().any(|entry| entry == "svc-admin"));
 
-    let approved_accounts = first_args
+    let approved_accounts = audit_turn_args
         .get("approved_privileged_accounts")
         .and_then(Value::as_array)
         .expect("approved_privileged_accounts should be present");
@@ -1121,14 +1127,20 @@ fn baseline_bundle_import_accepts_raw_file_path_with_spaces() {
         .get("turns")
         .and_then(Value::as_array)
         .expect("turns should be an array");
-    let first_args = turns
-        .first()
+    let audit_turn_args = turns
+        .iter()
+        .find(|turn| {
+            turn.get("tool_call")
+                .and_then(|call| call.get("tool"))
+                .and_then(Value::as_str)
+                == Some("audit_account_changes")
+        })
         .and_then(|turn| turn.get("tool_call"))
         .and_then(|call| call.get("args"))
         .and_then(Value::as_object)
-        .expect("first tool call args should be an object");
+        .expect("audit_account_changes tool call args should be present");
 
-    let baseline_accounts = first_args
+    let baseline_accounts = audit_turn_args
         .get("baseline_privileged_accounts")
         .and_then(Value::as_array)
         .expect("baseline_privileged_accounts should be present");

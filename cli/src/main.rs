@@ -478,9 +478,9 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, ValueEnum};
 use core_engine::agent::Agent;
 use core_engine::{
-    classify_capability, CoverageBaseline, EvidencePointer, Finding, FindingSeverity,
-    LiveFailureReasonCount, LiveFallbackDecision, LiveRunMetrics, ModelCapabilityReport,
-    ModelCapabilityTier, RunReport,
+    builtin_investigation_templates, classify_capability, CoverageBaseline, EvidencePointer,
+    Finding, FindingSeverity, LiveFailureReasonCount, LiveFallbackDecision, LiveRunMetrics,
+    ModelCapabilityReport, ModelCapabilityTier, RunReport,
 };
 use cyber_tools::{ToolRegistry, ToolSpec};
 use inference_bridge::onnx_vitis::{inspect_runtime_compatibility, RuntimeCompatibilitySeverity};
@@ -2083,7 +2083,7 @@ fn render_task_template_list() -> String {
     let templates = task_template_descriptors();
 
     let _ = writeln!(output, "WraithRun Task Templates");
-    for descriptor in templates {
+    for descriptor in &templates {
         let _ = writeln!(output, "- {}: {}", descriptor.name, descriptor.prompt);
         if descriptor.supports_template_target && descriptor.supports_template_lines {
             let default_target = descriptor.default_target.unwrap_or("(none)");
@@ -2102,6 +2102,13 @@ fn render_task_template_list() -> String {
                 "  options: --template-target <PATH> (default {default_target})"
             );
         }
+    }
+
+    let _ = writeln!(output);
+    let _ = writeln!(output, "Investigation Templates");
+    for template in builtin_investigation_templates() {
+        let _ = writeln!(output, "- {}: {}", template.name, template.description);
+        let _ = writeln!(output, "  tools: {}", template.tools.join(", "));
     }
 
     output.trim_end().to_string()
@@ -4377,6 +4384,34 @@ fn render_json_compact(report: &RunReport) -> Result<String> {
 
     object.remove("turns");
 
+    // In compact mode, move supplementary findings to supplementary_findings (#86).
+    if let Some(findings_val) = object.remove("findings") {
+        if let Value::Array(all_findings) = findings_val {
+            let mut primary = Vec::new();
+            let mut supplementary = Vec::new();
+
+            for f in all_findings {
+                let is_supplementary = f
+                    .get("relevance")
+                    .and_then(Value::as_str)
+                    == Some("supplementary");
+                if is_supplementary {
+                    supplementary.push(f);
+                } else {
+                    primary.push(f);
+                }
+            }
+
+            object.insert("findings".to_string(), Value::Array(primary));
+            if !supplementary.is_empty() {
+                object.insert(
+                    "supplementary_findings".to_string(),
+                    Value::Array(supplementary),
+                );
+            }
+        }
+    }
+
     object.insert(
         "contract_version".to_string(),
         Value::String(JSON_CONTRACT_VERSION.to_string()),
@@ -5428,21 +5463,21 @@ fn append_live_fallback_finding(report: &mut RunReport, decision: &LiveFallbackD
         return;
     }
 
-    report.findings.push(Finding {
-        title: "Live mode fallback applied after inference failure".to_string(),
-        severity: FindingSeverity::Info,
-        confidence: 1.0,
-        evidence_pointer: EvidencePointer {
+    report.findings.push(Finding::new(
+        "Live mode fallback applied after inference failure".to_string(),
+        FindingSeverity::Info,
+        1.0,
+        EvidencePointer {
             turn: None,
             tool: None,
             field: "live_fallback_decision.live_error".to_string(),
         },
-        recommended_action: format!(
+        format!(
             "Review live inference error details and model-pack readiness, then rerun live mode after fixing root cause. Fallback reason: {} (code: {}).",
             decision.reason,
             decision.reason_code
         ),
-    });
+    ));
 }
 
 fn classify_live_error_reason_code(live_error: &str) -> &'static str {
@@ -5542,7 +5577,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use std::{env, fs};
 
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     use core_engine::{
         AgentTurn, EvidencePointer, Finding, FindingSeverity, LiveFailureReasonCount,
@@ -5639,18 +5674,19 @@ mod tests {
                 observation: Some(json!({ "listener_count": 3, "listeners": [] })),
             }],
             final_answer: "Dry-run cycle complete.".to_string(),
-            findings: vec![Finding {
-                title: "Active listening sockets observed (3)".to_string(),
-                severity: FindingSeverity::Medium,
-                confidence: 0.68,
-                evidence_pointer: EvidencePointer {
+            findings: vec![Finding::new(
+                "Active listening sockets observed (3)".to_string(),
+                FindingSeverity::Medium,
+                0.68,
+                EvidencePointer {
                     turn: Some(1),
                     tool: Some("scan_network".to_string()),
                     field: "observation.listener_count".to_string(),
                 },
-                recommended_action: "Correlate listener PIDs and ports with expected services."
+                "Correlate listener PIDs and ports with expected services."
                     .to_string(),
-            }],
+            )],
+            supplementary_findings: Vec::new(),
         }
     }
 
@@ -5674,6 +5710,74 @@ mod tests {
         assert!(rendered.contains("\"task\""));
         assert!(rendered.contains("\"findings\""));
         assert!(!rendered.contains("\"turns\""));
+    }
+
+    #[test]
+    fn compact_mode_separates_supplementary_findings() {
+        use core_engine::FindingRelevance;
+
+        let mut report = sample_report();
+        let mut supp_finding = Finding::new(
+            "Generic persistence noise".to_string(),
+            FindingSeverity::Low,
+            0.50,
+            EvidencePointer {
+                turn: Some(1),
+                tool: Some("inspect_persistence_locations".to_string()),
+                field: "observation.suspicious_entry_count".to_string(),
+            },
+            "Review entries.".to_string(),
+        );
+        supp_finding.relevance = FindingRelevance::Supplementary;
+        report.findings.push(supp_finding);
+
+        let rendered = render_report(&report, OutputFormat::Json, OutputMode::Compact, None)
+            .expect("compact render should work");
+
+        let json: Value = serde_json::from_str(&rendered).unwrap();
+        let findings = json["findings"].as_array().unwrap();
+        let supplementary = json["supplementary_findings"].as_array().unwrap();
+
+        assert_eq!(findings.len(), 1, "only primary finding in findings");
+        assert_eq!(
+            supplementary.len(),
+            1,
+            "supplementary finding moved to supplementary_findings"
+        );
+        assert!(supplementary[0]["title"]
+            .as_str()
+            .unwrap()
+            .contains("persistence"));
+    }
+
+    #[test]
+    fn full_mode_keeps_all_findings_with_relevance_tags() {
+        use core_engine::FindingRelevance;
+
+        let mut report = sample_report();
+        let mut supp_finding = Finding::new(
+            "Generic persistence noise".to_string(),
+            FindingSeverity::Low,
+            0.50,
+            EvidencePointer {
+                turn: Some(1),
+                tool: Some("inspect_persistence_locations".to_string()),
+                field: "observation.suspicious_entry_count".to_string(),
+            },
+            "Review entries.".to_string(),
+        );
+        supp_finding.relevance = FindingRelevance::Supplementary;
+        report.findings.push(supp_finding);
+
+        let rendered = render_report(&report, OutputFormat::Json, OutputMode::Full, None)
+            .expect("full render should work");
+
+        let json: Value = serde_json::from_str(&rendered).unwrap();
+        let findings = json["findings"].as_array().unwrap();
+
+        // Full mode keeps all findings in the main array with relevance tags.
+        assert_eq!(findings.len(), 2);
+        assert!(rendered.contains("\"relevance\""));
     }
 
     #[test]

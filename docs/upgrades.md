@@ -1,5 +1,45 @@
 # Upgrade Notes
 
+## v0.13.0
+
+### Breaking/visible changes
+
+- Findings now include a `confidence_label` field (one of `informational`, `possible`, `likely`, `confirmed`) derived from the numeric `confidence` score. Existing `confidence` field is unchanged.
+- Findings now include a `relevance` field (`primary` or `supplementary`) indicating whether the finding came from a template-selected tool. Default: `primary`.
+- In compact output mode, supplementary findings are separated into a new `supplementary_findings` array. Full mode keeps all findings in the main array with relevance tags.
+- Free-text tasks are now matched against declarative investigation templates that determine tool selection order. Previously, tool selection used a hardcoded keyword mapping.
+- Tasks referencing out-of-scope domains (cloud, Kubernetes, email/phishing, SIEM) now return an informational scope-boundary finding instead of running the investigation.
+
+### Migration examples
+
+The `confidence_label` field is additive — existing parsers that ignore unknown fields are unaffected:
+
+```json
+{
+  "title": "Unauthorized SSH key detected",
+  "severity": "high",
+  "confidence": 0.92,
+  "confidence_label": "confirmed",
+  "relevance": "primary"
+}
+```
+
+If your pipeline consumes compact JSON and filters on `findings[]`, check for a new `supplementary_findings` array containing lower-relevance findings:
+
+```json
+{
+  "findings": [ ... ],
+  "supplementary_findings": [ ... ]
+}
+```
+
+Confidence label thresholds:
+
+- `confirmed`: score ≥ 0.90
+- `likely`: score ≥ 0.72
+- `possible`: score ≥ 0.55
+- `informational`: score < 0.55
+
 ## v0.12.0
 
 ### Breaking/visible changes

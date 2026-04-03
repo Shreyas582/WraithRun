@@ -63,6 +63,8 @@ Example adapter payload fields for forwarding:
 - `summary.highest_severity`
 - `findings[].finding_id`
 - `findings[].severity`
+- `findings[].confidence_label` (discrete tier: `informational`, `possible`, `likely`, `confirmed`)
+- `findings[].relevance` (`primary` or `supplementary`)
 - `findings[].recommended_action`
 - `findings[].evidence_pointer`
 - `summary.live_fallback_decision` (when fallback is triggered)

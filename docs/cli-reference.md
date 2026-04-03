@@ -423,8 +423,12 @@ When `--baseline-bundle` is set, the runtime imports the latest `capture_coverag
 - `title`: concise finding summary.
 - `severity`: one of `info`, `low`, `medium`, `high`, `critical`.
 - `confidence`: numeric confidence score (`0.00` to `1.00`).
+- `confidence_label`: discrete confidence tier derived from the numeric score. One of `informational` (< 0.55), `possible` (≥ 0.55), `likely` (≥ 0.72), `confirmed` (≥ 0.90).
+- `relevance`: finding relevance to the resolved investigation template. One of `primary` (from template-selected tools) or `supplementary` (from non-primary tools). Default: `primary`.
 - `evidence_pointer`: pointer back to supporting evidence.
 - `recommended_action`: analyst-facing next action.
+
+In compact output mode, supplementary findings are separated into a `supplementary_findings` array. In full mode, all findings remain in the main `findings` array with their `relevance` tag.
 
 `evidence_pointer` fields:
 
@@ -447,6 +451,25 @@ Template parameter support:
 - `hash-integrity`: supports `--template-target`.
 - `syslog-summary`: supports `--template-target` and `--template-lines`.
 - `ssh-keys`, `listener-risk`, `priv-esc-review`: no template parameters.
+
+## Investigation Templates
+
+When a free-text `--task` is provided, the agent resolves a declarative investigation template by scoring keywords in the task description. The matched template determines which tools run and in what order.
+
+Built-in investigation templates:
+
+- **broad-host-triage**: default fallback. Runs all host-level tools.
+- **ssh-key-investigation**: SSH key and account audit focus.
+- **persistence-analysis**: autorun and persistence mechanism checks.
+- **network-exposure-audit**: listener and network binding analysis.
+- **privilege-escalation-check**: privilege escalation indicator checks.
+- **file-integrity-check**: hash verification and file integrity analysis.
+
+List investigation templates via `--list-task-templates`.
+
+## Task Scope Validation
+
+The agent validates that the task description falls within its supported scope (host-level cyber investigation). Tasks that reference out-of-scope domains (cloud infrastructure, container orchestration, email/phishing, SIEM) return an informational finding explaining the scope boundary instead of running the investigation.
 
 ## Built-In Profiles
 

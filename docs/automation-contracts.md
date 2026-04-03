@@ -16,6 +16,8 @@ Live-mode note:
 - Run report includes optional `run_timing` and `live_run_metrics` for latency and reliability telemetry.
 - Findings adapter summary includes optional `live_run_metrics` for downstream alerting and scoring.
 - Doctor introspection checks now include an optional `remediation` field with actionable fix guidance for each `reason_code`.
+- Run report findings now include `confidence_label` (discrete tier) and `relevance` (primary/supplementary) fields.
+- Run report includes an optional `supplementary_findings` array for lower-relevance findings (compact output mode).
 
 ## Schema Files
 
