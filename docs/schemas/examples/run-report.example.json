@@ -2,6 +2,14 @@
   "contract_version": "1.0.0",
   "task": "Investigate unauthorized SSH keys",
   "case_id": "CASE-2026-IR-1001",
+  "max_severity": "medium",
+  "model_capability": {
+    "tier": "basic",
+    "estimated_params_b": 1.2,
+    "execution_provider": "CPUExecutionProvider",
+    "smoke_latency_ms": 350,
+    "vocab_size": 32000
+  },
   "live_fallback_decision": {
     "policy": "dry-run-on-error",
     "reason": "live inference failed and runtime fell back to dry-run",

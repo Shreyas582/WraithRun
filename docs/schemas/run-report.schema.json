@@ -21,6 +21,39 @@
     "case_id": {
       "type": ["string", "null"]
     },
+    "max_severity": {
+      "type": ["string", "null"],
+      "enum": ["info", "low", "medium", "high", "critical", null]
+    },
+    "model_capability": {
+      "type": ["object", "null"],
+      "required": ["tier", "estimated_params_b", "execution_provider", "smoke_latency_ms", "vocab_size"],
+      "properties": {
+        "tier": {
+          "type": "string",
+          "enum": ["basic", "moderate", "strong"]
+        },
+        "estimated_params_b": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "execution_provider": {
+          "type": "string"
+        },
+        "smoke_latency_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "vocab_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "override": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "live_fallback_decision": {
       "type": ["object", "null"],
       "required": ["policy", "reason", "reason_code", "live_error", "fallback_mode"],
