@@ -8,7 +8,7 @@ This repository uses GitHub Actions for quality gates, release planning, and art
   - Runs formatting checks, linting, tests, and cross-platform workspace compilation.
   - Validates feature-gated Vitis build path.
   - Runs live-mode metrics benchmark regression checks and validates machine-readable telemetry thresholds.
-  - Includes an infrastructure-gated live-success e2e lane for Vitis environments (no fallback expected).
+  - Includes an infrastructure-gated live-success e2e lane using ONNX CPU inference on a self-hosted runner (no fallback expected).
   - Cross-platform checks run on Linux, macOS, and Windows.
 
 - `release-drafter.yml`
@@ -48,9 +48,9 @@ Before merge, pull requests should satisfy:
 - `cargo check --workspace`
 - `cargo check -p inference_bridge --features vitis`
 
-When live-success e2e is enabled (self-hosted Vitis runner), the CI lane also runs:
+When live-success e2e is enabled (self-hosted runner), the CI lane also runs:
 
-- `cargo test -p wraithrun --features inference_bridge/vitis --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact`
+- `cargo test -p wraithrun --features inference_bridge/onnx --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact`
 
 Live-success lane prerequisites (repository variables):
 
@@ -130,4 +130,4 @@ Optional checks (advisory, not required for every PR):
 
 - `Dependency Vulnerability Audit` (scheduled/manual security workflow)
 - `Release Drafter` (draft notes maintenance)
-- `Live success e2e (self-hosted vitis windows)` (runs only when explicitly enabled)
+- `Live success e2e (self-hosted windows)` (runs only when explicitly enabled)

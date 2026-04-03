@@ -45,6 +45,9 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 ### Fixed
 
 - `validate_live_setup_report` previously only checked file presence; now also rejects models that fail ONNX session initialization.
+- Agent investigation plan now respects `max_steps` limit; previously all planned tools ran regardless of the configured cap.
+- CI live e2e artifact upload path corrected for package-rooted test output.
+- CI live e2e lane switched from `inference_bridge/vitis` to `inference_bridge/onnx` with CPU-compatible model for reliable self-hosted execution.
 
 ## 0.9.1 - 2026-04-01
 

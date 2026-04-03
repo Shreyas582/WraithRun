@@ -140,6 +140,8 @@ Completed in v0.10.0:
 - Zero-guess live setup with automatic model compatibility validation
 - E2E live-success test lane (feature-gated)
 - Cross-platform inference split: `onnx` (CPU EP) and `vitis` (AMD RyzenAI EP)
+- Batch prefill prompt ingestion replacing token-by-token loop (~4× first-token-latency improvement)
+- Deterministic two-phase agent architecture: investigation plan execution followed by LLM synthesis
 
 In progress:
 

@@ -8,6 +8,8 @@
 - Doctor JSON output now includes an optional `remediation` field on check items, providing actionable fix guidance for every `reason_code`.
 - Doctor text output now renders "Fix:" lines after each non-PASS check.
 - Cross-platform inference features are now split: `onnx` (CPU execution provider) and `vitis` (AMD RyzenAI execution provider). Use `--features inference_bridge/onnx` for generic CPU inference or `--features inference_bridge/vitis` for RyzenAI NPU acceleration.
+- Batch prefill prompt ingestion replaces the token-by-token loop, reducing first-token latency by ~4×.
+- The agent loop has been replaced with a deterministic two-phase architecture: Phase 1 runs keyword-matched tools without LLM interaction; Phase 2 feeds gathered evidence to the LLM for structured synthesis. `--max-steps` now limits the number of tools executed in Phase 1.
 
 ### Migration examples
 
