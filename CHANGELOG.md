@@ -31,11 +31,14 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 - Runtime compatibility inspector (`inspect_runtime_compatibility`) with deterministic reason codes and `RuntimeCompatibilityReport` (#38).
 - Feature-gated live-success E2E integration test lane (#39).
 - Cross-platform inference split: `onnx` feature (CPU EP) and `vitis` feature (AMD RyzenAI EP).
+- Deterministic two-phase agent architecture: Phase 1 runs keyword-matched tools without LLM; Phase 2 feeds gathered evidence to the LLM for structured synthesis.
+- Batch prefill prompt ingestion replacing token-by-token loop (~4× first-token-latency improvement).
 
 ### Changed
 
 - Doctor JSON schema now includes an optional `remediation` field on check items.
 - `live-runtime-compatibility` check is now a hard gate in `live setup`—previously it was informational only.
+- Agent loop replaced: the previous multi-turn ReAct loop is now a single deterministic investigation pass followed by one LLM synthesis call.
 - Pre-existing integration tests updated to tolerate runtime-compatibility results across onnx/non-onnx builds.
 - Test suite now covers 149 tests (no features) and 148 tests (onnx feature) with 0 failures.
 
