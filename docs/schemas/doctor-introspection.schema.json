@@ -47,6 +47,9 @@
           "reason_code": {
             "type": "string",
             "pattern": "^[a-z0-9_]+$"
+          },
+          "remediation": {
+            "type": "string"
           }
         },
         "additionalProperties": false

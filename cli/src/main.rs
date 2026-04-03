@@ -138,6 +138,111 @@ fn discover_tokenizer_path(model_path: &Path) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
+fn cache_key_from_metastate_name(file_name: &str) -> Option<String> {
+    let suffixes = [".state", ".fconst", ".ctrlpkt", ".super"];
+    let key = file_name.strip_prefix("dd_metastate_")?;
+
+    suffixes
+        .iter()
+        .find_map(|suffix| key.strip_suffix(suffix))
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+}
+
+fn discover_vitis_metastate_key(model_dir: &Path) -> Option<String> {
+    let mut state_keys = Vec::new();
+    let mut fallback_keys = Vec::new();
+
+    for entry in fs::read_dir(model_dir).ok()?.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        let Some(cache_key) = cache_key_from_metastate_name(file_name) else {
+            continue;
+        };
+
+        if file_name.ends_with(".state") {
+            state_keys.push(cache_key);
+        } else {
+            fallback_keys.push(cache_key);
+        }
+    }
+
+    state_keys.sort();
+    state_keys.dedup();
+    if let Some(cache_key) = state_keys.into_iter().next() {
+        return Some(cache_key);
+    }
+
+    fallback_keys.sort();
+    fallback_keys.dedup();
+    fallback_keys.into_iter().next()
+}
+
+fn discover_vitis_cache_key(model_path: &Path) -> Option<String> {
+    let model_dir = model_path.parent()?;
+
+    if let Some(cache_key) = discover_vitis_metastate_key(model_dir) {
+        return Some(cache_key);
+    }
+
+    let cache_dirs = [model_dir.join(".cache"), model_dir.join("cache")];
+    let mut keys = Vec::new();
+
+    for cache_dir in cache_dirs {
+        if !cache_dir.is_dir() {
+            continue;
+        }
+
+        let Ok(entries) = fs::read_dir(cache_dir) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+
+            if let Some(cache_key) = file_name
+                .strip_suffix("_meta.json")
+                .filter(|value| !value.is_empty())
+            {
+                keys.push(cache_key.to_string());
+            }
+        }
+    }
+
+    keys.sort();
+    keys.dedup();
+    keys.into_iter().next()
+}
+
+fn discover_vitis_cache_dir(model_path: &Path) -> Option<String> {
+    let model_dir = model_path.parent()?;
+
+    if discover_vitis_metastate_key(model_dir).is_some() {
+        return Some(model_dir.display().to_string());
+    }
+
+    let candidates = [model_dir.join(".cache"), model_dir.join("cache")];
+
+    candidates
+        .into_iter()
+        .find(|path| path.is_dir())
+        .map(|path| path.display().to_string())
+}
+
 fn tokenizer_json_health(path: &Path) -> Result<(), &'static str> {
     let bytes = fs::read(path).map_err(|err| {
         if err.kind() == std::io::ErrorKind::PermissionDenied {
@@ -242,7 +347,11 @@ fn validate_live_setup_report(report: &DoctorReport) -> Result<()> {
         })
         .collect::<Vec<_>>();
 
-    if missing.is_empty() {
+    let has_runtime_failure = report.checks.iter().any(|check| {
+        check.name == "live-runtime-compatibility" && check.status == DoctorStatus::Fail
+    });
+
+    if missing.is_empty() && !has_runtime_failure {
         return Ok(());
     }
 
@@ -259,11 +368,14 @@ fn validate_live_setup_report(report: &DoctorReport) -> Result<()> {
             check.name,
             check.detail
         );
+        if let Some(remediation) = check.remediation {
+            let _ = writeln!(details, "  Fix: {remediation}");
+        }
     }
 
     bail!(
         "Live setup validation failed. Missing passing checks: {}\n{}Resolve the checks above and rerun 'wraithrun live setup --model <PATH> --tokenizer <PATH>'.",
-        missing.join(", "),
+        if missing.is_empty() { "live-runtime-compatibility".to_string() } else { missing.join(", ") },
         details
     );
 }
@@ -862,6 +974,8 @@ struct ModelPackValidationCheckView {
     detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remediation: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1077,6 +1191,51 @@ enum ConfigPathSelection {
     Required(PathBuf),
 }
 
+fn remediation_for_reason_code(reason_code: &str) -> Option<&'static str> {
+    match reason_code {
+        // Model path issues
+        "model_path_missing" => Some("Place an ONNX model file under ./models/ or pass --model <PATH>."),
+        "model_path_explicit_invalid" => Some("Update --model to point to a readable .onnx file."),
+        "model_path_discovery_failed" => Some("Place a .onnx file under ./models/ or pass --model <PATH>."),
+        "model_file_empty" => Some("The model file has zero bytes. Re-download or replace the model."),
+        "model_permission_denied" => Some("Grant read permission on the model file to the account running WraithRun."),
+        "model_format_non_onnx" | "model_format_explicit_non_onnx" => Some("Provide a model with the .onnx extension."),
+
+        // Tokenizer issues
+        "tokenizer_path_missing" => Some("Place tokenizer.json beside the model or pass --tokenizer <PATH>."),
+        "tokenizer_path_explicit_invalid" => Some("Update --tokenizer to a readable JSON file with a top-level 'model' key."),
+        "tokenizer_discovery_failed" => Some("Add tokenizer.json beside the model (or under ./models/) and retry."),
+        "tokenizer_file_empty" => Some("The tokenizer file has zero bytes. Re-download or replace the tokenizer."),
+        "tokenizer_json_invalid" => Some("The tokenizer file is not valid JSON. Replace it with a valid tokenizer.json."),
+        "tokenizer_model_key_missing" => Some("The tokenizer JSON is missing the top-level 'model' key. Use a Hugging Face tokenizer.json."),
+        "tokenizer_permission_denied" => Some("Grant read permission on the tokenizer file."),
+
+        // Runtime / session init issues
+        "runtime_session_init_failed" => Some("Verify the model file is a valid ONNX model. Re-download if corrupted."),
+        "runtime_model_invalid" => Some("The model file is not a valid ONNX model. Re-download or convert to ONNX format."),
+        "runtime_ort_dylib_missing" => Some("Set ORT_DYLIB_PATH to the onnxruntime shared library, or place it beside the model."),
+        "runtime_vitis_provider_missing" => Some("Install the RyzenAI SDK or set ORT_DYLIB_PATH to a Vitis-enabled ONNX Runtime build."),
+        "runtime_custom_ops_unavailable" => Some("Install the custom ops library from the RyzenAI SDK, or place it beside the ONNX Runtime DLL."),
+        "runtime_external_data_file_missing" => Some("Ensure the external data file referenced by the model is present beside the .onnx file."),
+        "runtime_external_initializer_unresolved" => Some("Check that all external data files and _ORT_MEM_ADDR_ directories are present beside the model."),
+        "runtime_ep_assignment_failed" => Some("The execution provider could not be assigned. Check runtime and model compatibility."),
+
+        // IO signature issues
+        "runtime_input_ids_missing" => Some("The model does not expose an input_ids or tokens input. It may not be a text-generation model."),
+        "runtime_logits_output_missing" => Some("The model does not expose logits output. It may not be a text-generation model."),
+        "runtime_input_unsupported" => Some("The model requires inputs this runtime does not support. Check model compatibility."),
+        "runtime_input_dtype_unsupported" => Some("The model uses unsupported tensor types. Convert the model to use int64/int32 sequence inputs."),
+        "runtime_cache_dtype_unsupported" => Some("The model's KV-cache tensors use an unsupported dtype. Convert to float32/float16."),
+        "runtime_cache_output_missing" => Some("The model has cache inputs but no matching cache outputs. Check model export settings."),
+        "runtime_forward_smoke_failed" => Some("The model loads but fails a minimal forward pass. Check model integrity and runtime version."),
+
+        // ONNX feature disabled
+        "onnx_feature_disabled" => Some("Rebuild with '--features inference_bridge/onnx' or '--features inference_bridge/vitis' to enable inference."),
+
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum DoctorStatus {
@@ -1102,6 +1261,8 @@ struct DoctorCheck {
     detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason_code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remediation: Option<&'static str>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -1121,11 +1282,13 @@ impl DoctorReport {
         detail: impl Into<String>,
         reason_code: Option<&'static str>,
     ) {
+        let remediation = reason_code.and_then(remediation_for_reason_code);
         self.checks.push(DoctorCheck {
             status,
             name,
             detail: detail.into(),
             reason_code,
+            remediation,
         });
     }
 
@@ -2850,6 +3013,7 @@ fn run_models_validate(
                 name: check.name,
                 detail: check.detail.clone(),
                 reason_code: check.reason_code.map(|code| code.to_string()),
+                remediation: check.remediation,
             })
             .collect();
 
@@ -4082,6 +4246,9 @@ fn render_doctor_report(report: &DoctorReport) -> String {
                 check.detail
             );
         }
+        if let Some(remediation) = check.remediation {
+            let _ = writeln!(output, "       Fix: {remediation}");
+        }
     }
 
     output.trim_end().to_string()
@@ -5208,17 +5375,19 @@ fn live_fallback_policy_token(policy: LiveFallbackPolicy) -> &'static str {
 }
 
 fn build_vitis_config(runtime: &RuntimeConfig) -> Option<VitisEpConfig> {
-    if runtime.vitis_config.is_none()
-        && runtime.vitis_cache_dir.is_none()
-        && runtime.vitis_cache_key.is_none()
-    {
+    let discovered_cache_dir = discover_vitis_cache_dir(&runtime.model);
+    let discovered_cache_key = discover_vitis_cache_key(&runtime.model);
+    let cache_dir = runtime.vitis_cache_dir.clone().or(discovered_cache_dir);
+    let cache_key = runtime.vitis_cache_key.clone().or(discovered_cache_key);
+
+    if runtime.vitis_config.is_none() && cache_dir.is_none() && cache_key.is_none() {
         return None;
     }
 
     Some(VitisEpConfig {
         config_file: runtime.vitis_config.clone(),
-        cache_dir: runtime.vitis_cache_dir.clone(),
-        cache_key: runtime.vitis_cache_key.clone(),
+        cache_dir,
+        cache_key,
     })
 }
 
