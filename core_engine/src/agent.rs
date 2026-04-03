@@ -7,9 +7,8 @@ use cyber_tools::ToolRegistry;
 use inference_bridge::InferenceEngine;
 
 use crate::{
-    deduplicate_findings, derive_findings, extract_tag, max_severity,
-    quality_checked_final_answer, sort_findings, AgentTurn, CoverageBaseline, RunReport,
-    RunTimingMetrics, ToolCall,
+    deduplicate_findings, derive_findings, extract_tag, max_severity, quality_checked_final_answer,
+    sort_findings, AgentTurn, CoverageBaseline, RunReport, RunTimingMetrics, ToolCall,
 };
 
 pub struct Agent<B: InferenceEngine> {

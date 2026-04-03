@@ -621,10 +621,8 @@ pub fn deduplicate_findings(findings: Vec<Finding>) -> Vec<Finding> {
                 .iter_mut()
                 .find(|f| f.evidence_pointer.field == *field)
             {
-                let new_authority =
-                    tool_authority(finding.evidence_pointer.tool.as_deref());
-                let existing_authority =
-                    tool_authority(existing.evidence_pointer.tool.as_deref());
+                let new_authority = tool_authority(finding.evidence_pointer.tool.as_deref());
+                let existing_authority = tool_authority(existing.evidence_pointer.tool.as_deref());
                 if new_authority > existing_authority
                     || (new_authority == existing_authority
                         && finding.confidence > existing.confidence)
@@ -644,9 +642,11 @@ pub fn deduplicate_findings(findings: Vec<Finding>) -> Vec<Finding> {
 /// Sort findings by severity descending, then confidence descending as tiebreaker.
 pub fn sort_findings(findings: &mut [Finding]) {
     findings.sort_by(|a, b| {
-        b.severity
-            .cmp(&a.severity)
-            .then(b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal))
+        b.severity.cmp(&a.severity).then(
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal),
+        )
     });
 }
 
@@ -758,8 +758,8 @@ mod tests {
 
     use super::{
         deduplicate_findings, derive_findings, extract_tag, is_low_quality, max_severity,
-        parse_tool_call, quality_checked_final_answer, sort_findings, AgentTurn,
-        EvidencePointer, Finding, FindingSeverity, ToolCall,
+        parse_tool_call, quality_checked_final_answer, sort_findings, AgentTurn, EvidencePointer,
+        Finding, FindingSeverity, ToolCall,
     };
 
     #[test]
@@ -993,13 +993,7 @@ mod tests {
                 "scan_network",
                 "observation.error",
             ),
-            make_finding(
-                "Fallback",
-                FindingSeverity::Info,
-                0.50,
-                "",
-                "final_answer",
-            ),
+            make_finding("Fallback", FindingSeverity::Info, 0.50, "", "final_answer"),
         ];
 
         let deduped = deduplicate_findings(findings);

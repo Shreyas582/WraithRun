@@ -1461,7 +1461,12 @@ async fn main() -> Result<()> {
         write_evidence_bundle_archive(archive_path, &report)?;
     }
 
-    let rendered = render_report(&report, runtime.format, runtime.output_mode, runtime.automation_adapter)?;
+    let rendered = render_report(
+        &report,
+        runtime.format,
+        runtime.output_mode,
+        runtime.automation_adapter,
+    )?;
     if let Some(path) = &runtime.output_file {
         write_report_file(path, &rendered)?;
     }
@@ -5598,8 +5603,8 @@ mod tests {
     #[test]
     fn renders_json_output() {
         let report = sample_report();
-        let rendered =
-            render_report(&report, OutputFormat::Json, OutputMode::Full, None).expect("json render should work");
+        let rendered = render_report(&report, OutputFormat::Json, OutputMode::Full, None)
+            .expect("json render should work");
         assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"task\""));
         assert!(rendered.contains("\"scan_network\""));
@@ -5609,9 +5614,8 @@ mod tests {
     #[test]
     fn renders_json_compact_omits_turns() {
         let report = sample_report();
-        let rendered =
-            render_report(&report, OutputFormat::Json, OutputMode::Compact, None)
-                .expect("compact render should work");
+        let rendered = render_report(&report, OutputFormat::Json, OutputMode::Compact, None)
+            .expect("compact render should work");
         assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"task\""));
         assert!(rendered.contains("\"findings\""));
@@ -5640,8 +5644,8 @@ mod tests {
             }],
         });
 
-        let rendered =
-            render_report(&report, OutputFormat::Json, OutputMode::Full, None).expect("json render should work");
+        let rendered = render_report(&report, OutputFormat::Json, OutputMode::Full, None)
+            .expect("json render should work");
 
         assert!(rendered.contains("\"run_timing\""));
         assert!(rendered.contains("\"live_run_metrics\""));
