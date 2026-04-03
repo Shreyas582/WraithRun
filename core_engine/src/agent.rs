@@ -1,14 +1,15 @@
 use anyhow::Result;
 use serde_json::{json, Map, Value};
 use std::time::Instant;
-use tracing::info;
+use tracing::{debug, info};
 
 use cyber_tools::ToolRegistry;
 use inference_bridge::InferenceEngine;
 
 use crate::{
-    derive_findings, extract_tag, AgentTurn, CoverageBaseline, RunReport, RunTimingMetrics,
-    ToolCall,
+    deduplicate_findings, derive_findings, extract_tag, max_severity,
+    quality_checked_final_answer, sort_findings, AgentTurn, CoverageBaseline, RunReport,
+    RunTimingMetrics, ToolCall,
 };
 
 pub struct Agent<B: InferenceEngine> {
@@ -99,6 +100,12 @@ impl<B: InferenceEngine> Agent<B> {
         let mut turns = Vec::new();
 
         for tool_name in tool_plan.iter().take(self.max_steps) {
+            // #74: skip tools with known-failing preconditions.
+            if !self.check_tool_precondition(tool_name) {
+                debug!(tool = %tool_name, "skipping tool: precondition not met");
+                continue;
+            }
+
             let mut call = ToolCall {
                 tool: tool_name.to_string(),
                 args: Value::Object(Map::new()),
@@ -127,14 +134,21 @@ impl<B: InferenceEngine> Agent<B> {
         let first_token_latency_ms = Some(elapsed_ms_since(run_started_at));
         info!(output = %output, "agent synthesis output");
 
-        let final_answer = extract_tag(&output, "final").unwrap_or(output);
+        let raw_final_answer = extract_tag(&output, "final").unwrap_or(output);
 
         // Structured findings from tool observations (rule-based extraction).
-        let findings = derive_findings(&turns, &final_answer);
+        let raw_findings = derive_findings(&turns, &raw_final_answer);
+        let mut findings = deduplicate_findings(raw_findings);
+        sort_findings(&mut findings);
+
+        // Quality-check LLM output; replace with deterministic summary if low quality.
+        let final_answer = quality_checked_final_answer(&raw_final_answer, &findings);
+        let report_max_severity = max_severity(&findings);
 
         Ok(RunReport {
             task: task.to_string(),
             case_id: None,
+            max_severity: report_max_severity,
             live_fallback_decision: None,
             run_timing: Some(build_run_timing_metrics(
                 run_started_at,
@@ -145,6 +159,26 @@ impl<B: InferenceEngine> Agent<B> {
             final_answer,
             findings,
         })
+    }
+
+    /// Check whether a tool's preconditions are met before executing it.
+    /// Returns false if the tool should be skipped.
+    fn check_tool_precondition(&self, tool_name: &str) -> bool {
+        match tool_name {
+            "read_syslog" => {
+                // Default path is ./agent.log — skip if it doesn't exist and
+                // the sandbox policy would deny access anyway.
+                let default_path = std::path::Path::new("./agent.log");
+                if !default_path.exists() {
+                    return false;
+                }
+                self.tools
+                    .policy()
+                    .ensure_path_allowed(default_path)
+                    .is_ok()
+            }
+            _ => true,
+        }
     }
 }
 

@@ -571,6 +571,14 @@ enum TaskTemplate {
     SyslogSummary,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+enum OutputMode {
+    #[default]
+    Compact,
+    Full,
+}
+
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
@@ -677,6 +685,9 @@ struct Cli {
     format: Option<OutputFormat>,
 
     #[arg(long, value_enum)]
+    output_mode: Option<OutputMode>,
+
+    #[arg(long, value_enum)]
     automation_adapter: Option<AutomationAdapter>,
 
     #[arg(long, value_enum)]
@@ -738,6 +749,7 @@ struct SettingsFragment {
     evidence_bundle_dir: Option<PathBuf>,
     evidence_bundle_archive: Option<PathBuf>,
     baseline_bundle: Option<PathBuf>,
+    output_mode: Option<OutputMode>,
     log: Option<LogMode>,
     vitis_config: Option<String>,
     vitis_cache_dir: Option<String>,
@@ -763,6 +775,7 @@ struct RuntimeConfig {
     live: bool,
     live_fallback_policy: LiveFallbackPolicy,
     format: OutputFormat,
+    output_mode: OutputMode,
     automation_adapter: Option<AutomationAdapter>,
     exit_policy: ExitPolicy,
     exit_threshold: Option<ExitSeverityThreshold>,
@@ -814,6 +827,7 @@ struct RuntimeConfigSources {
     max_new_tokens: String,
     temperature: String,
     format: String,
+    output_mode: String,
     automation_adapter: String,
     exit_policy: String,
     exit_threshold: String,
@@ -1077,6 +1091,7 @@ impl RuntimeConfig {
             live: false,
             live_fallback_policy: LiveFallbackPolicy::None,
             format: OutputFormat::Json,
+            output_mode: OutputMode::Compact,
             automation_adapter: None,
             exit_policy: ExitPolicy::None,
             exit_threshold: None,
@@ -1168,6 +1183,7 @@ impl RuntimeConfigSources {
             max_new_tokens: "default".to_string(),
             temperature: "default".to_string(),
             format: "default".to_string(),
+            output_mode: "default".to_string(),
             automation_adapter: "default".to_string(),
             exit_policy: "default".to_string(),
             exit_threshold: "default".to_string(),
@@ -1445,7 +1461,7 @@ async fn main() -> Result<()> {
         write_evidence_bundle_archive(archive_path, &report)?;
     }
 
-    let rendered = render_report(&report, runtime.format, runtime.automation_adapter)?;
+    let rendered = render_report(&report, runtime.format, runtime.output_mode, runtime.automation_adapter)?;
     if let Some(path) = &runtime.output_file {
         write_report_file(path, &rendered)?;
     }
@@ -2330,6 +2346,7 @@ fn env_settings_fragment() -> Result<SettingsFragment> {
         live: read_env_bool("WRAITHRUN_LIVE")?,
         live_fallback_policy: read_env_live_fallback_policy("WRAITHRUN_LIVE_FALLBACK_POLICY")?,
         format: read_env_output_format("WRAITHRUN_FORMAT")?,
+        output_mode: read_env_output_mode("WRAITHRUN_OUTPUT_MODE")?,
         automation_adapter: read_env_automation_adapter("WRAITHRUN_AUTOMATION_ADAPTER")?,
         exit_policy: read_env_exit_policy("WRAITHRUN_EXIT_POLICY")?,
         exit_threshold: read_env_exit_threshold("WRAITHRUN_EXIT_THRESHOLD")?,
@@ -2372,6 +2389,9 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     }
     if let Some(format) = cli.format {
         runtime.format = format;
+    }
+    if let Some(output_mode) = cli.output_mode {
+        runtime.output_mode = output_mode;
     }
     if let Some(automation_adapter) = cli.automation_adapter {
         runtime.automation_adapter = Some(automation_adapter);
@@ -2451,6 +2471,10 @@ fn apply_fragment_with_source(
     if let Some(format) = fragment.format {
         runtime.format = format;
         sources.format = source.to_string();
+    }
+    if let Some(output_mode) = fragment.output_mode {
+        runtime.output_mode = output_mode;
+        sources.output_mode = source.to_string();
     }
     if let Some(automation_adapter) = fragment.automation_adapter {
         runtime.automation_adapter = Some(automation_adapter);
@@ -2542,6 +2566,10 @@ fn apply_cli_overrides_with_source(
     if let Some(format) = cli.format {
         runtime.format = format;
         sources.format = "cli --format".to_string();
+    }
+    if let Some(output_mode) = cli.output_mode {
+        runtime.output_mode = output_mode;
+        sources.output_mode = "cli --output-mode".to_string();
     }
     if let Some(automation_adapter) = cli.automation_adapter {
         runtime.automation_adapter = Some(automation_adapter);
@@ -2739,6 +2767,22 @@ fn parse_output_format(raw: &str, source: &str) -> Result<OutputFormat> {
         "summary" => Ok(OutputFormat::Summary),
         "markdown" => Ok(OutputFormat::Markdown),
         _ => bail!("{source} must be one of: json, summary, markdown (got '{raw}')"),
+    }
+}
+
+fn read_env_output_mode(name: &str) -> Result<Option<OutputMode>> {
+    let Some(raw) = read_env_string(name)? else {
+        return Ok(None);
+    };
+
+    parse_output_mode(&raw, name).map(Some)
+}
+
+fn parse_output_mode(raw: &str, source: &str) -> Result<OutputMode> {
+    match raw.to_ascii_lowercase().as_str() {
+        "compact" => Ok(OutputMode::Compact),
+        "full" => Ok(OutputMode::Full),
+        _ => bail!("{source} must be one of: compact, full (got '{raw}')"),
     }
 }
 
@@ -4270,6 +4314,7 @@ fn render_doctor_report_json(report: &DoctorReport) -> Result<String> {
 fn render_report(
     report: &RunReport,
     format: OutputFormat,
+    output_mode: OutputMode,
     automation_adapter: Option<AutomationAdapter>,
 ) -> Result<String> {
     if let Some(adapter) = automation_adapter {
@@ -4277,10 +4322,32 @@ fn render_report(
     }
 
     match format {
-        OutputFormat::Json => render_json_with_contract(report),
+        OutputFormat::Json => {
+            if output_mode == OutputMode::Compact {
+                render_json_compact(report)
+            } else {
+                render_json_with_contract(report)
+            }
+        }
         OutputFormat::Summary => Ok(render_summary(report)),
         OutputFormat::Markdown => Ok(render_markdown(report)),
     }
+}
+
+fn render_json_compact(report: &RunReport) -> Result<String> {
+    let mut value = serde_json::to_value(report).map_err(|err| anyhow!(err))?;
+    let Some(object) = value.as_object_mut() else {
+        bail!("JSON compact payload must serialize to an object");
+    };
+
+    object.remove("turns");
+
+    object.insert(
+        "contract_version".to_string(),
+        Value::String(JSON_CONTRACT_VERSION.to_string()),
+    );
+
+    serde_json::to_string_pretty(&value).map_err(|err| anyhow!(err))
 }
 
 fn render_automation_adapter(report: &RunReport, adapter: AutomationAdapter) -> Result<String> {
@@ -5438,8 +5505,8 @@ mod tests {
         run_models_list, run_models_validate, validate_live_runtime_preflight,
         verify_evidence_bundle, write_evidence_bundle, write_evidence_bundle_archive,
         AutomationAdapter, Cli, DoctorReport, DoctorStatus, ExitPolicy, ExitSeverityThreshold,
-        FileConfig, IntrospectionFormat, LiveFallbackPolicy, OutputFormat, RuntimeConfig,
-        SettingsFragment, TaskTemplate, ToolRegistry,
+        FileConfig, IntrospectionFormat, LiveFallbackPolicy, OutputFormat, OutputMode,
+        RuntimeConfig, SettingsFragment, TaskTemplate, ToolRegistry,
     };
 
     fn base_cli() -> Cli {
@@ -5478,6 +5545,7 @@ mod tests {
             dry_run: false,
             live_fallback_policy: None,
             format: None,
+            output_mode: None,
             automation_adapter: None,
             exit_policy: None,
             exit_threshold: None,
@@ -5499,6 +5567,7 @@ mod tests {
         RunReport {
             task: "Check suspicious listener ports and summarize risk".to_string(),
             case_id: Some("CASE-2026-0001".to_string()),
+            max_severity: Some(FindingSeverity::Medium),
             live_fallback_decision: None,
             run_timing: None,
             live_run_metrics: None,
@@ -5530,11 +5599,23 @@ mod tests {
     fn renders_json_output() {
         let report = sample_report();
         let rendered =
-            render_report(&report, OutputFormat::Json, None).expect("json render should work");
+            render_report(&report, OutputFormat::Json, OutputMode::Full, None).expect("json render should work");
         assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
         assert!(rendered.contains("\"task\""));
         assert!(rendered.contains("\"scan_network\""));
         assert!(rendered.contains("\"findings\""));
+    }
+
+    #[test]
+    fn renders_json_compact_omits_turns() {
+        let report = sample_report();
+        let rendered =
+            render_report(&report, OutputFormat::Json, OutputMode::Compact, None)
+                .expect("compact render should work");
+        assert!(rendered.contains("\"contract_version\": \"1.0.0\""));
+        assert!(rendered.contains("\"task\""));
+        assert!(rendered.contains("\"findings\""));
+        assert!(!rendered.contains("\"turns\""));
     }
 
     #[test]
@@ -5560,7 +5641,7 @@ mod tests {
         });
 
         let rendered =
-            render_report(&report, OutputFormat::Json, None).expect("json render should work");
+            render_report(&report, OutputFormat::Json, OutputMode::Full, None).expect("json render should work");
 
         assert!(rendered.contains("\"run_timing\""));
         assert!(rendered.contains("\"live_run_metrics\""));
@@ -5571,7 +5652,7 @@ mod tests {
     #[test]
     fn renders_summary_output() {
         let report = sample_report();
-        let rendered = render_report(&report, OutputFormat::Summary, None)
+        let rendered = render_report(&report, OutputFormat::Summary, OutputMode::Full, None)
             .expect("summary render should work");
         assert!(rendered.contains("Task:"));
         assert!(rendered.contains("Case ID: CASE-2026-0001"));
@@ -5583,7 +5664,7 @@ mod tests {
     #[test]
     fn renders_markdown_output() {
         let report = sample_report();
-        let rendered = render_report(&report, OutputFormat::Markdown, None)
+        let rendered = render_report(&report, OutputFormat::Markdown, OutputMode::Full, None)
             .expect("markdown render should work");
         assert!(rendered.contains("# WraithRun Report"));
         assert!(rendered.contains("- Case ID: CASE-2026-0001"));
@@ -5598,6 +5679,7 @@ mod tests {
         let rendered = render_report(
             &report,
             OutputFormat::Json,
+            OutputMode::Full,
             Some(AutomationAdapter::FindingsV1),
         )
         .expect("adapter render should work");
@@ -5629,6 +5711,7 @@ mod tests {
         let rendered = render_report(
             &report,
             OutputFormat::Json,
+            OutputMode::Full,
             Some(AutomationAdapter::FindingsV1),
         )
         .expect("adapter render should work");

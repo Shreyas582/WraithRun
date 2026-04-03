@@ -1,6 +1,8 @@
 pub mod agent;
 
-use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +43,7 @@ pub struct AgentTurn {
     pub observation: Option<Value>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum FindingSeverity {
     Info,
@@ -51,6 +53,18 @@ pub enum FindingSeverity {
     Critical,
 }
 
+impl FindingSeverity {
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Critical => "critical",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvidencePointer {
     pub turn: Option<usize>,
@@ -58,10 +72,16 @@ pub struct EvidencePointer {
     pub field: String,
 }
 
+fn serialize_confidence<S: Serializer>(value: &f32, serializer: S) -> Result<S::Ok, S::Error> {
+    let rounded = (*value * 100.0).round() / 100.0;
+    serializer.serialize_f32(rounded)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Finding {
     pub title: String,
     pub severity: FindingSeverity,
+    #[serde(serialize_with = "serialize_confidence")]
     pub confidence: f32,
     pub evidence_pointer: EvidencePointer,
     pub recommended_action: String,
@@ -109,6 +129,8 @@ pub struct RunReport {
     pub task: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub case_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_severity: Option<FindingSeverity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_fallback_decision: Option<LiveFallbackDecision>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -563,6 +585,134 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
     findings
 }
 
+/// Tool authority ranking — higher means this tool's findings should be preferred
+/// when two tools produce findings for the same observation field.
+fn tool_authority(tool: Option<&str>) -> u8 {
+    match tool {
+        Some("correlate_process_network") => 3,
+        Some("audit_account_changes") => 3,
+        Some("inspect_persistence_locations") => 2,
+        Some("scan_network") => 1,
+        Some("check_privilege_escalation_vectors") => 1,
+        _ => 0,
+    }
+}
+
+/// Deduplicate findings that share the same observation field key.
+/// When duplicates exist, keep the finding from the more authoritative tool,
+/// falling back to highest confidence as tiebreaker.
+pub fn deduplicate_findings(findings: Vec<Finding>) -> Vec<Finding> {
+    let mut seen_fields: HashSet<String> = HashSet::new();
+    let mut deduped: Vec<Finding> = Vec::new();
+
+    // Group by observation field; these are the dedup keys.
+    for finding in findings {
+        let field = &finding.evidence_pointer.field;
+
+        // Fields like "final_answer" or "observation.error" are never deduped.
+        if field == "final_answer" || field == "observation.error" {
+            deduped.push(finding);
+            continue;
+        }
+
+        if seen_fields.contains(field) {
+            // Replace existing if the new one is from a more authoritative tool.
+            if let Some(existing) = deduped
+                .iter_mut()
+                .find(|f| f.evidence_pointer.field == *field)
+            {
+                let new_authority =
+                    tool_authority(finding.evidence_pointer.tool.as_deref());
+                let existing_authority =
+                    tool_authority(existing.evidence_pointer.tool.as_deref());
+                if new_authority > existing_authority
+                    || (new_authority == existing_authority
+                        && finding.confidence > existing.confidence)
+                {
+                    *existing = finding;
+                }
+            }
+        } else {
+            seen_fields.insert(field.clone());
+            deduped.push(finding);
+        }
+    }
+
+    deduped
+}
+
+/// Sort findings by severity descending, then confidence descending as tiebreaker.
+pub fn sort_findings(findings: &mut [Finding]) {
+    findings.sort_by(|a, b| {
+        b.severity
+            .cmp(&a.severity)
+            .then(b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal))
+    });
+}
+
+/// Compute the maximum severity across all findings.
+pub fn max_severity(findings: &[Finding]) -> Option<FindingSeverity> {
+    findings.iter().map(|f| f.severity).max()
+}
+
+/// Check whether LLM output is low quality and return a deterministic summary if so.
+pub fn quality_checked_final_answer(raw_llm_output: &str, findings: &[Finding]) -> String {
+    if is_low_quality(raw_llm_output) {
+        deterministic_summary(findings)
+    } else {
+        raw_llm_output.to_string()
+    }
+}
+
+fn is_low_quality(text: &str) -> bool {
+    let trimmed = text.trim();
+
+    // Length check.
+    if trimmed.len() < 20 || trimmed.len() > 5000 {
+        return true;
+    }
+
+    // Repetition detection: if any sentence appears 3+ times, flag.
+    let sentences: Vec<&str> = trimmed
+        .split(['.', '!', '?', '\n'])
+        .map(|s| s.trim())
+        .filter(|s| s.len() > 10)
+        .collect();
+    let mut seen = std::collections::HashMap::new();
+    for sentence in &sentences {
+        let lower = sentence.to_lowercase();
+        let count = seen.entry(lower).or_insert(0u32);
+        *count += 1;
+        if *count >= 3 {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn deterministic_summary(findings: &[Finding]) -> String {
+    if findings.is_empty() {
+        return "SUMMARY: No findings derived from collected evidence.".to_string();
+    }
+
+    let max_sev = findings
+        .iter()
+        .map(|f| f.severity)
+        .max()
+        .unwrap_or(FindingSeverity::Info);
+
+    let top = &findings[0]; // findings are already severity-sorted
+
+    format!(
+        "SUMMARY: {} finding(s) ({} max severity). Top finding: {}. Recommended: {}",
+        findings.len(),
+        max_sev.token(),
+        top.title,
+        top.recommended_action
+    )
+}
+
 fn confidence_from_count(base: f32, count: u64, slope: f32, ceiling: f32) -> f32 {
     let raw = (base + (count as f32 * slope)).min(ceiling);
     (raw * 100.0).round() / 100.0
@@ -607,7 +757,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        derive_findings, extract_tag, parse_tool_call, AgentTurn, FindingSeverity, ToolCall,
+        deduplicate_findings, derive_findings, extract_tag, is_low_quality, max_severity,
+        parse_tool_call, quality_checked_final_answer, sort_findings, AgentTurn,
+        EvidencePointer, Finding, FindingSeverity, ToolCall,
     };
 
     #[test]
@@ -778,5 +930,177 @@ mod tests {
                 && finding.severity == FindingSeverity::Info
                 && finding.evidence_pointer.field == "observation.baseline_version"
         }));
+    }
+
+    fn make_finding(
+        title: &str,
+        severity: FindingSeverity,
+        confidence: f32,
+        tool: &str,
+        field: &str,
+    ) -> Finding {
+        Finding {
+            title: title.to_string(),
+            severity,
+            confidence,
+            evidence_pointer: EvidencePointer {
+                turn: Some(1),
+                tool: Some(tool.to_string()),
+                field: field.to_string(),
+            },
+            recommended_action: "Investigate further.".to_string(),
+        }
+    }
+
+    #[test]
+    fn deduplicates_findings_by_field_keeps_higher_authority() {
+        let findings = vec![
+            make_finding(
+                "Listeners via scan_network",
+                FindingSeverity::Medium,
+                0.70,
+                "scan_network",
+                "observation.listener_count",
+            ),
+            make_finding(
+                "Listeners via correlate",
+                FindingSeverity::Medium,
+                0.65,
+                "correlate_process_network",
+                "observation.listener_count",
+            ),
+        ];
+
+        let deduped = deduplicate_findings(findings);
+        assert_eq!(deduped.len(), 1);
+        assert!(deduped[0].title.contains("correlate"));
+    }
+
+    #[test]
+    fn dedup_preserves_error_and_final_answer_fields() {
+        let findings = vec![
+            make_finding(
+                "Error 1",
+                FindingSeverity::High,
+                0.90,
+                "scan_network",
+                "observation.error",
+            ),
+            make_finding(
+                "Error 2",
+                FindingSeverity::High,
+                0.90,
+                "scan_network",
+                "observation.error",
+            ),
+            make_finding(
+                "Fallback",
+                FindingSeverity::Info,
+                0.50,
+                "",
+                "final_answer",
+            ),
+        ];
+
+        let deduped = deduplicate_findings(findings);
+        assert_eq!(deduped.len(), 3);
+    }
+
+    #[test]
+    fn sort_findings_by_severity_then_confidence() {
+        let mut findings = vec![
+            make_finding("A", FindingSeverity::Low, 0.90, "scan_network", "a"),
+            make_finding("B", FindingSeverity::Critical, 0.50, "scan_network", "b"),
+            make_finding("C", FindingSeverity::High, 0.80, "scan_network", "c"),
+            make_finding("D", FindingSeverity::High, 0.95, "scan_network", "d"),
+        ];
+
+        sort_findings(&mut findings);
+
+        assert_eq!(findings[0].severity, FindingSeverity::Critical);
+        assert_eq!(findings[1].severity, FindingSeverity::High);
+        assert!(findings[1].confidence > findings[2].confidence);
+        assert_eq!(findings[3].severity, FindingSeverity::Low);
+    }
+
+    #[test]
+    fn max_severity_returns_highest() {
+        let findings = vec![
+            make_finding("A", FindingSeverity::Info, 0.50, "scan_network", "a"),
+            make_finding("B", FindingSeverity::High, 0.50, "scan_network", "b"),
+            make_finding("C", FindingSeverity::Medium, 0.50, "scan_network", "c"),
+        ];
+
+        assert_eq!(max_severity(&findings), Some(FindingSeverity::High));
+    }
+
+    #[test]
+    fn max_severity_returns_none_for_empty() {
+        let findings: Vec<Finding> = vec![];
+        assert_eq!(max_severity(&findings), None);
+    }
+
+    #[test]
+    fn low_quality_detects_short_text() {
+        assert!(is_low_quality("too short"));
+    }
+
+    #[test]
+    fn low_quality_detects_repetitive_text() {
+        let repeated = "The system is compromised and needs attention. ".repeat(5);
+        assert!(is_low_quality(&repeated));
+    }
+
+    #[test]
+    fn low_quality_accepts_normal_text() {
+        let normal = "The investigation found 3 suspicious network listeners on non-standard ports. One process (PID 4321) is associated with an unknown binary.";
+        assert!(!is_low_quality(normal));
+    }
+
+    #[test]
+    fn quality_check_replaces_bad_output_with_deterministic_summary() {
+        let findings = vec![make_finding(
+            "Active listeners",
+            FindingSeverity::Medium,
+            0.70,
+            "scan_network",
+            "observation.listener_count",
+        )];
+
+        let result = quality_checked_final_answer("bad", &findings);
+        assert!(result.starts_with("SUMMARY:"));
+        assert!(result.contains("1 finding(s)"));
+        assert!(result.contains("medium"));
+    }
+
+    #[test]
+    fn quality_check_preserves_good_output() {
+        let findings = vec![make_finding(
+            "Active listeners",
+            FindingSeverity::Medium,
+            0.70,
+            "scan_network",
+            "observation.listener_count",
+        )];
+
+        let good = "The investigation revealed 3 suspicious listener ports that warrant further analysis and correlation with expected services.";
+        let result = quality_checked_final_answer(good, &findings);
+        assert_eq!(result, good);
+    }
+
+    #[test]
+    fn confidence_serializes_to_two_decimals() {
+        let finding = make_finding("A", FindingSeverity::Info, 0.6789, "scan_network", "a");
+        let json = serde_json::to_string(&finding).expect("serialize");
+        assert!(json.contains("0.68"));
+        assert!(!json.contains("0.6789"));
+    }
+
+    #[test]
+    fn finding_severity_ordering() {
+        assert!(FindingSeverity::Critical > FindingSeverity::High);
+        assert!(FindingSeverity::High > FindingSeverity::Medium);
+        assert!(FindingSeverity::Medium > FindingSeverity::Low);
+        assert!(FindingSeverity::Low > FindingSeverity::Info);
     }
 }
