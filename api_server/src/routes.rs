@@ -15,7 +15,8 @@ use core_engine::agent::Agent;
 use cyber_tools::ToolRegistry;
 use inference_bridge::{ModelConfig, OnnxVitisEngine};
 
-use crate::state::{chrono_now, AppState, RunEntry, RunStatus};
+use crate::state::{chrono_now, AppState, CaseEntry, CaseStatus, RunEntry, RunStatus};
+use crate::audit::{audit_event, details, AuditEventKind};
 
 /// Build the full application router with all v1 endpoints.
 pub fn build_router(state: AppState) -> Router {
@@ -28,7 +29,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/runs", get(list_runs))
         .route("/runs/{id}", get(get_run))
         .route("/runs/{id}/cancel", post(cancel_run))
+        .route("/cases", post(create_case))
+        .route("/cases", get(list_cases))
+        .route("/cases/{id}", get(get_case))
+        .route("/cases/{id}", axum::routing::patch(update_case))
+        .route("/cases/{id}/runs", get(list_case_runs))
         .route("/runtime/status", get(runtime_status))
+        .route("/audit/events", get(list_audit_events))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             bearer_auth_middleware,
@@ -77,8 +84,26 @@ async fn bearer_auth_middleware(
         Some(header) if header.starts_with("Bearer ") => {
             let token = &header[7..];
             if token == expected {
+                state
+                    .audit
+                    .emit(audit_event(
+                        AuditEventKind::AuthSuccess,
+                        "api-token:default",
+                        "auth",
+                        details(&[]),
+                    ))
+                    .await;
                 Ok(next.run(req).await)
             } else {
+                state
+                    .audit
+                    .emit(audit_event(
+                        AuditEventKind::AuthFailure,
+                        "unknown",
+                        "auth",
+                        details(&[("reason", "invalid bearer token")]),
+                    ))
+                    .await;
                 tracing::warn!("API auth failure: invalid bearer token");
                 Err((
                     StatusCode::UNAUTHORIZED,
@@ -89,6 +114,15 @@ async fn bearer_auth_middleware(
             }
         }
         _ => {
+            state
+                .audit
+                .emit(audit_event(
+                    AuditEventKind::AuthFailure,
+                    "unknown",
+                    "auth",
+                    details(&[("reason", "missing or malformed Authorization header")]),
+                ))
+                .await;
             tracing::warn!("API auth failure: missing or malformed Authorization header");
             Err((
                 StatusCode::UNAUTHORIZED,
@@ -147,6 +181,8 @@ struct CreateRunRequest {
     task: String,
     #[serde(default = "default_max_steps")]
     max_steps: usize,
+    #[serde(default)]
+    case_id: Option<Uuid>,
 }
 
 fn default_max_steps() -> usize {
@@ -190,6 +226,7 @@ async fn create_run(
     }
 
     let run_id = Uuid::new_v4();
+    let entry_task = task.clone();
     let entry = RunEntry {
         id: run_id,
         task: task.clone(),
@@ -198,6 +235,7 @@ async fn create_run(
         error: None,
         created_at: chrono_now(),
         completed_at: None,
+        case_id: body.case_id,
     };
 
     // Persist to database if available.
@@ -216,6 +254,16 @@ async fn create_run(
     tokio::spawn(async move {
         execute_run(state_clone, run_id, task, max_steps).await;
     });
+
+    state
+        .audit
+        .emit(audit_event(
+            AuditEventKind::RunCreated,
+            "api-token:default",
+            &format!("run/{run_id}"),
+            details(&[("task", &entry_task)]),
+        ))
+        .await;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -258,17 +306,42 @@ async fn execute_run(state: AppState, run_id: Uuid, task: String, max_steps: usi
             Ok(report) => {
                 entry.status = RunStatus::Completed;
                 entry.report = Some(report);
+                drop(runs);
+                state
+                    .audit
+                    .emit(audit_event(
+                        AuditEventKind::RunCompleted,
+                        "system",
+                        &format!("run/{run_id}"),
+                        details(&[("task", &task)]),
+                    ))
+                    .await;
+                let mut runs = state.runs.write().await;
+                let entry = runs.get_mut(&run_id).unwrap();
+                entry.completed_at = Some(chrono_now());
+                if let Some(db) = &state.db {
+                    let _ = db.update_run(entry).await;
+                }
             }
             Err(e) => {
+                let err_msg = e.to_string();
                 entry.status = RunStatus::Failed;
-                entry.error = Some(e.to_string());
+                entry.error = Some(err_msg.clone());
+                entry.completed_at = Some(chrono_now());
+                if let Some(db) = &state.db {
+                    let _ = db.update_run(entry).await;
+                }
+                drop(runs);
+                state
+                    .audit
+                    .emit(audit_event(
+                        AuditEventKind::RunFailed,
+                        "system",
+                        &format!("run/{run_id}"),
+                        details(&[("task", &task), ("error", &err_msg)]),
+                    ))
+                    .await;
             }
-        }
-        entry.completed_at = Some(chrono_now());
-
-        // Persist to database if available.
-        if let Some(db) = &state.db {
-            let _ = db.update_run(entry).await;
         }
     }
 }
@@ -337,11 +410,26 @@ async fn cancel_run(
     let mut runs = state.runs.write().await;
     match runs.get_mut(&id) {
         Some(entry) => {
-            if entry.status == RunStatus::Queued || entry.status == RunStatus::Running {
+            let was_active =
+                entry.status == RunStatus::Queued || entry.status == RunStatus::Running;
+            if was_active {
                 entry.status = RunStatus::Cancelled;
                 entry.completed_at = Some(chrono_now());
             }
-            Ok(Json(entry.clone()))
+            let result = entry.clone();
+            drop(runs);
+            if was_active {
+                state
+                    .audit
+                    .emit(audit_event(
+                        AuditEventKind::RunCancelled,
+                        "api-token:default",
+                        &format!("run/{id}"),
+                        details(&[]),
+                    ))
+                    .await;
+            }
+            Ok(Json(result))
         }
         None => Err((
             StatusCode::NOT_FOUND,
@@ -350,6 +438,246 @@ async fn cancel_run(
             }),
         )),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Case management
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct CreateCaseRequest {
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CreateCaseResponse {
+    id: Uuid,
+    status: CaseStatus,
+}
+
+async fn create_case(
+    State(state): State<AppState>,
+    Json(body): Json<CreateCaseRequest>,
+) -> Result<(StatusCode, Json<CreateCaseResponse>), (StatusCode, Json<ErrorResponse>)> {
+    let title = body.title.trim().to_string();
+    if title.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "title must not be empty".to_string(),
+            }),
+        ));
+    }
+
+    let db = state.db.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "case management requires database persistence".to_string(),
+            }),
+        )
+    })?;
+
+    let now = chrono_now();
+    let case = CaseEntry {
+        id: Uuid::new_v4(),
+        title: title.clone(),
+        description: body.description,
+        status: CaseStatus::Open,
+        created_at: now.clone(),
+        updated_at: now,
+        run_count: 0,
+        max_severity: None,
+    };
+
+    db.insert_case(&case).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("failed to create case: {e}"),
+            }),
+        )
+    })?;
+
+    state
+        .audit
+        .emit(audit_event(
+            AuditEventKind::CaseCreated,
+            "api-token:default",
+            &format!("case/{}", case.id),
+            details(&[("title", &title)]),
+        ))
+        .await;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateCaseResponse {
+            id: case.id,
+            status: CaseStatus::Open,
+        }),
+    ))
+}
+
+async fn list_cases(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<CaseEntry>>, (StatusCode, Json<ErrorResponse>)> {
+    let db = state.db.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "case management requires database persistence".to_string(),
+            }),
+        )
+    })?;
+    let cases = db.list_cases().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("failed to list cases: {e}"),
+            }),
+        )
+    })?;
+    Ok(Json(cases))
+}
+
+async fn get_case(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<CaseEntry>, (StatusCode, Json<ErrorResponse>)> {
+    let db = state.db.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "case management requires database persistence".to_string(),
+            }),
+        )
+    })?;
+    match db.get_case(id).await {
+        Ok(Some(case)) => Ok(Json(case)),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: format!("case {id} not found"),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("failed to get case: {e}"),
+            }),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateCaseRequest {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    status: Option<CaseStatus>,
+}
+
+async fn update_case(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateCaseRequest>,
+) -> Result<Json<CaseEntry>, (StatusCode, Json<ErrorResponse>)> {
+    let db = state.db.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "case management requires database persistence".to_string(),
+            }),
+        )
+    })?;
+
+    let mut case = match db.get_case(id).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: format!("case {id} not found"),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("failed to get case: {e}"),
+                }),
+            ));
+        }
+    };
+
+    if let Some(title) = &body.title {
+        let title = title.trim().to_string();
+        if title.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "title must not be empty".to_string(),
+                }),
+            ));
+        }
+        case.title = title;
+    }
+    if let Some(desc) = body.description {
+        case.description = Some(desc);
+    }
+    if let Some(status) = body.status {
+        case.status = status;
+    }
+    case.updated_at = chrono_now();
+
+    db.update_case(&case).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("failed to update case: {e}"),
+            }),
+        )
+    })?;
+
+    state
+        .audit
+        .emit(audit_event(
+            AuditEventKind::CaseUpdated,
+            "api-token:default",
+            &format!("case/{id}"),
+            details(&[]),
+        ))
+        .await;
+
+    Ok(Json(case))
+}
+
+async fn list_case_runs(
+    State(state): State<AppState>,
+    Path(case_id): Path<Uuid>,
+) -> Result<Json<Vec<RunEntry>>, (StatusCode, Json<ErrorResponse>)> {
+    let db = state.db.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "case management requires database persistence".to_string(),
+            }),
+        )
+    })?;
+    let runs = db.list_runs_for_case(case_id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("failed to list case runs: {e}"),
+            }),
+        )
+    })?;
+    Ok(Json(runs))
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +698,28 @@ async fn runtime_status(State(state): State<AppState>) -> Json<RuntimeStatusResp
         tools_available: registry.tool_names(),
         max_concurrent_runs: state.config.max_concurrent_runs,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Audit events
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct AuditEventsQuery {
+    #[serde(default = "default_audit_limit")]
+    limit: usize,
+}
+
+fn default_audit_limit() -> usize {
+    100
+}
+
+async fn list_audit_events(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<AuditEventsQuery>,
+) -> Json<Vec<crate::audit::AuditEvent>> {
+    let events = state.audit.recent_events(query.limit).await;
+    Json(events)
 }
 
 // ---------------------------------------------------------------------------
