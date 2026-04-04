@@ -18,6 +18,31 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 1.1.0 - 2026-04-04
+
+### Added
+
+- Structured JSON audit logging module (`audit.rs`) with 12 event types covering authentication, run lifecycle, case operations, and server lifecycle (#98).
+  - File sink (JSON lines) and in-memory ring buffer for recent events.
+  - `GET /api/v1/audit/events?limit=N` endpoint to query recent audit events.
+  - `--audit-log <PATH>` CLI flag to enable file-based audit trail.
+  - Events emitted for: `AuthSuccess`, `AuthFailure`, `RunCreated`, `RunCompleted`, `RunFailed`, `RunCancelled`, `CaseCreated`, `CaseUpdated`, `ToolExecuted`, `ToolPolicyDenied`, `ServerStarted`, `ServerStopped`.
+- Case management API for grouping related investigation runs (#97).
+  - `POST /api/v1/cases` — create a new investigation case with title and optional description.
+  - `GET /api/v1/cases` — list all cases with run count aggregates.
+  - `GET /api/v1/cases/{id}` — retrieve a single case with linked run statistics.
+  - `PATCH /api/v1/cases/{id}` — update case title, description, or status (open/investigating/closed).
+  - `GET /api/v1/cases/{id}/runs` — list runs linked to a case.
+  - `case_id` field on `POST /api/v1/runs` request body to associate runs with cases.
+  - SQLite schema v2 migration: `cases` table and `case_id` column on `runs` (auto-migrated).
+- Evidence-backed narrative report format via `--format narrative` (#96).
+  - Executive Summary with task, case reference, finding count, max severity, and duration.
+  - Risk Assessment severity distribution table.
+  - Investigation Timeline with step-by-step tool execution log.
+  - Detailed Findings with confidence level, evidence chain, and recommended action.
+  - Supplementary Findings and Conclusion sections.
+  - Report metadata footer (model tier, inference mode, live metrics).
+
 ## 1.0.0 - 2026-04-06
 
 ### Added
