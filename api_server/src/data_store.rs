@@ -6,10 +6,10 @@ use rusqlite::Connection;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::state::{RunEntry, RunStatus};
+use crate::state::{CaseEntry, CaseStatus, RunEntry, RunStatus};
 
 /// Current schema version. Increment when adding migrations.
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// Persistent data store backed by SQLite.
 #[derive(Clone)]
@@ -51,8 +51,8 @@ impl DataStore {
     pub async fn insert_run(&self, entry: &RunEntry) -> Result<()> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT INTO runs (id, task, status, report_json, error, created_at, completed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO runs (id, task, status, report_json, error, created_at, completed_at, case_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 entry.id.to_string(),
                 entry.task,
@@ -61,6 +61,7 @@ impl DataStore {
                 entry.error,
                 entry.created_at,
                 entry.completed_at,
+                entry.case_id.map(|id| id.to_string()),
             ],
         )?;
 
@@ -88,13 +89,14 @@ impl DataStore {
     pub async fn update_run(&self, entry: &RunEntry) -> Result<()> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "UPDATE runs SET status = ?1, report_json = ?2, error = ?3, completed_at = ?4
-             WHERE id = ?5",
+            "UPDATE runs SET status = ?1, report_json = ?2, error = ?3, completed_at = ?4, case_id = ?5
+             WHERE id = ?6",
             rusqlite::params![
                 status_to_str(&entry.status),
                 entry.report.as_ref().map(|r| serde_json::to_string(r).unwrap_or_default()),
                 entry.error,
                 entry.completed_at,
+                entry.case_id.map(|id| id.to_string()),
                 entry.id.to_string(),
             ],
         )?;
@@ -127,7 +129,7 @@ impl DataStore {
     pub async fn get_run(&self, id: Uuid) -> Result<Option<RunEntry>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, task, status, report_json, error, created_at, completed_at
+            "SELECT id, task, status, report_json, error, created_at, completed_at, case_id
              FROM runs WHERE id = ?1",
         )?;
         let mut rows = stmt.query([id.to_string()])?;
@@ -140,7 +142,7 @@ impl DataStore {
     pub async fn list_runs(&self) -> Result<Vec<RunEntry>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, task, status, report_json, error, created_at, completed_at
+            "SELECT id, task, status, report_json, error, created_at, completed_at, case_id
              FROM runs ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| Ok(row_to_run_entry(row).unwrap()))?;
@@ -164,6 +166,92 @@ impl DataStore {
     pub async fn export_json(&self) -> Result<String> {
         let runs = self.list_runs().await?;
         Ok(serde_json::to_string_pretty(&runs)?)
+    }
+
+    // ── Case management ──────────────────────────────────────────────
+
+    pub async fn insert_case(&self, entry: &CaseEntry) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO cases (id, title, description, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                entry.id.to_string(),
+                entry.title,
+                entry.description,
+                case_status_to_str(&entry.status),
+                entry.created_at,
+                entry.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub async fn get_case(&self, id: Uuid) -> Result<Option<CaseEntry>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.title, c.description, c.status, c.created_at, c.updated_at,
+                    COUNT(r.id)
+             FROM cases c
+             LEFT JOIN runs r ON r.case_id = c.id
+             WHERE c.id = ?1
+             GROUP BY c.id",
+        )?;
+        let mut rows = stmt.query([id.to_string()])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row_to_case_entry(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn list_cases(&self) -> Result<Vec<CaseEntry>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.title, c.description, c.status, c.created_at, c.updated_at,
+                    COUNT(r.id)
+             FROM cases c
+             LEFT JOIN runs r ON r.case_id = c.id
+             GROUP BY c.id
+             ORDER BY c.updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(row_to_case_entry(row).unwrap()))?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    pub async fn update_case(&self, entry: &CaseEntry) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE cases SET title = ?1, description = ?2, status = ?3, updated_at = ?4
+             WHERE id = ?5",
+            rusqlite::params![
+                entry.title,
+                entry.description,
+                case_status_to_str(&entry.status),
+                entry.updated_at,
+                entry.id.to_string(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub async fn list_runs_for_case(&self, case_id: Uuid) -> Result<Vec<RunEntry>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, task, status, report_json, error, created_at, completed_at, case_id
+             FROM runs WHERE case_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([case_id.to_string()], |row| {
+            Ok(row_to_run_entry(row).unwrap())
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
     }
 }
 
@@ -212,6 +300,27 @@ fn migrate(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    if current < 2 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS cases (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            -- Add case_id foreign key to runs (SQLite ALTER TABLE only supports ADD COLUMN).
+            ALTER TABLE runs ADD COLUMN case_id TEXT REFERENCES cases(id);
+
+            CREATE INDEX idx_runs_case_id ON runs(case_id);
+            CREATE INDEX idx_cases_status ON cases(status);
+
+            INSERT INTO schema_version (version) VALUES (2);",
+        )?;
+    }
+
     assert!(
         current <= SCHEMA_VERSION,
         "database schema version {current} is newer than supported {SCHEMA_VERSION}"
@@ -244,6 +353,7 @@ fn str_to_status(s: &str) -> RunStatus {
 fn row_to_run_entry(row: &rusqlite::Row) -> Result<RunEntry> {
     let id_str: String = row.get(0)?;
     let report_json: Option<String> = row.get(3)?;
+    let case_id_str: Option<String> = row.get(7)?;
     Ok(RunEntry {
         id: Uuid::parse_str(&id_str)?,
         task: row.get(1)?,
@@ -256,6 +366,42 @@ fn row_to_run_entry(row: &rusqlite::Row) -> Result<RunEntry> {
         error: row.get(4)?,
         created_at: row.get(5)?,
         completed_at: row.get(6)?,
+        case_id: case_id_str
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()?,
+    })
+}
+
+fn case_status_to_str(status: &CaseStatus) -> &'static str {
+    match status {
+        CaseStatus::Open => "open",
+        CaseStatus::Investigating => "investigating",
+        CaseStatus::Closed => "closed",
+    }
+}
+
+fn str_to_case_status(s: &str) -> CaseStatus {
+    match s {
+        "open" => CaseStatus::Open,
+        "investigating" => CaseStatus::Investigating,
+        "closed" => CaseStatus::Closed,
+        _ => CaseStatus::Open,
+    }
+}
+
+fn row_to_case_entry(row: &rusqlite::Row) -> Result<CaseEntry> {
+    let id_str: String = row.get(0)?;
+    let run_count: i64 = row.get(6)?;
+    Ok(CaseEntry {
+        id: Uuid::parse_str(&id_str)?,
+        title: row.get(1)?,
+        description: row.get(2)?,
+        status: str_to_case_status(&row.get::<_, String>(3)?),
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+        run_count: run_count as usize,
+        max_severity: None,
     })
 }
 
@@ -272,6 +418,7 @@ mod tests {
             error: None,
             created_at: "1700000000".to_string(),
             completed_at: None,
+            case_id: None,
         }
     }
 

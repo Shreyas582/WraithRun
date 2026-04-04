@@ -508,6 +508,7 @@ enum OutputFormat {
     Json,
     Summary,
     Markdown,
+    Narrative,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -682,6 +683,9 @@ struct Cli {
 
     #[arg(long, value_name = "PATH", requires = "serve")]
     database: Option<PathBuf>,
+
+    #[arg(long, value_name = "PATH", requires = "serve")]
+    audit_log: Option<PathBuf>,
 
     #[arg(long)]
     config: Option<PathBuf>,
@@ -1432,6 +1436,9 @@ async fn main() -> Result<()> {
         }
         if let Some(db_path) = &cli.database {
             config.database_path = Some(db_path.clone());
+        }
+        if let Some(audit_path) = &cli.audit_log {
+            config.audit_log_path = Some(audit_path.clone());
         }
         run_server(config).await?;
         return Ok(());
@@ -4427,6 +4434,7 @@ fn render_report(
         }
         OutputFormat::Summary => Ok(render_summary(report)),
         OutputFormat::Markdown => Ok(render_markdown(report)),
+        OutputFormat::Narrative => Ok(render_narrative(report)),
     }
 }
 
@@ -5276,6 +5284,185 @@ fn render_markdown(report: &RunReport) -> String {
     output.trim_end().to_string()
 }
 
+fn render_narrative(report: &RunReport) -> String {
+    use std::fmt::Write;
+    let mut output = String::new();
+
+    // ── Executive Summary ────────────────────────────────────────────
+    let _ = writeln!(output, "# Investigation Report");
+    let _ = writeln!(output);
+
+    let _ = writeln!(output, "## Executive Summary");
+    let _ = writeln!(output);
+
+    let _ = write!(output, "An automated investigation was conducted");
+    if let Some(case_id) = report.case_id.as_deref() {
+        let _ = write!(output, " (Case {case_id})");
+    }
+    let _ = writeln!(output, " for the following task:");
+    let _ = writeln!(output);
+    let _ = writeln!(output, "> {}", report.task);
+    let _ = writeln!(output);
+
+    let total_findings = report.findings.len() + report.supplementary_findings.len();
+    let _ = write!(
+        output,
+        "The investigation executed **{} analysis step{}** and produced **{total_findings} finding{}**",
+        report.turns.len(),
+        if report.turns.len() == 1 { "" } else { "s" },
+        if total_findings == 1 { "" } else { "s" },
+    );
+    if let Some(sev) = report.max_severity {
+        let _ = write!(output, " with a maximum severity of **{}**", finding_severity_label(sev));
+    }
+    let _ = writeln!(output, ".");
+
+    if let Some(timing) = report.run_timing.as_ref() {
+        let _ = writeln!(
+            output,
+            "Total analysis duration: {}ms.",
+            timing.total_run_duration_ms
+        );
+    }
+    let _ = writeln!(output);
+
+    // ── Risk Assessment ──────────────────────────────────────────────
+    if !report.findings.is_empty() {
+        let _ = writeln!(output, "## Risk Assessment");
+        let _ = writeln!(output);
+
+        let (critical, high, medium, low, info) = count_severities(&report.findings);
+        let _ = writeln!(
+            output,
+            "| Severity | Count |\n|----------|-------|\n| Critical | {critical} |\n| High | {high} |\n| Medium | {medium} |\n| Low | {low} |\n| Informational | {info} |"
+        );
+        let _ = writeln!(output);
+    }
+
+    // ── Investigation Timeline ───────────────────────────────────────
+    if !report.turns.is_empty() {
+        let _ = writeln!(output, "## Investigation Timeline");
+        let _ = writeln!(output);
+
+        for (idx, turn) in report.turns.iter().enumerate() {
+            let step = idx + 1;
+            if let Some(call) = &turn.tool_call {
+                let obs_summary = turn
+                    .observation
+                    .as_ref()
+                    .map(|o| summarize_observation(o))
+                    .unwrap_or_else(|| "no output".to_string());
+                let _ = writeln!(
+                    output,
+                    "**Step {step}.** Executed `{}` — {obs_summary}",
+                    call.tool
+                );
+            } else {
+                let _ = writeln!(output, "**Step {step}.** Reasoning step (no tool invoked)");
+            }
+        }
+        let _ = writeln!(output);
+    }
+
+    // ── Detailed Findings ────────────────────────────────────────────
+    if !report.findings.is_empty() {
+        let _ = writeln!(output, "## Detailed Findings");
+        let _ = writeln!(output);
+
+        for (idx, finding) in report.findings.iter().enumerate() {
+            let _ = writeln!(
+                output,
+                "### {}. {} [{}]",
+                idx + 1,
+                finding.title,
+                finding_severity_label(finding.severity)
+            );
+            let _ = writeln!(output);
+
+            let _ = writeln!(
+                output,
+                "**Confidence:** {} ({:.0}%)",
+                finding.confidence_label,
+                finding.confidence * 100.0
+            );
+
+            // Evidence chain
+            let evidence = render_evidence_pointer(&finding.evidence_pointer);
+            if evidence != "none" {
+                let _ = writeln!(output, "**Evidence:** {evidence}");
+            }
+
+            let _ = writeln!(output);
+            let _ = writeln!(output, "**Recommended Action:** {}", finding.recommended_action);
+            let _ = writeln!(output);
+        }
+    }
+
+    // ── Supplementary Findings ───────────────────────────────────────
+    if !report.supplementary_findings.is_empty() {
+        let _ = writeln!(output, "## Supplementary Findings");
+        let _ = writeln!(output);
+
+        for finding in &report.supplementary_findings {
+            let _ = writeln!(
+                output,
+                "- **{}** [{}] — {}",
+                finding.title,
+                finding_severity_label(finding.severity),
+                finding.recommended_action
+            );
+        }
+        let _ = writeln!(output);
+    }
+
+    // ── Conclusion ───────────────────────────────────────────────────
+    let _ = writeln!(output, "## Conclusion");
+    let _ = writeln!(output);
+    let _ = writeln!(output, "{}", report.final_answer);
+
+    // ── Metadata ─────────────────────────────────────────────────────
+    if report.model_capability.is_some() || report.live_fallback_decision.is_some() || report.live_run_metrics.is_some() {
+        let _ = writeln!(output);
+        let _ = writeln!(output, "---");
+        let _ = writeln!(output, "*Report metadata:*");
+        if let Some(cap) = &report.model_capability {
+            let _ = writeln!(output, "- Model tier: {}", cap.tier);
+        }
+        if let Some(decision) = &report.live_fallback_decision {
+            let _ = writeln!(output, "- Inference mode: {} ({})", decision.fallback_mode, decision.reason);
+        }
+        if let Some(metrics) = &report.live_run_metrics {
+            let _ = writeln!(
+                output,
+                "- Live metrics: success_rate={:.0}%, fallback_rate={:.0}%, duration={}ms",
+                metrics.live_success_rate * 100.0,
+                metrics.fallback_rate * 100.0,
+                metrics.total_run_duration_ms
+            );
+        }
+    }
+
+    output.trim_end().to_string()
+}
+
+fn count_severities(findings: &[Finding]) -> (usize, usize, usize, usize, usize) {
+    let mut critical = 0;
+    let mut high = 0;
+    let mut medium = 0;
+    let mut low = 0;
+    let mut info = 0;
+    for f in findings {
+        match f.severity {
+            FindingSeverity::Critical => critical += 1,
+            FindingSeverity::High => high += 1,
+            FindingSeverity::Medium => medium += 1,
+            FindingSeverity::Low => low += 1,
+            FindingSeverity::Info => info += 1,
+        }
+    }
+    (critical, high, medium, low, info)
+}
+
 fn pretty_json(value: &Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
 }
@@ -5684,6 +5871,7 @@ mod tests {
             port: 8080,
             api_token: None,
             database: None,
+            audit_log: None,
             config: None,
             profile: None,
             model: None,
@@ -5891,6 +6079,22 @@ mod tests {
         assert!(rendered.contains("## Findings"));
         assert!(rendered.contains("## Turns"));
         assert!(rendered.contains("```json"));
+    }
+
+    #[test]
+    fn renders_narrative_report() {
+        let report = sample_report();
+        let rendered = render_report(&report, OutputFormat::Narrative, OutputMode::Full, None)
+            .expect("narrative render should work");
+        assert!(rendered.contains("# Investigation Report"));
+        assert!(rendered.contains("## Executive Summary"));
+        assert!(rendered.contains("Case CASE-2026-0001"));
+        assert!(rendered.contains("## Risk Assessment"));
+        assert!(rendered.contains("## Investigation Timeline"));
+        assert!(rendered.contains("## Detailed Findings"));
+        assert!(rendered.contains("## Conclusion"));
+        assert!(rendered.contains("**Confidence:**"));
+        assert!(rendered.contains("**Recommended Action:**"));
     }
 
     #[test]
