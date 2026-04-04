@@ -11,6 +11,7 @@ wraithrun [OPTIONS] --task <TASK>
 wraithrun [OPTIONS] --task-stdin
 wraithrun [OPTIONS] --task-file <PATH>
 wraithrun [OPTIONS] --task-template <TASK_TEMPLATE>
+wraithrun serve [--port <PORT>] [--api-token <TOKEN>] [--database <PATH>]
 wraithrun --doctor [OPTIONS]
 wraithrun --list-task-templates
 wraithrun --list-tools [OPTIONS]
@@ -43,6 +44,10 @@ wraithrun models benchmark [OPTIONS]
 - `--models-list`: list discovered live model packs and preset tuning (`wraithrun models list`).
 - `--models-validate`: run live model-pack readiness checks for discovered packs (`wraithrun models validate`).
 - `--models-benchmark`: rank discovered live packs by estimated responsiveness (`wraithrun models benchmark`).
+- `--serve`: start the local API server and web dashboard. Alias: `wraithrun serve`.
+- `--port <PORT>`: port for the API server. Default: `8080`. Requires `--serve`.
+- `--api-token <TOKEN>`: bearer token for API authentication. Auto-generated if omitted. Requires `--serve`.
+- `--database <PATH>`: SQLite database file for persistent run storage. In-memory if omitted. Requires `--serve`.
 - `--verify-bundle <PATH>`: verify evidence bundle file integrity from a bundle directory or direct `SHA256SUMS` path.
 - `--introspection-format <INTROSPECTION_FORMAT>`: format for introspection modes. Values: `text`, `json`. Default: `text`.
 - `--print-effective-config`: print resolved runtime settings as JSON and exit.
