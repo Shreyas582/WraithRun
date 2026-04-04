@@ -1,5 +1,68 @@
 # Upgrade Notes
 
+## v1.1.0
+
+### Breaking/visible changes
+
+- SQLite database schema automatically migrates from v1 to v2 on first use. The migration adds a `cases` table and a `case_id` column to the `runs` table. Existing databases are upgraded in-place; no manual action is required.
+- New `narrative` output format available via `--format narrative`. Existing formats (`json`, `summary`, `markdown`) are unchanged.
+- New API endpoints added under `/api/v1/cases/*` and `/api/v1/audit/events`. Existing endpoints are unchanged.
+
+### Migration examples
+
+To enable audit logging, pass the new `--audit-log` flag:
+
+```powershell
+wraithrun serve --audit-log ./audit.jsonl
+```
+
+To create and use cases via the API:
+
+```bash
+# Create a case
+curl -X POST http://127.0.0.1:8080/api/v1/cases \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Incident 2026-04-04", "description": "Suspicious SSH activity"}'
+
+# Start a run linked to a case
+curl -X POST http://127.0.0.1:8080/api/v1/runs \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Investigate SSH keys", "case_id": "<CASE-UUID>"}'
+```
+
+To generate a narrative report:
+
+```powershell
+wraithrun --task "Check suspicious ports" --format narrative
+```
+
+## v1.0.0
+
+### Breaking/visible changes
+
+- New `api_server` crate added to the workspace. This is an additive change; the CLI continues to work identically without `--serve`.
+- When `--serve` is used, WraithRun starts an HTTP server on `127.0.0.1:8080` (configurable via `--port`) instead of running a single investigation and exiting.
+- Bearer token authentication is now required for all API endpoints except `/api/v1/health`. A random token is printed at startup unless `--api-token` is provided.
+- SQLite persistence is opt-in via `--database <PATH>`. Without it, runs are stored in memory only.
+
+### Migration examples
+
+Start the API server:
+
+```powershell
+wraithrun serve --port 8080 --database ./wraithrun.db
+```
+
+Use a fixed API token for automation:
+
+```powershell
+wraithrun serve --api-token my-secret-token
+```
+
+Existing CLI workflows (non-serve) are completely unchanged.
+
 ## v0.13.0
 
 ### Breaking/visible changes
