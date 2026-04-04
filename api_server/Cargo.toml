@@ -1,26 +1,22 @@
 [package]
-name = "wraithrun"
+name = "api_server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[features]
-default = []
-onnx = ["inference_bridge/onnx"]
-vitis = ["inference_bridge/vitis"]
-
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
+axum.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-toml.workspace = true
-sha2.workspace = true
 tokio.workspace = true
+tower-http.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
-tar.workspace = true
+uuid.workspace = true
 core_engine = { path = "../core_engine" }
 cyber_tools = { path = "../cyber_tools" }
 inference_bridge = { path = "../inference_bridge" }
-api_server = { path = "../api_server" }
+
+[dev-dependencies]
+tower = "0.5"

@@ -488,6 +488,7 @@ use inference_bridge::{probe_model_capability, ModelConfig, OnnxVitisEngine, Vit
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use api_server::{run_server, ServerConfig};
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_CONFIG_FILE: &str = "wraithrun.toml";
@@ -601,7 +602,7 @@ impl CapabilityOverride {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates", "verify_bundle", "live_setup", "models_list", "models_validate", "models_benchmark"])]
+    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates", "verify_bundle", "live_setup", "models_list", "models_validate", "models_benchmark", "serve"])]
     task: Option<String>,
 
     #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_stdin", "task_template"])]
@@ -669,6 +670,18 @@ struct Cli {
 
     #[arg(long)]
     models_benchmark: bool,
+
+    #[arg(long)]
+    serve: bool,
+
+    #[arg(long, default_value_t = 8080, requires = "serve")]
+    port: u16,
+
+    #[arg(long, requires = "serve")]
+    api_token: Option<String>,
+
+    #[arg(long, value_name = "PATH", requires = "serve")]
+    database: Option<PathBuf>,
 
     #[arg(long)]
     config: Option<PathBuf>,
@@ -1362,6 +1375,7 @@ impl DoctorReport {
 async fn main() -> Result<()> {
     let cli_args = normalize_models_alias(std::env::args_os());
     let cli_args = normalize_live_setup_alias(cli_args);
+    let cli_args = normalize_serve_alias(cli_args);
     let cli = Cli::parse_from(cli_args);
     ensure_exclusive_modes(&cli)?;
     ensure_introspection_format_usage(&cli)?;
@@ -1405,6 +1419,21 @@ async fn main() -> Result<()> {
     if cli.models_benchmark {
         let rendered = run_models_benchmark(&cli, cli.introspection_format)?;
         println!("{rendered}");
+        return Ok(());
+    }
+
+    if cli.serve {
+        let mut config = ServerConfig {
+            port: cli.port,
+            ..ServerConfig::default()
+        };
+        if let Some(token) = &cli.api_token {
+            config.api_token = token.clone();
+        }
+        if let Some(db_path) = &cli.database {
+            config.database_path = Some(db_path.clone());
+        }
+        run_server(config).await?;
         return Ok(());
     }
 
@@ -1567,6 +1596,28 @@ fn normalize_live_setup_alias(args: impl IntoIterator<Item = OsString>) -> Vec<O
     normalized.push(args[0].clone());
     normalized.push(OsString::from("--live-setup"));
     normalized.extend(args.into_iter().skip(3));
+    normalized
+}
+
+fn normalize_serve_alias(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+    let args: Vec<OsString> = args.into_iter().collect();
+    if args.len() < 2 {
+        return args;
+    }
+
+    let is_serve = args
+        .get(1)
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("serve"))
+        .unwrap_or(false);
+    if !is_serve {
+        return args;
+    }
+
+    let mut normalized = Vec::with_capacity(args.len());
+    normalized.push(args[0].clone());
+    normalized.push(OsString::from("--serve"));
+    normalized.extend(args.into_iter().skip(2));
     normalized
 }
 
@@ -2967,6 +3018,9 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     }
     if cli.models_benchmark {
         selected.push("--models-benchmark");
+    }
+    if cli.serve {
+        selected.push("--serve");
     }
 
     if selected.len() > 1 {
@@ -5626,6 +5680,10 @@ mod tests {
             models_list: false,
             models_validate: false,
             models_benchmark: false,
+            serve: false,
+            port: 8080,
+            api_token: None,
+            database: None,
             config: None,
             profile: None,
             model: None,

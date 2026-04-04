@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WraithRun Dashboard</title>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  --green: #3fb950; --yellow: #d29922; --red: #f85149; --orange: #db6d28;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.5; }
+a { color: var(--accent); text-decoration: none; }
+.container { max-width: 1200px; margin: 0 auto; padding: 1rem; }
+
+/* Header */
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0.75rem 1rem; display: flex; align-items: center; gap: 1rem; }
+header h1 { font-size: 1.25rem; font-weight: 600; }
+header .health { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--green); }
+.dot.down { background: var(--red); }
+
+/* Tabs */
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+.tab { padding: 0.5rem 1rem; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab:hover { color: var(--text); }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-bottom: 0.75rem; }
+.card h3 { font-size: 1rem; margin-bottom: 0.5rem; }
+.card .meta { font-size: 0.8125rem; color: var(--muted); }
+
+/* Health panel */
+.health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; text-align: center; }
+.stat-card .value { font-size: 2rem; font-weight: 700; }
+.stat-card .label { font-size: 0.8125rem; color: var(--muted); }
+
+/* Run list */
+.run-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 1rem; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+.run-row:last-child { border-bottom: none; }
+.run-task { font-weight: 500; }
+
+/* Status badges */
+.badge { display: inline-block; padding: 0.125rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+.badge.queued { background: #1f2937; color: var(--muted); }
+.badge.running { background: #0c2d6b; color: var(--accent); }
+.badge.completed { background: #0d2818; color: var(--green); }
+.badge.failed { background: #3b1319; color: var(--red); }
+.badge.cancelled { background: #2d2000; color: var(--yellow); }
+
+/* Severity badges */
+.sev { padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+.sev.critical { background: #3b1319; color: var(--red); }
+.sev.high { background: #3b1319; color: var(--orange); }
+.sev.medium { background: #2d2000; color: var(--yellow); }
+.sev.low { background: #0d2818; color: var(--green); }
+.sev.info { background: #1f2937; color: var(--muted); }
+
+/* Findings */
+.finding { padding: 0.75rem; border-left: 3px solid var(--border); margin-bottom: 0.5rem; }
+.finding.Critical { border-left-color: var(--red); }
+.finding.High { border-left-color: var(--orange); }
+.finding.Medium { border-left-color: var(--yellow); }
+.finding.Low { border-left-color: var(--green); }
+
+/* Filters */
+.filters { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.filter-btn { padding: 0.25rem 0.625rem; border-radius: 999px; border: 1px solid var(--border); background: transparent;
+  color: var(--muted); cursor: pointer; font-size: 0.8125rem; }
+.filter-btn.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+/* New run form */
+.new-run { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.new-run input { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font-size: 0.875rem; }
+.new-run input:focus { outline: none; border-color: var(--accent); }
+.btn { padding: 0.5rem 1rem; border-radius: 6px; border: none; background: var(--accent); color: var(--bg);
+  font-weight: 600; cursor: pointer; font-size: 0.875rem; }
+.btn:hover { opacity: 0.9; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-danger { background: var(--red); }
+
+/* Detail panel */
+.detail-panel { position: fixed; top: 0; right: -500px; width: 500px; height: 100vh;
+  background: var(--surface); border-left: 1px solid var(--border); overflow-y: auto;
+  transition: right 0.2s ease; z-index: 100; padding: 1rem; }
+.detail-panel.open { right: 0; }
+.detail-close { float: right; cursor: pointer; color: var(--muted); font-size: 1.25rem; }
+.detail-close:hover { color: var(--text); }
+
+/* Empty state */
+.empty { text-align: center; padding: 3rem; color: var(--muted); }
+
+/* Token dialog */
+.token-dialog { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center; z-index: 200; }
+.token-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 2rem;
+  width: 400px; max-width: 90vw; }
+.token-box h2 { margin-bottom: 1rem; font-size: 1.125rem; }
+.token-box input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); font-size: 0.875rem; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+
+<div id="token-screen" class="token-dialog">
+  <div class="token-box">
+    <h2>WraithRun API Token</h2>
+    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">Enter the API token shown when the server started.</p>
+    <input id="token-input" type="password" placeholder="Bearer token" autofocus>
+    <button class="btn" onclick="saveToken()" style="width:100%">Connect</button>
+  </div>
+</div>
+
+<header>
+  <h1>WraithRun</h1>
+  <header class="health">
+    <span class="dot" id="health-dot"></span>
+    <span id="health-text">connecting…</span>
+    <span style="color:var(--muted);font-size:0.75rem" id="uptime-text"></span>
+  </header>
+</header>
+
+<div class="container">
+  <div class="tabs">
+    <div class="tab active" data-tab="runs" onclick="switchTab('runs')">Runs</div>
+    <div class="tab" data-tab="findings" onclick="switchTab('findings')">Findings</div>
+    <div class="tab" data-tab="health" onclick="switchTab('health')">Health</div>
+  </div>
+
+  <!-- RUNS TAB -->
+  <div id="tab-runs">
+    <div class="new-run">
+      <input id="task-input" placeholder="Describe investigation task…" onkeydown="if(event.key==='Enter')createRun()">
+      <button class="btn" onclick="createRun()" id="run-btn">Start Run</button>
+    </div>
+    <div id="run-list"></div>
+  </div>
+
+  <!-- FINDINGS TAB -->
+  <div id="tab-findings" style="display:none">
+    <div class="filters" id="severity-filters"></div>
+    <div id="findings-list"></div>
+  </div>
+
+  <!-- HEALTH TAB -->
+  <div id="tab-health" style="display:none">
+    <div class="health-grid" id="health-grid"></div>
+  </div>
+</div>
+
+<!-- Run detail panel -->
+<div class="detail-panel" id="detail-panel">
+  <span class="detail-close" onclick="closeDetail()">&times;</span>
+  <div id="detail-content"></div>
+</div>
+
+<script>
+let TOKEN = localStorage.getItem('wraithrun_token') || '';
+let allRuns = [];
+let activeSeverities = new Set(['Critical','High','Medium','Low','Info']);
+let pollTimer = null;
+
+function apiHeaders() {
+  return { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' };
+}
+
+async function api(path, opts = {}) {
+  const resp = await fetch('/api/v1' + path, { headers: apiHeaders(), ...opts });
+  if (resp.status === 401) { showTokenDialog(); throw new Error('Unauthorized'); }
+  return resp;
+}
+
+function showTokenDialog() { document.getElementById('token-screen').style.display = 'flex'; }
+function hideTokenDialog() { document.getElementById('token-screen').style.display = 'none'; }
+
+function saveToken() {
+  TOKEN = document.getElementById('token-input').value.trim();
+  localStorage.setItem('wraithrun_token', TOKEN);
+  hideTokenDialog();
+  refresh();
+}
+
+// Health polling
+async function pollHealth() {
+  try {
+    const r = await fetch('/api/v1/health');
+    const d = await r.json();
+    document.getElementById('health-dot').className = 'dot ok';
+    document.getElementById('health-text').textContent = 'online';
+    document.getElementById('uptime-text').textContent = formatUptime(d.uptime_secs);
+   } catch {
+    document.getElementById('health-dot').className = 'dot down';
+    document.getElementById('health-text').textContent = 'offline';
+  }
+}
+
+function formatUptime(secs) {
+  if (secs < 60) return secs + 's';
+  if (secs < 3600) return Math.floor(secs/60) + 'm';
+  return Math.floor(secs/3600) + 'h ' + Math.floor((secs%3600)/60) + 'm';
+}
+
+// Runs
+async function loadRuns() {
+  try {
+    const r = await api('/runs');
+    allRuns = await r.json();
+    renderRuns();
+    renderFindings();
+  } catch {}
+}
+
+function renderRuns() {
+  const el = document.getElementById('run-list');
+  if (!allRuns.length) { el.innerHTML = '<div class="empty">No runs yet. Start an investigation above.</div>'; return; }
+  el.innerHTML = allRuns.map(run => `
+    <div class="card run-row" onclick="showDetail('${run.id}')" style="cursor:pointer">
+      <div>
+        <div class="run-task">${esc(run.task)}</div>
+        <div class="meta">${run.id.slice(0,8)}… · ${run.created_at}</div>
+      </div>
+      <span class="badge ${run.status}">${run.status}</span>
+      <span class="meta">${run.completed_at || ''}</span>
+      ${run.status === 'queued' || run.status === 'running'
+        ? '<button class="btn btn-danger" onclick="event.stopPropagation();cancelRun(\'' + run.id + '\')">Cancel</button>'
+        : ''}
+    </div>`).join('');
+}
+
+async function createRun() {
+  const input = document.getElementById('task-input');
+  const task = input.value.trim();
+  if (!task) return;
+  document.getElementById('run-btn').disabled = true;
+  try {
+    await api('/runs', { method: 'POST', body: JSON.stringify({ task }) });
+    input.value = '';
+    await loadRuns();
+  } catch(e) { console.error(e); }
+  document.getElementById('run-btn').disabled = false;
+}
+
+async function cancelRun(id) {
+  await api('/runs/' + id + '/cancel', { method: 'POST' });
+  await loadRuns();
+}
+
+async function showDetail(id) {
+  try {
+    const r = await api('/runs/' + id);
+    const run = await r.json();
+    const panel = document.getElementById('detail-panel');
+    let html = `<h2 style="margin-bottom:1rem">${esc(run.task)}</h2>
+      <p><span class="badge ${run.status}">${run.status}</span></p>
+      <p class="meta" style="margin:0.5rem 0">ID: ${run.id}<br>Created: ${run.created_at}${run.completed_at ? '<br>Completed: ' + run.completed_at : ''}</p>`;
+    if (run.error) html += `<div class="card" style="border-color:var(--red);margin-top:1rem"><strong>Error:</strong> ${esc(run.error)}</div>`;
+    if (run.report && run.report.findings && run.report.findings.length) {
+      html += '<h3 style="margin-top:1rem">Findings</h3>';
+      run.report.findings.forEach(f => {
+        html += `<div class="finding ${f.severity}" style="margin-top:0.5rem">
+          <div style="display:flex;gap:0.5rem;align-items:center">
+            <span class="sev ${(f.severity||'').toLowerCase()}">${f.severity}</span>
+            <strong>${esc(f.title)}</strong>
+          </div>
+          <div class="meta" style="margin-top:0.25rem">Confidence: ${(f.confidence*100).toFixed(0)}%</div>
+          <div style="margin-top:0.25rem;font-size:0.875rem">${esc(f.recommended_action)}</div>
+        </div>`;
+      });
+    }
+    if (run.report && run.report.final_answer) {
+      html += `<h3 style="margin-top:1rem">Final Answer</h3><div class="card">${esc(run.report.final_answer)}</div>`;
+    }
+    document.getElementById('detail-content').innerHTML = html;
+    panel.classList.add('open');
+  } catch {}
+}
+
+function closeDetail() { document.getElementById('detail-panel').classList.remove('open'); }
+
+// Findings aggregation
+function renderFindings() {
+  const container = document.getElementById('findings-list');
+  const filterEl = document.getElementById('severity-filters');
+  const severities = ['Critical','High','Medium','Low','Info'];
+  filterEl.innerHTML = severities.map(s =>
+    `<button class="filter-btn ${activeSeverities.has(s)?'active':''}" onclick="toggleSeverity('${s}')">${s}</button>`
+  ).join('');
+
+  const findings = [];
+  allRuns.forEach(run => {
+    if (run.report && run.report.findings) {
+      run.report.findings.forEach(f => findings.push({ ...f, run_id: run.id, run_task: run.task }));
+    }
+  });
+
+  const filtered = findings.filter(f => activeSeverities.has(f.severity));
+  if (!filtered.length) { container.innerHTML = '<div class="empty">No findings match the current filters.</div>'; return; }
+
+  container.innerHTML = filtered.map(f => `
+    <div class="finding ${f.severity}" style="cursor:pointer" onclick="showDetail('${f.run_id}')">
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <span class="sev ${(f.severity||'').toLowerCase()}">${f.severity}</span>
+        <strong>${esc(f.title)}</strong>
+      </div>
+      <div class="meta">Confidence: ${(f.confidence*100).toFixed(0)}% · Run: ${f.run_id.slice(0,8)}…</div>
+      <div style="font-size:0.875rem;margin-top:0.25rem">${esc(f.recommended_action)}</div>
+    </div>`).join('');
+}
+
+function toggleSeverity(s) {
+  if (activeSeverities.has(s)) activeSeverities.delete(s); else activeSeverities.add(s);
+  renderFindings();
+}
+
+// Health tab
+async function loadHealth() {
+  const grid = document.getElementById('health-grid');
+  try {
+    const [healthR, readyR, statusR] = await Promise.all([
+      fetch('/api/v1/health'), api('/ready'), api('/runtime/status')
+    ]);
+    const health = await healthR.json();
+    const ready = await readyR.json();
+    const status = await statusR.json();
+    grid.innerHTML = `
+      <div class="stat-card"><div class="value" style="color:var(--green)">${health.status}</div><div class="label">Status</div></div>
+      <div class="stat-card"><div class="value">${health.version}</div><div class="label">Version</div></div>
+      <div class="stat-card"><div class="value">${formatUptime(health.uptime_secs)}</div><div class="label">Uptime</div></div>
+      <div class="stat-card"><div class="value">${ready.tools_available}</div><div class="label">Tools</div></div>
+      <div class="stat-card"><div class="value">${status.mode}</div><div class="label">Mode</div></div>
+      <div class="stat-card"><div class="value">${status.max_concurrent_runs}</div><div class="label">Max Concurrent</div></div>
+      <div class="stat-card"><div class="value">${allRuns.length}</div><div class="label">Total Runs</div></div>
+      <div class="stat-card"><div class="value">${allRuns.filter(r=>r.status==='running').length}</div><div class="label">Active Runs</div></div>
+    `;
+  } catch { grid.innerHTML = '<div class="empty">Cannot load health data.</div>'; }
+}
+
+// Tab switching
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  ['runs','findings','health'].forEach(t => {
+    document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
+  });
+  if (name === 'health') loadHealth();
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+async function refresh() {
+  await pollHealth();
+  try { await loadRuns(); } catch {}
+}
+
+// Init
+if (TOKEN) { hideTokenDialog(); }
+refresh();
+pollTimer = setInterval(refresh, 5000);
+</script>
+</body>
+</html>

@@ -18,6 +18,48 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 1.0.0 - 2026-04-06
+
+### Added
+
+- Local API server via `wraithrun serve --port 8080` with v1 REST endpoints (#23).
+  - `GET /api/v1/health` — unauthenticated liveness check returning status, version, uptime.
+  - `GET /api/v1/ready` — readiness check returning available tool count.
+  - `POST /api/v1/runs` — start a new investigation run (accepts `task` and optional `max_steps`).
+  - `GET /api/v1/runs` — list all runs sorted by creation time.
+  - `GET /api/v1/runs/{id}` — retrieve a single run with full report.
+  - `POST /api/v1/runs/{id}/cancel` — cancel a queued or running investigation.
+  - `GET /api/v1/runtime/status` — runtime introspection (mode, tools, concurrency config).
+- `wraithrun serve` subcommand alias (equivalent to `--serve`).
+- Bearer token authentication on all API endpoints except `/health` (#25).
+  - Auto-generated UUID token printed at startup; override with `--api-token <TOKEN>`.
+  - Invalid/missing tokens return 401 Unauthorized with audit log warning.
+- Request body size limit (1 MiB default) via `tower-http` `RequestBodyLimitLayer` (#25).
+- Bind address locked to `127.0.0.1` for local-only access (#25).
+- Concurrency limiter: configurable max concurrent runs (default 4) with 429 Too Many Requests response.
+- SQLite-backed data store for persistent run and findings storage (#26).
+  - Schema: `runs`, `findings`, `schema_version` tables with WAL journal mode.
+  - Versioned migration framework (current schema v1) with idempotent migration.
+  - `--database <PATH>` flag to enable persistent storage; in-memory by default.
+  - `DataStore` API: `insert_run`, `update_run`, `get_run`, `list_runs`, `backup`, `export_json`.
+  - Runs auto-persisted on creation and completion when database is configured.
+- Embedded web dashboard at `GET /` for browser-based investigation management (#24).
+  - Run list with real-time polling (5-second refresh).
+  - Run detail slide panel with findings, severity badges, and final answer.
+  - Findings explorer with severity filter buttons (Critical/High/Medium/Low/Info).
+  - Live health panel: server status, version, uptime, tools, mode, concurrent runs.
+  - New investigation form with Enter-key submission.
+  - Run cancellation from the dashboard.
+  - Token-gated access with local storage persistence.
+  - Dark theme matching WraithRun visual identity.
+- New `api_server` workspace crate containing server, routes, data store, and embedded dashboard.
+- 19 new tests: 13 API route tests (health, auth reject, auth wrong token, ready, CRUD, cancel, runtime status, concurrency), 6 data store tests (insert/retrieve, update, list ordering, nonexistent, export, migration idempotency).
+
+### Changed
+
+- Workspace dependencies updated: added `axum 0.8`, `tower-http 0.6` (cors, trace, limit), `uuid 1.11` (v4, serde), `rusqlite 0.35` (bundled, backup).
+- `tokio` workspace feature set expanded with `net` for TCP listener support.
+
 ## 0.13.0 - 2026-04-05
 
 ### Added
