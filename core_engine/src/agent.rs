@@ -970,7 +970,7 @@ mod tests {
             .expect("agent run should succeed");
 
         // The unknown tool should produce an error observation, not crash.
-        assert!(report.turns.len() >= 1);
+        assert!(!report.turns.is_empty());
         let obs = report.turns[0].observation.as_ref().unwrap();
         assert!(obs.get("error").is_some());
     }
