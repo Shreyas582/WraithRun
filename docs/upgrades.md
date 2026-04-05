@@ -1,6 +1,6 @@
 # Upgrade Notes
 
-## Unreleased
+## v1.3.1
 
 ### Breaking/visible changes
 
