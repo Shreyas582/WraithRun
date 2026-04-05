@@ -113,17 +113,44 @@ wraithrun --task "Check suspicious listener ports and summarize risk" --dry-run 
 
 ## Advanced Features
 
-- Model capability tiering: automatic probe classifies models as Basic/Moderate/Strong and adapts agent behavior (deterministic summary, reduced evidence, or full synthesis).
+**Agentic investigation (v1.6.0)**
+
+- ReAct agent loop: Moderate/Strong tiers reason iteratively, choosing which tool to call based on observations so far.
+- Task-aware LLM synthesis with structured output (Summary, Key Findings, Risk Assessment, Recommendations).
+- Session caching eliminates per-step ONNX session rebuild; KV-cache prefix reuse detects shared prompt prefixes.
+- Temperature-scaled sampling for creative vs. deterministic output (`temperature` config key).
+
+**Model management**
+
+- `--model-download list` shows curated model packs; `--model-download <NAME>` fetches and verifies with SHA-256.
+- Capability tiering: automatic probe classifies models as Basic/Moderate/Strong and adapts agent behavior.
 - `--capability-override` to manually set tier classification.
-- Compact output mode (default) with `--output-mode full` for verbose turn-by-turn output.
+- Model-pack lifecycle: discover, validate, and benchmark candidate packs.
+
+**Multi-backend inference (v1.4.0–v1.5.0)**
+
+- Pluggable backends: CPU, Vitis (AMD RyzenAI), DirectML, CoreML, CUDA, TensorRT, QNN.
+- `--backend <NAME>` flag (or auto-select by priority). EP-aware debug logging.
+- `ModelFormat` (ONNX/GGUF/SafeTensors) and `QuantFormat` (FP32/FP16/INT8/INT4) auto-detection.
+
+**Operational reliability**
+
+- Live preflight validation to fail fast on missing model or tokenizer assets.
+- Deterministic fallback controls with `--live-fallback-policy` and machine-readable reason codes.
 - Findings deduplication, severity sorting, and quality-checked summaries.
-- Live preflight validation in runtime path to fail fast on missing model or tokenizer assets.
-- Deterministic fallback controls with `--live-fallback-policy` and machine-readable fallback reason codes.
-- Model-pack lifecycle operations: discover, validate, and benchmark candidate live packs.
-- Evidence handling with bundle export, deterministic archive creation, and checksum verification.
-- Automation contracts with `findings-v1` adapter output and severity-threshold exit policy.
-- Baseline-aware drift workflows for persistence, account changes, and process-network risk scoring.
+- Compact output (default) with `--output-mode full` for verbose turn-by-turn output.
+
+**Evidence and automation**
+
+- Evidence bundle export with deterministic archive creation and checksum verification.
+- Automation contracts with `findings-v1` adapter and severity-threshold exit policy.
+- Baseline-aware drift workflows for persistence, account changes, and process-network risk.
 - Effective configuration introspection (`--print-effective-config` and `--explain-effective-config`).
+
+**Local API server and web UI (v1.0.0)**
+
+- `wraithrun serve` with 7 REST endpoints, embedded HTML dashboard, bearer token auth.
+- Case management, structured audit logging, and SQLite-backed data model.
 
 ## Documentation Map
 
@@ -139,42 +166,19 @@ wraithrun --task "Check suspicious listener ports and summarize risk" --dry-run 
 
 ## Project Status
 
-Early-stage but production-minded for controlled defensive workflows.
+**Current release: [v1.6.0](https://github.com/Shreyas582/WraithRun/releases/tag/v1.6.0)** — Agentic Investigation Engine
 
-Completed in v0.12.0:
+| Version | Milestone | Highlights |
+|---------|-----------|------------|
+| v1.6.0 | Agentic Investigation Engine | ReAct agent loop, task-aware synthesis, temperature sampling, session caching, model-pack download |
+| v1.5.0 | Concrete Hardware Backends | DirectML, CoreML, CUDA/TensorRT, QNN, ModelFormat/QuantFormat auto-detection |
+| v1.4.0 | Multi-Backend Abstraction | Provider registry, `--backend` flag, provider-aware doctor diagnostics |
+| v1.3.0 | Backend Trait Extraction | `ExecutionProviderBackend` trait, CPU/Vitis trait impls, conformance harness |
+| v1.2.0 | Integrations & Extensibility | Tool plugin API, CI/CD pipeline integration |
+| v1.1.0 | Professional Workflow Depth | Narrative reports, case management API, structured audit logging |
+| v1.0.0 | Local API Server & Web UI | REST API, embedded dashboard, bearer auth, SQLite data model |
 
-- Model capability probe: file-size parameter estimation, execution provider detection, smoke latency measurement, vocab size detection
-- Capability tier classification (Basic / Moderate / Strong) with const-threshold rules
-- Agent adapts Phase 2 by tier: Basic skips LLM, Moderate reduces evidence window, Strong runs full synthesis
-- `--capability-override` CLI flag for manual tier selection
-- `model_capability` object in JSON run report
-
-Completed in v0.11.0:
-
-- Findings deduplication across overlapping tools with authority-based ranking
-- Findings sorted by severity descending with confidence tiebreaker
-- `max_severity` field in JSON run report
-- Compact output mode (default) omitting turns array from JSON
-- Deterministic executive summary fallback for low-quality LLM output
-- Confidence score rounding to two decimal places
-- Tool precondition checking to skip known-failing tools
-- `--output-mode` CLI flag
-
-Completed in v0.10.0:
-
-- KV-cache and shared-buffer IO binding for live inference with GQO models
-- Runtime compatibility checks with ~30 deterministic reason codes and structured remediation
-- Zero-guess live setup with automatic model compatibility validation
-- E2E live-success test lane (feature-gated)
-- Cross-platform inference split: `onnx` (CPU EP) and `vitis` (AMD RyzenAI EP)
-- Batch prefill prompt ingestion replacing token-by-token loop (~4x first-token-latency improvement)
-- Deterministic two-phase agent architecture: investigation plan execution followed by LLM synthesis
-
-In progress:
-
-- Code-signing and platform trust hardening for released binaries/installers
-- Multi-backend inference abstraction (v1.3.0: DirectML, CoreML, CUDA/TensorRT, QNN)
-- Local API server and web UI MVP (v1.0.0)
+See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
 ## Responsible Use
 
