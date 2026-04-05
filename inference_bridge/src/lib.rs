@@ -2,7 +2,7 @@ pub mod backend;
 pub mod onnx_vitis;
 
 use std::any::Any;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -53,7 +53,8 @@ pub fn probe_model_capability(config: &ModelConfig) -> ModelCapabilityProbe {
 }
 
 /// Estimate parameter count (in billions) from model file size.
-/// Assumes ~2 bytes per parameter (float16/bfloat16 quantised models).
+/// Detects quantization level from filename conventions (q4, q8, fp16, fp32)
+/// and adjusts the bytes-per-parameter divisor accordingly.
 /// Sums external data files (`*.onnx_data`, `*.onnx.data`) that ONNX models
 /// commonly use for weights that exceed the 2 GB protobuf limit (#115).
 fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
@@ -86,9 +87,33 @@ fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
         .unwrap_or(0);
 
     let bytes = (main_size + external_size) as f64;
-    // ~2 bytes per param for fp16/bf16; adjust for overhead (~10%).
-    let estimated_params = bytes / 2.2;
+
+    // Detect quantization from the model path to choose the right divisor.
+    // Bytes per parameter: Q4 ≈ 0.55 (4-bit + overhead), Q8 ≈ 1.1,
+    // FP16/BF16 ≈ 2.2, FP32 ≈ 4.4 (includes ~10% ONNX structure overhead).
+    let bytes_per_param = detect_quant_bytes_per_param(model_path);
+    let estimated_params = bytes / bytes_per_param;
     (estimated_params / 1_000_000_000.0) as f32
+}
+
+/// Infer bytes-per-parameter from filename conventions.
+/// Falls back to 2.2 (FP16) if no quantization hint is found.
+fn detect_quant_bytes_per_param(model_path: &Path) -> f64 {
+    let path_lower = model_path
+        .to_string_lossy()
+        .to_lowercase();
+
+    // Check filename and parent directory for quantization hints.
+    if path_lower.contains("q4") || path_lower.contains("int4") || path_lower.contains("4bit") {
+        0.55
+    } else if path_lower.contains("q8") || path_lower.contains("int8") || path_lower.contains("8bit") {
+        1.1
+    } else if path_lower.contains("fp32") || path_lower.contains("float32") {
+        4.4
+    } else {
+        // Default: assume FP16/BF16 with ~10% overhead.
+        2.2
+    }
 }
 
 // ── Dry-run investigation templates (#117) ──
@@ -149,10 +174,10 @@ static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
     DryRunTemplate {
         keywords: &["ssh", "authorized_keys", "key"],
         tools: &[
+            "enumerate_ssh_keys",
             "audit_account_changes",
             "inspect_persistence_locations",
             "check_privilege_escalation_vectors",
-            "scan_network",
         ],
     },
     // persistence-analysis
@@ -221,9 +246,10 @@ fn detect_execution_provider(config: &ModelConfig) -> String {
         || config.backend_config.contains_key("config_file")
     {
         "VitisAIExecutionProvider".to_string()
-    } else if cfg!(feature = "onnx") {
-        // Without Vitis config, ONNX Runtime defaults to CPU.
-        "CPUExecutionProvider".to_string()
+    } else if config.backend_override.as_deref() == Some("directml") {
+        "DmlExecutionProvider".to_string()
+    } else if config.backend_override.as_deref() == Some("cuda") {
+        "CUDAExecutionProvider".to_string()
     } else {
         "CPUExecutionProvider".to_string()
     }
@@ -613,16 +639,16 @@ mod tests {
         let task = "Task: Investigate unauthorized SSH keys";
 
         let out1 = engine.dry_run_response(task);
-        assert!(out1.contains("\"tool\":\"audit_account_changes\""));
+        assert!(out1.contains("\"tool\":\"enumerate_ssh_keys\""));
 
         let out2 = engine.dry_run_response(&format!("{task}\nObservation: {{}}"));
-        assert!(out2.contains("\"tool\":\"inspect_persistence_locations\""));
+        assert!(out2.contains("\"tool\":\"audit_account_changes\""));
 
         let out3 = engine.dry_run_response(&format!("{task}\nObservation: {{}}\nObservation: {{}}"));
-        assert!(out3.contains("\"tool\":\"check_privilege_escalation_vectors\""));
+        assert!(out3.contains("\"tool\":\"inspect_persistence_locations\""));
 
         let out4 = engine.dry_run_response(&format!("{task}\n...Observation x3..."));
-        assert!(out4.contains("\"tool\":\"scan_network\""));
+        assert!(out4.contains("\"tool\":\"check_privilege_escalation_vectors\""));
 
         let out5 = engine.dry_run_response(&format!("{task}\n...Observation x4..."));
         assert!(out5.contains("<final>"));
