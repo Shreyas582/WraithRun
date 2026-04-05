@@ -1,5 +1,25 @@
 # Upgrade Notes
 
+## v1.7.1
+
+- Dependency-only release. No breaking API changes.
+- `sha2` 0.11 changes the `Display`/`LowerHex` impl on digest types. If you format hashes via `format!("{:x}", digest)`, switch to iterating over `digest.as_slice()` with per-byte hex formatting.
+- CI action versions bumped (checkout v6, upload-artifact v7, download-artifact v8, setup-python v6, release-drafter v7). No user-facing impact unless you pin these in your own workflows.
+
+## v1.7.0
+
+### Breaking/visible changes
+
+- **`RunReport` gains new fields**: `elapsed_ms` per tool entry, `llm_reasoning` on Moderate/Strong tier results, and `confidence` score with corroboration metadata. Consumers parsing JSON reports should handle these new optional fields.
+- **Basic tier now emits a summary**: `basic_tier_summary_for_task()` produces a short task-context summary even without LLM synthesis. Previously Basic tier returned raw tool output only.
+- **Small model warning**: models with fewer than 100M estimated parameters emit a warning at load time. This is informational and does not block execution.
+
+### Migration
+
+- No TOML config changes required.
+- If you parse `RunReport` JSON, add handling for the new optional `elapsed_ms`, `llm_reasoning`, and `confidence` fields.
+- Model packs with placeholder (all-zero) SHA-256 checksums will now be rejected. Re-download any affected packs.
+
 ## v1.6.0
 
 ### Breaking/visible changes
