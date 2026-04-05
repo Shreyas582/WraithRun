@@ -129,12 +129,70 @@ impl<B: InferenceEngine> Agent<B> {
             });
         }
 
-        // Phase 1: deterministic tool execution — gather evidence.
+        // Dispatch based on capability tier (#92).
+        let (turns, final_answer, first_token_latency_ms) = match self.capability_tier {
+            ModelCapabilityTier::Basic => {
+                // Template-driven tool execution (no LLM for tool selection).
+                let (turns, _template) = self.run_template_phase(task).await;
+                let raw_findings = derive_findings(&turns, "");
+                let findings = deduplicate_findings(raw_findings);
+                debug!("Basic tier: skipping LLM synthesis");
+                let answer = basic_tier_summary(&findings);
+                (turns, answer, None)
+            }
+            ModelCapabilityTier::Moderate | ModelCapabilityTier::Strong => {
+                // ReAct loop: LLM decides tool selection (#92).
+                self.run_react_loop(task, &run_started_at).await?
+            }
+        };
+
+        let raw_findings = derive_findings(&turns, "");
+        let mut findings = deduplicate_findings(raw_findings);
+        sort_findings(&mut findings);
+
+        // Tag finding relevance: tools used in turns are primary.
+        let primary_tools: std::collections::HashSet<String> = turns
+            .iter()
+            .filter_map(|t| t.tool_call.as_ref().map(|c| c.tool.clone()))
+            .collect();
+        for finding in &mut findings {
+            if let Some(tool) = finding.evidence_pointer.tool.as_deref() {
+                if !primary_tools.contains(tool) {
+                    finding.relevance = crate::FindingRelevance::Supplementary;
+                }
+            }
+        }
+
+        let report_max_severity = max_severity(&findings);
+
+        Ok(RunReport {
+            task: task.to_string(),
+            case_id: None,
+            max_severity: report_max_severity,
+            backend: None,
+            model_capability: self.model_capability_report.clone(),
+            live_fallback_decision: None,
+            run_timing: Some(build_run_timing_metrics(
+                run_started_at,
+                first_token_latency_ms,
+            )),
+            live_run_metrics: None,
+            turns,
+            final_answer,
+            findings,
+            supplementary_findings: Vec::new(),
+        })
+    }
+
+    /// Template-driven tool execution (Phase 1 fallback for Basic tier).
+    async fn run_template_phase(
+        &self,
+        task: &str,
+    ) -> (Vec<AgentTurn>, &'static InvestigationTemplate) {
         let template = resolve_investigation_template(task);
         let mut turns = Vec::new();
 
         for tool_name in template.tools.iter().take(self.max_steps) {
-            // #74: skip tools with known-failing preconditions.
             if !self.check_tool_precondition(tool_name) {
                 debug!(tool = %tool_name, "skipping tool: precondition not met");
                 continue;
@@ -160,72 +218,108 @@ impl<B: InferenceEngine> Agent<B> {
             });
         }
 
-        // Phase 2: synthesis — behavior depends on capability tier.
-        let raw_findings = derive_findings(&turns, "");
-        let mut findings = deduplicate_findings(raw_findings);
-        sort_findings(&mut findings);
+        (turns, template)
+    }
 
-        // Tag finding relevance based on template's primary tool set (#86).
-        let primary_tools: std::collections::HashSet<&str> =
-            template.tools.iter().copied().collect();
-        for finding in &mut findings {
-            if let Some(tool) = finding.evidence_pointer.tool.as_deref() {
-                if !primary_tools.contains(tool) {
-                    finding.relevance = crate::FindingRelevance::Supplementary;
+    /// LLM-guided ReAct loop (#92).
+    ///
+    /// The LLM receives a system prompt with available tools and the task,
+    /// then iteratively decides which tool to call. It emits:
+    /// - `<call>{"tool":"name","args":{...}}</call>` to invoke a tool
+    /// - `<final>...</final>` to produce the final answer
+    async fn run_react_loop(
+        &self,
+        task: &str,
+        run_started_at: &Instant,
+    ) -> Result<(Vec<AgentTurn>, String, Option<u64>)> {
+        let tool_manifest = self.tools.manifest_compact();
+        let mut transcript = String::new();
+        let mut turns = Vec::new();
+        let mut first_token_latency_ms = None;
+
+        // Build the initial ReAct prompt.
+        let system_prompt = format_react_system_prompt(task, &tool_manifest);
+        transcript.push_str(&system_prompt);
+
+        for step in 0..self.max_steps {
+            let output = self.brain.generate(&transcript).await?;
+            if first_token_latency_ms.is_none() {
+                first_token_latency_ms = Some(elapsed_ms_since(*run_started_at));
+            }
+
+            info!(step = step + 1, output = %output, "ReAct step");
+
+            // Check for final answer first.
+            if let Some(final_text) = extract_tag(&output, "final") {
+                let raw_findings = derive_findings(&turns, "");
+                let findings = deduplicate_findings(raw_findings);
+                let answer = quality_checked_final_answer(&final_text, &findings);
+                return Ok((turns, answer, first_token_latency_ms));
+            }
+
+            // Try to parse a tool call.
+            if let Some(call_json) = extract_tag(&output, "call") {
+                match parse_tool_call(&call_json) {
+                    Some(mut call) => {
+                        self.apply_coverage_baseline_to_call(&mut call);
+
+                        let observation =
+                            match self.tools.execute(&call.tool, call.args.clone()).await {
+                                Ok(value) => value,
+                                Err(err) => json!({ "error": err.to_string() }),
+                            };
+
+                        info!(tool = %call.tool, step = step + 1, "ReAct tool executed");
+
+                        // Append observation to transcript for next iteration.
+                        let obs_str = serde_json::to_string(&observation).unwrap_or_default();
+                        let obs_truncated = if obs_str.len() > 2000 {
+                            format!("{}...(truncated)", &obs_str[..2000])
+                        } else {
+                            obs_str
+                        };
+                        transcript.push_str(&format!("\n{output}\nObservation: {obs_truncated}\n"));
+
+                        turns.push(AgentTurn {
+                            thought: format!("ReAct step {}: invoking {}", step + 1, call.tool),
+                            tool_call: Some(call),
+                            observation: Some(observation),
+                        });
+                    }
+                    None => {
+                        debug!(step = step + 1, "ReAct output contained unparseable <call>");
+                        transcript.push_str(&format!(
+                            "\n{output}\nObservation: ERROR — could not parse tool call. Use <call>{{\"tool\":\"name\",\"args\":{{...}}}}</call> format.\n"
+                        ));
+                    }
                 }
+            } else {
+                // No <call> or <final> tag — nudge the LLM.
+                debug!(step = step + 1, "ReAct output contained no action tags");
+                transcript.push_str(&format!(
+                    "\n{output}\nObservation: No action detected. Respond with <call>...</call> to use a tool or <final>...</final> to finish.\n"
+                ));
             }
         }
 
-        let (final_answer, first_token_latency_ms) = match self.capability_tier {
-            ModelCapabilityTier::Basic => {
-                // Skip LLM entirely; build deterministic summary from findings.
-                debug!("Basic tier: skipping LLM synthesis");
-                let answer = basic_tier_summary(&findings);
-                (answer, None)
-            }
-            ModelCapabilityTier::Moderate => {
-                // Call LLM with reduced evidence (top-5 observations).
-                let evidence_summary = build_evidence_summary_limited(&turns, 5);
-                let synthesis_prompt = format_synthesis_prompt(task, &evidence_summary);
-                let output = self.brain.generate(&synthesis_prompt).await?;
-                let latency = Some(elapsed_ms_since(run_started_at));
-                info!(output = %output, "agent synthesis output (moderate)");
-                let raw = extract_tag(&output, "final").unwrap_or(output);
-                let answer = quality_checked_final_answer(&raw, &findings);
-                (answer, latency)
-            }
-            ModelCapabilityTier::Strong => {
-                // Full evidence, full synthesis.
-                let evidence_summary = build_evidence_summary(&turns);
-                let synthesis_prompt = format_synthesis_prompt(task, &evidence_summary);
-                let output = self.brain.generate(&synthesis_prompt).await?;
-                let latency = Some(elapsed_ms_since(run_started_at));
-                info!(output = %output, "agent synthesis output (strong)");
-                let raw = extract_tag(&output, "final").unwrap_or(output);
-                let answer = quality_checked_final_answer(&raw, &findings);
-                (answer, latency)
-            }
-        };
+        // Max steps reached — fall back to template-driven evidence + synthesis.
+        info!(
+            max_steps = self.max_steps,
+            "ReAct loop exhausted max steps, falling back to template synthesis"
+        );
+        if turns.is_empty() {
+            let (template_turns, _) = self.run_template_phase(task).await;
+            turns = template_turns;
+        }
+        let evidence_summary = build_evidence_summary(&turns);
+        let synthesis_prompt = format_synthesis_prompt(task, &evidence_summary);
+        let output = self.brain.generate(&synthesis_prompt).await?;
+        let raw = extract_tag(&output, "final").unwrap_or(output);
+        let raw_findings = derive_findings(&turns, "");
+        let findings = deduplicate_findings(raw_findings);
+        let answer = quality_checked_final_answer(&raw, &findings);
 
-        let report_max_severity = max_severity(&findings);
-
-        Ok(RunReport {
-            task: task.to_string(),
-            case_id: None,
-            max_severity: report_max_severity,
-            backend: None,
-            model_capability: self.model_capability_report.clone(),
-            live_fallback_decision: None,
-            run_timing: Some(build_run_timing_metrics(
-                run_started_at,
-                first_token_latency_ms,
-            )),
-            live_run_metrics: None,
-            turns,
-            final_answer,
-            findings,
-            supplementary_findings: Vec::new(),
-        })
+        Ok((turns, answer, first_token_latency_ms))
     }
 
     /// Check whether a tool's preconditions are met before executing it.
@@ -404,10 +498,10 @@ fn build_evidence_summary_limited(turns: &[AgentTurn], max_turns: usize) -> Stri
             .map(|c| c.tool.as_str())
             .unwrap_or("unknown");
         if let Some(obs) = &turn.observation {
-            // Truncate large observations to keep within model context limits.
+            // Truncate large observations to keep within model context limits (#93).
             let obs_str = serde_json::to_string(obs).unwrap_or_default();
-            let truncated = if obs_str.len() > 1500 {
-                format!("{}...(truncated)", &obs_str[..1500])
+            let truncated = if obs_str.len() > 3000 {
+                format!("{}...(truncated)", &obs_str[..3000])
             } else {
                 obs_str
             };
@@ -418,21 +512,47 @@ fn build_evidence_summary_limited(turns: &[AgentTurn], max_turns: usize) -> Stri
     summary
 }
 
-/// Format the synthesis prompt that asks the LLM to analyze collected evidence.
+/// Format the synthesis prompt that asks the LLM to analyze collected evidence (#93).
+///
+/// Includes the task verbatim and structures the expected output format.
 fn format_synthesis_prompt(task: &str, evidence: &str) -> String {
     format!(
-        "You are a security analyst. Analyze the evidence below and write a report.\n\
-         Task: {task}\n\n\
-         Evidence from host investigation tools:\n\
+        "You are a security analyst conducting a host-level investigation.\n\n\
+         TASK (verbatim):\n{task}\n\n\
+         EVIDENCE from host investigation tools:\n\
          {evidence}\n\
-         Write your report inside <final>...</final> tags.\n\
-         Format:\n\
-         SUMMARY: One-line verdict.\n\
-         FINDINGS: Numbered list of specific observations from the evidence.\n\
-         RISK: critical/high/medium/low/info\n\
-         ACTIONS: Numbered remediation steps.\n\n\
+         Using ONLY the evidence above, write a structured report inside <final>...</final> tags.\n\
+         Required sections:\n\
+         SUMMARY: One-line verdict of the investigation.\n\
+         FINDINGS: Numbered list of specific, evidence-backed observations.\n\
+         RISK: One of critical / high / medium / low / info — with a one-line justification.\n\
+         ACTIONS: Numbered remediation or follow-up steps.\n\n\
          <final>"
     )
+}
+
+/// Build the initial ReAct system prompt for LLM-guided tool selection (#92).
+fn format_react_system_prompt(task: &str, tool_manifest: &str) -> String {
+    format!(
+        "You are an autonomous security investigation agent using a ReAct loop.\n\
+         Available tools:\n{tool_manifest}\n\n\
+         Task: {task}\n\n\
+         At each step, decide your next action.\n\
+         To call a tool, respond with: <call>{{\"tool\":\"tool_name\",\"args\":{{...}}}}</call>\n\
+         When you have enough evidence, write your final report: <final>SUMMARY: ...\nFINDINGS: ...\nRISK: ...\nACTIONS: ...</final>\n\n\
+         Begin your investigation.\n"
+    )
+}
+
+/// Parse a tool call from a JSON string extracted from `<call>...</call>` tags.
+fn parse_tool_call(json_str: &str) -> Option<ToolCall> {
+    let parsed: Value = serde_json::from_str(json_str).ok()?;
+    let tool = parsed.get("tool")?.as_str()?.to_string();
+    let args = parsed
+        .get("args")
+        .cloned()
+        .unwrap_or(Value::Object(Map::new()));
+    Some(ToolCall { tool, args })
 }
 
 fn build_run_timing_metrics(
@@ -581,7 +701,10 @@ mod tests {
 
     #[tokio::test]
     async fn executes_investigation_plan_and_synthesizes() {
+        // ReAct loop: LLM calls a tool, then produces final answer.
         let engine = MockEngine::new(vec![
+            r#"<call>{"tool":"audit_account_changes","args":{}}</call>"#,
+            r#"<call>{"tool":"scan_network","args":{"limit":40}}</call>"#,
             "<final>SUMMARY: Found 1 non-default privileged account.\nRISK: high</final>",
         ]);
 
@@ -598,10 +721,10 @@ mod tests {
             "final answer should contain synthesis: {}",
             report.final_answer
         );
-        // Agent should have run multiple tools from the investigation plan.
+        // ReAct loop should have executed tools from LLM decisions.
         assert!(
-            report.turns.len() >= 3,
-            "expected at least 3 tool turns, got {}",
+            report.turns.len() >= 2,
+            "expected at least 2 tool turns from ReAct, got {}",
             report.turns.len()
         );
         // All turns should have tool calls with observations.
@@ -618,27 +741,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn falls_back_to_raw_output_when_no_final_tag() {
-        let engine = MockEngine::new(vec!["No significant anomalies detected."]);
+    async fn react_immediate_final_answer() {
+        // ReAct loop: LLM immediately produces final answer without calling tools.
+        let engine = MockEngine::new(vec!["<final>No significant anomalies detected.</final>"]);
 
         let agent = Agent::new(engine, ToolRegistry::with_default_tools());
         let report = agent
-            .run("Perform a quick triage")
+            .run("Perform a quick triage of this host")
             .await
             .expect("agent run should succeed");
 
-        assert_eq!(report.final_answer, "No significant anomalies detected.");
-        // Investigation plan tools should still have been executed.
+        assert!(
+            report.final_answer.contains("No significant anomalies"),
+            "final answer: {}",
+            report.final_answer
+        );
+    }
+
+    #[tokio::test]
+    async fn basic_tier_uses_template_driven_execution() {
+        // Basic tier should use template-driven execution, not ReAct.
+        let engine = MockEngine::new(vec![]);
+
+        let agent = Agent::new(engine, ToolRegistry::with_default_tools())
+            .with_capability_tier(crate::ModelCapabilityTier::Basic);
+        let report = agent
+            .run("Investigate suspicious account behavior")
+            .await
+            .expect("agent run should succeed");
+
+        // Template-driven: should have run tools.
         assert!(
             report.turns.len() >= 3,
-            "expected at least 3 tool turns, got {}",
+            "expected at least 3 tool turns from template, got {}",
             report.turns.len()
         );
     }
 
     #[tokio::test]
     async fn derives_structured_findings_from_tool_observations() {
-        let engine = MockEngine::new(vec!["<final>summary</final>"]);
+        // ReAct loop: run tools then produce final answer.
+        let engine = MockEngine::new(vec![
+            r#"<call>{"tool":"audit_account_changes","args":{}}</call>"#,
+            r#"<call>{"tool":"scan_network","args":{"limit":40}}</call>"#,
+            "<final>summary</final>",
+        ]);
 
         let agent = Agent::new(engine, ToolRegistry::with_default_tools());
         let report = agent
@@ -766,5 +913,65 @@ mod tests {
         assert!(report.turns.is_empty(), "no tools should be executed");
         assert_eq!(report.findings.len(), 1);
         assert!(report.findings[0].title.contains("outside the scope"));
+    }
+
+    // ── ReAct helpers (#92) ──
+
+    use super::{format_react_system_prompt, parse_tool_call};
+
+    #[test]
+    fn parse_tool_call_valid_json() {
+        let call = parse_tool_call(r#"{"tool":"scan_network","args":{"limit":40}}"#);
+        assert!(call.is_some());
+        let call = call.unwrap();
+        assert_eq!(call.tool, "scan_network");
+        assert_eq!(call.args["limit"], 40);
+    }
+
+    #[test]
+    fn parse_tool_call_missing_args() {
+        let call = parse_tool_call(r#"{"tool":"scan_network"}"#);
+        assert!(call.is_some());
+        let call = call.unwrap();
+        assert_eq!(call.tool, "scan_network");
+        assert!(call.args.is_object());
+    }
+
+    #[test]
+    fn parse_tool_call_invalid_json() {
+        assert!(parse_tool_call("not json").is_none());
+    }
+
+    #[test]
+    fn parse_tool_call_missing_tool_field() {
+        assert!(parse_tool_call(r#"{"args":{}}"#).is_none());
+    }
+
+    #[test]
+    fn react_system_prompt_includes_task_and_tools() {
+        let prompt = format_react_system_prompt("Check SSH keys", "- scan_network: scan");
+        assert!(prompt.contains("Check SSH keys"));
+        assert!(prompt.contains("scan_network"));
+        assert!(prompt.contains("<call>"));
+        assert!(prompt.contains("<final>"));
+    }
+
+    #[tokio::test]
+    async fn react_loop_handles_unknown_tool_gracefully() {
+        let engine = MockEngine::new(vec![
+            r#"<call>{"tool":"nonexistent_tool","args":{}}</call>"#,
+            "<final>Investigation complete with partial data.</final>",
+        ]);
+
+        let agent = Agent::new(engine, ToolRegistry::with_default_tools());
+        let report = agent
+            .run("Investigate suspicious network activity")
+            .await
+            .expect("agent run should succeed");
+
+        // The unknown tool should produce an error observation, not crash.
+        assert!(report.turns.len() >= 1);
+        let obs = report.turns[0].observation.as_ref().unwrap();
+        assert!(obs.get("error").is_some());
     }
 }

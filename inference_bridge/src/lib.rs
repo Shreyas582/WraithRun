@@ -1,7 +1,9 @@
 pub mod backend;
 pub mod onnx_vitis;
 
+use std::any::Any;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -180,11 +182,16 @@ pub trait InferenceEngine: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct OnnxVitisEngine {
     config: ModelConfig,
+    /// Cached ONNX Runtime session reused across generate() calls (#64).
+    session_cache: Arc<Mutex<Option<Box<dyn Any + Send>>>>,
 }
 
 impl OnnxVitisEngine {
     pub fn new(config: ModelConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            session_cache: Arc::new(Mutex::new(None)),
+        }
     }
 
     fn extract_task_from_prompt(prompt: &str) -> Option<&str> {
@@ -372,7 +379,11 @@ impl InferenceEngine for OnnxVitisEngine {
             return Ok(self.dry_run_response(prompt));
         }
 
-        onnx_vitis::run_prompt(&self.config, prompt)
+        let mut guard = self
+            .session_cache
+            .lock()
+            .map_err(|e| anyhow::anyhow!("session cache lock poisoned: {e}"))?;
+        onnx_vitis::run_prompt_cached(&mut guard, &self.config, prompt)
     }
 }
 
