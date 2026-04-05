@@ -54,16 +54,165 @@ pub fn probe_model_capability(config: &ModelConfig) -> ModelCapabilityProbe {
 
 /// Estimate parameter count (in billions) from model file size.
 /// Assumes ~2 bytes per parameter (float16/bfloat16 quantised models).
+/// Sums external data files (`*.onnx_data`, `*.onnx.data`) that ONNX models
+/// commonly use for weights that exceed the 2 GB protobuf limit (#115).
 fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
-    match std::fs::metadata(model_path) {
-        Ok(meta) => {
-            let bytes = meta.len() as f64;
-            // ~2 bytes per param for fp16/bf16; adjust for overhead (~10%).
-            let estimated_params = bytes / 2.2;
-            (estimated_params / 1_000_000_000.0) as f32
+    let main_size = match std::fs::metadata(model_path) {
+        Ok(meta) => meta.len(),
+        Err(_) => return 0.0,
+    };
+
+    // Scan siblings for external weight files matching the model stem.
+    let external_size = model_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|model_name| {
+            let parent = model_path.parent()?;
+            let total: u64 = std::fs::read_dir(parent)
+                .ok()?
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let name = e.file_name();
+                    let name = name.to_string_lossy();
+                    // Match: model_q4.onnx_data, model_q4.onnx_data_0, model_q4.onnx.data
+                    name != model_name
+                        && (name.starts_with(&format!("{model_name}_data"))
+                            || name.starts_with(&format!("{model_name}.data")))
+                })
+                .filter_map(|e| e.metadata().ok().map(|m| m.len()))
+                .sum();
+            Some(total)
+        })
+        .unwrap_or(0);
+
+    let bytes = (main_size + external_size) as f64;
+    // ~2 bytes per param for fp16/bf16; adjust for overhead (~10%).
+    let estimated_params = bytes / 2.2;
+    (estimated_params / 1_000_000_000.0) as f32
+}
+
+// ── Dry-run investigation templates (#117) ──
+//
+// Mirrors the templates in `core_engine::builtin_investigation_templates()`
+// without a compile-time dependency on core_engine (which depends on us).
+// Order matters: earlier templates win on tied keyword scores.
+
+struct DryRunTemplate {
+    keywords: &'static [&'static str],
+    tools: &'static [&'static str],
+}
+
+static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
+    // baseline-capture — must outrank baseline-drift when "capture"/"coverage" present.
+    DryRunTemplate {
+        keywords: &["capture", "snapshot", "collect", "coverage", "baseline", "golden"],
+        tools: &["capture_coverage_baseline"],
+    },
+    // file-integrity
+    DryRunTemplate {
+        keywords: &["hash", "sha256", "checksum", "integrity", "tamper"],
+        tools: &["hash_binary", "inspect_persistence_locations"],
+    },
+    // syslog-summary
+    DryRunTemplate {
+        keywords: &["log", "syslog", "journal"],
+        tools: &["read_syslog", "audit_account_changes"],
+    },
+    // account-audit — before baseline-drift so "account drift" picks accounts first.
+    DryRunTemplate {
+        keywords: &["account", "user", "group", "member", "drift"],
+        tools: &[
+            "audit_account_changes",
+            "inspect_persistence_locations",
+            "check_privilege_escalation_vectors",
+        ],
+    },
+    // baseline-drift
+    DryRunTemplate {
+        keywords: &["drift", "baseline", "deviation"],
+        tools: &[
+            "correlate_process_network",
+            "audit_account_changes",
+            "inspect_persistence_locations",
+        ],
+    },
+    // process-network correlation
+    DryRunTemplate {
+        keywords: &["correlat", "process", "network"],
+        tools: &[
+            "correlate_process_network",
+            "scan_network",
+            "audit_account_changes",
+        ],
+    },
+    // ssh-key-investigation
+    DryRunTemplate {
+        keywords: &["ssh", "authorized_keys", "key"],
+        tools: &[
+            "audit_account_changes",
+            "inspect_persistence_locations",
+            "check_privilege_escalation_vectors",
+            "scan_network",
+        ],
+    },
+    // persistence-analysis
+    DryRunTemplate {
+        keywords: &["persistence", "autorun", "startup", "cron", "scheduled"],
+        tools: &[
+            "inspect_persistence_locations",
+            "audit_account_changes",
+            "read_syslog",
+        ],
+    },
+    // network-exposure-audit
+    DryRunTemplate {
+        keywords: &[
+            "network", "connection", "port", "listen", "listener", "lateral",
+            "beacon", "socket",
+        ],
+        tools: &[
+            "scan_network",
+            "correlate_process_network",
+            "audit_account_changes",
+        ],
+    },
+    // privilege-escalation
+    DryRunTemplate {
+        keywords: &["privilege", "escalat", "admin", "root", "sudo", "whoami", "unauthori"],
+        tools: &[
+            "check_privilege_escalation_vectors",
+            "audit_account_changes",
+            "inspect_persistence_locations",
+        ],
+    },
+];
+
+/// Broad-host-triage fallback when no template matches.
+static BROAD_TRIAGE_TOOLS: &[&str] = &[
+    "audit_account_changes",
+    "inspect_persistence_locations",
+    "read_syslog",
+    "scan_network",
+    "check_privilege_escalation_vectors",
+];
+
+/// Resolve the best-matching dry-run template by keyword scoring.
+fn resolve_dry_run_template(task: &str) -> &'static [&'static str] {
+    let lower = task.to_lowercase();
+    let mut best: Option<(&'static [&'static str], usize)> = None;
+
+    for tmpl in DRY_RUN_TEMPLATES {
+        let score = tmpl
+            .keywords
+            .iter()
+            .filter(|kw| lower.contains(**kw))
+            .count();
+        if score > 0 && best.is_none_or(|(_, s)| score > s) {
+            best = Some((tmpl.tools, score));
         }
-        Err(_) => 0.0,
     }
+
+    best.map(|(tools, _)| tools).unwrap_or(BROAD_TRIAGE_TOOLS)
 }
 
 /// Detect which execution provider would be used for this config.
@@ -184,6 +333,8 @@ pub struct OnnxVitisEngine {
     config: ModelConfig,
     /// Cached ONNX Runtime session reused across generate() calls (#64).
     session_cache: Arc<Mutex<Option<Box<dyn Any + Send>>>>,
+    /// Tracks which tool in the matched template to emit next during dry-run (#117, #118).
+    dry_run_tool_index: Arc<Mutex<usize>>,
 }
 
 impl OnnxVitisEngine {
@@ -191,6 +342,7 @@ impl OnnxVitisEngine {
         Self {
             config,
             session_cache: Arc::new(Mutex::new(None)),
+            dry_run_tool_index: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -265,109 +417,71 @@ impl OnnxVitisEngine {
     }
 
     fn dry_run_response(&self, prompt: &str) -> String {
-        let lower = prompt.to_ascii_lowercase();
         let task = Self::extract_task_from_prompt(prompt).unwrap_or(prompt);
-        let task_lower = task.to_ascii_lowercase();
 
-        if lower.contains("observation:") {
+        // Resolve the matching investigation template for this task (#117).
+        let template_tools = resolve_dry_run_template(task);
+
+        let mut idx = self
+            .dry_run_tool_index
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        // If we've already emitted all template tools, finish (#118).
+        if *idx >= template_tools.len() {
+            *idx = 0; // reset for next investigation
             return "<final>Dry-run cycle complete. Review the latest tool observations and escalate manually if indicators persist.</final>".to_string();
         }
 
-        if (task_lower.contains("baseline") || task_lower.contains("golden"))
-            && (task_lower.contains("capture")
-                || task_lower.contains("snapshot")
-                || task_lower.contains("collect")
-                || task_lower.contains("build"))
-            && (task_lower.contains("coverage")
-                || task_lower.contains("persistence")
-                || task_lower.contains("account")
-                || task_lower.contains("network")
-                || task_lower.contains("host"))
-        {
-            return r#"<call>{"tool":"capture_coverage_baseline","args":{"persistence_limit":256,"listener_limit":128}}</call>"#.to_string();
-        }
+        let tool_name = template_tools[*idx];
+        *idx += 1;
 
-        if task_lower.contains("hash")
-            || task_lower.contains("sha256")
-            || task_lower.contains("checksum")
-            || task_lower.contains("integrity")
-        {
-            let path =
-                Self::guess_path_from_task(task).unwrap_or_else(|| "./Cargo.toml".to_string());
-            let path = Self::escape_json_string(&path);
-            return format!(r#"<call>{{"tool":"hash_binary","args":{{"path":"{path}"}}}}</call>"#);
-        }
+        Self::format_dry_run_tool_call(tool_name, task)
+    }
 
-        if task_lower.contains("log") || task_lower.contains("syslog") {
-            let path =
-                Self::guess_path_from_task(task).unwrap_or_else(|| "./README.md".to_string());
-            let path = Self::escape_json_string(&path);
-            let max_lines = Self::guess_line_count_from_task(task).unwrap_or(200);
-            return format!(
-                r#"<call>{{"tool":"read_syslog","args":{{"path":"{path}","max_lines":{max_lines}}}}}</call>"#
-            );
+    /// Produce a dry-run `<call>` tag for the given tool, using heuristic args from the task.
+    fn format_dry_run_tool_call(tool_name: &str, task: &str) -> String {
+        match tool_name {
+            "capture_coverage_baseline" => {
+                r#"<call>{"tool":"capture_coverage_baseline","args":{"persistence_limit":256,"listener_limit":128}}</call>"#.to_string()
+            }
+            "hash_binary" => {
+                let path = Self::guess_path_from_task(task)
+                    .unwrap_or_else(|| "./Cargo.toml".to_string());
+                let path = Self::escape_json_string(&path);
+                format!(r#"<call>{{"tool":"hash_binary","args":{{"path":"{path}"}}}}</call>"#)
+            }
+            "read_syslog" => {
+                let path = Self::guess_path_from_task(task)
+                    .unwrap_or_else(|| "./README.md".to_string());
+                let path = Self::escape_json_string(&path);
+                let max_lines = Self::guess_line_count_from_task(task).unwrap_or(200);
+                format!(
+                    r#"<call>{{"tool":"read_syslog","args":{{"path":"{path}","max_lines":{max_lines}}}}}</call>"#
+                )
+            }
+            "correlate_process_network" => {
+                r#"<call>{"tool":"correlate_process_network","args":{"limit":64}}</call>"#
+                    .to_string()
+            }
+            "scan_network" => {
+                r#"<call>{"tool":"scan_network","args":{"limit":40}}</call>"#.to_string()
+            }
+            "inspect_persistence_locations" => {
+                r#"<call>{"tool":"inspect_persistence_locations","args":{"limit":200}}</call>"#
+                    .to_string()
+            }
+            "audit_account_changes" => {
+                r#"<call>{"tool":"audit_account_changes","args":{}}</call>"#.to_string()
+            }
+            "check_privilege_escalation_vectors" => {
+                r#"<call>{"tool":"check_privilege_escalation_vectors","args":{}}</call>"#
+                    .to_string()
+            }
+            other => {
+                format!(r#"<call>{{"tool":"{other}","args":{{}}}}</call>"#)
+            }
         }
-
-        if task_lower.contains("persistence")
-            || task_lower.contains("startup")
-            || task_lower.contains("autorun")
-            || task_lower.contains("run key")
-        {
-            return r#"<call>{"tool":"inspect_persistence_locations","args":{"limit":200}}</call>"#
-                .to_string();
-        }
-
-        if task_lower.contains("account")
-            && (task_lower.contains("change")
-                || task_lower.contains("admin")
-                || task_lower.contains("group")
-                || task_lower.contains("privilege")
-                || task_lower.contains("baseline")
-                || task_lower.contains("drift"))
-        {
-            return r#"<call>{"tool":"audit_account_changes","args":{}}</call>"#.to_string();
-        }
-
-        if (task_lower.contains("baseline") || task_lower.contains("drift"))
-            && (task_lower.contains("network")
-                || task_lower.contains("listener")
-                || task_lower.contains("port")
-                || task_lower.contains("socket"))
-        {
-            return r#"<call>{"tool":"correlate_process_network","args":{"limit":64}}</call>"#
-                .to_string();
-        }
-
-        if (task_lower.contains("process")
-            && (task_lower.contains("network")
-                || task_lower.contains("listener")
-                || task_lower.contains("port")
-                || task_lower.contains("socket")))
-            || (task_lower.contains("correlat") && task_lower.contains("network"))
-        {
-            return r#"<call>{"tool":"correlate_process_network","args":{"limit":64}}</call>"#
-                .to_string();
-        }
-
-        if task_lower.contains("network")
-            || task_lower.contains("listener")
-            || task_lower.contains("port")
-            || task_lower.contains("socket")
-        {
-            return r#"<call>{"tool":"scan_network","args":{"limit":40}}</call>"#.to_string();
-        }
-
-        if task_lower.contains("ssh")
-            || task_lower.contains("privilege")
-            || task_lower.contains("escalation")
-            || task_lower.contains("sudo")
-            || task_lower.contains("whoami")
-        {
-            return r#"<call>{"tool":"check_privilege_escalation_vectors","args":{}}</call>"#
-                .to_string();
-        }
-
-        r#"<call>{"tool":"check_privilege_escalation_vectors","args":{}}</call>"#.to_string()
     }
 }
 
@@ -491,11 +605,26 @@ mod tests {
         assert!(output.contains("\"max_lines\":50"));
     }
 
+    /// Verify dry-run iterates all template tools then emits `<final>` (#118).
     #[test]
-    fn returns_final_answer_after_observation() {
+    fn iterates_all_template_tools_then_final() {
         let engine = dry_run_engine();
-        let output =
-            engine.dry_run_response("Task: Investigate unauthorized SSH keys\nObservation: {}\n");
-        assert!(output.contains("<final>"));
+        // SSH-key template has 4 tools.
+        let task = "Task: Investigate unauthorized SSH keys";
+
+        let out1 = engine.dry_run_response(task);
+        assert!(out1.contains("\"tool\":\"audit_account_changes\""));
+
+        let out2 = engine.dry_run_response(&format!("{task}\nObservation: {{}}"));
+        assert!(out2.contains("\"tool\":\"inspect_persistence_locations\""));
+
+        let out3 = engine.dry_run_response(&format!("{task}\nObservation: {{}}\nObservation: {{}}"));
+        assert!(out3.contains("\"tool\":\"check_privilege_escalation_vectors\""));
+
+        let out4 = engine.dry_run_response(&format!("{task}\n...Observation x3..."));
+        assert!(out4.contains("\"tool\":\"scan_network\""));
+
+        let out5 = engine.dry_run_response(&format!("{task}\n...Observation x4..."));
+        assert!(out5.contains("<final>"));
     }
 }

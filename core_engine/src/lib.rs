@@ -186,6 +186,9 @@ pub struct AgentTurn {
     pub thought: String,
     pub tool_call: Option<ToolCall>,
     pub observation: Option<Value>,
+    /// Wall-clock tool execution time in milliseconds (#129).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -817,6 +820,32 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
         ));
     }
 
+    // Evidence-derived confidence adjustments (#121):
+    // 1. Corroboration: boost confidence when multiple tools report related findings.
+    // 2. Count distinct tools that contributed concrete findings (non-error, non-fallback).
+    let distinct_tools: HashSet<&str> = findings
+        .iter()
+        .filter_map(|f| f.evidence_pointer.tool.as_deref())
+        .collect();
+    let corroboration_bonus: f32 = match distinct_tools.len() {
+        0 | 1 => 0.0,
+        2 => 0.03,
+        _ => 0.05,
+    };
+
+    for finding in &mut findings {
+        // Only boost concrete tool-sourced findings, not error/fallback entries.
+        if finding.evidence_pointer.tool.is_some()
+            && finding.evidence_pointer.field != "observation.error"
+        {
+            finding.confidence =
+                ((finding.confidence + corroboration_bonus) * 100.0).round() / 100.0;
+            if finding.confidence > 0.99 {
+                finding.confidence = 0.99;
+            }
+        }
+    }
+
     // Backfill confidence labels from float values (#85).
     findings
         .into_iter()
@@ -957,8 +986,18 @@ fn deterministic_summary(findings: &[Finding]) -> String {
 /// Format follows the spec from issue #79 — byte-identical across runs
 /// with the same findings.
 pub fn basic_tier_summary(findings: &[Finding]) -> String {
+    basic_tier_summary_for_task(findings, None)
+}
+
+/// Task-aware variant of [`basic_tier_summary`] that generates a contextual
+/// executive sentence referencing the investigation task (#122).
+pub fn basic_tier_summary_for_task(findings: &[Finding], task: Option<&str>) -> String {
     if findings.is_empty() {
-        return "SUMMARY: 0 findings detected. Maximum severity: info.\nFINDINGS:\n(none)\nRISK: info\nACTIONS:\n(none)".to_string();
+        let prefix = match task {
+            Some(t) => format!("SUMMARY: Task \"{t}\" completed with 0 findings. Maximum severity: info."),
+            None => "SUMMARY: 0 findings detected. Maximum severity: info.".to_string(),
+        };
+        return format!("{prefix}\nFINDINGS:\n(none)\nRISK: info\nACTIONS:\n(none)");
     }
 
     let max_sev = findings
@@ -967,11 +1006,24 @@ pub fn basic_tier_summary(findings: &[Finding]) -> String {
         .max()
         .unwrap_or(FindingSeverity::Info);
 
-    let mut out = format!(
-        "SUMMARY: {} findings detected. Maximum severity: {}.\nFINDINGS:\n",
-        findings.len(),
-        max_sev.token()
-    );
+    let distinct_tools: HashSet<&str> = findings
+        .iter()
+        .filter_map(|f| f.evidence_pointer.tool.as_deref())
+        .collect();
+
+    let mut out = match task {
+        Some(t) => format!(
+            "SUMMARY: Task \"{t}\" produced {} findings across {} tool(s). Maximum severity: {}.\nFINDINGS:\n",
+            findings.len(),
+            distinct_tools.len(),
+            max_sev.token()
+        ),
+        None => format!(
+            "SUMMARY: {} findings detected. Maximum severity: {}.\nFINDINGS:\n",
+            findings.len(),
+            max_sev.token()
+        ),
+    };
 
     for (i, f) in findings.iter().enumerate() {
         out.push_str(&format!(
@@ -1007,10 +1059,25 @@ pub struct ModelCapabilityReport {
     pub vocab_size: usize,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub r#override: bool,
+    /// Warning emitted when the model is likely too small for ReAct (#120).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 impl ModelCapabilityReport {
     pub fn from_probe(probe: &ModelCapabilityProbe, tier: ModelCapabilityTier) -> Self {
+        let warning = if tier >= ModelCapabilityTier::Moderate
+            && probe.estimated_param_billions > 0.0
+            && probe.estimated_param_billions < 3.0
+        {
+            Some(format!(
+                "Model estimated at {:.1}B params — ReAct tool-use may be unreliable below 7B. \
+                 Consider --capability-override basic for deterministic mode.",
+                probe.estimated_param_billions,
+            ))
+        } else {
+            None
+        };
         Self {
             tier,
             estimated_params_b: probe.estimated_param_billions,
@@ -1018,6 +1085,7 @@ impl ModelCapabilityReport {
             smoke_latency_ms: probe.smoke_latency_ms,
             vocab_size: probe.vocab_size,
             r#override: false,
+            warning,
         }
     }
 }
@@ -1099,6 +1167,7 @@ mod tests {
                 "indicator_count": 2,
                 "potential_vectors": ["SeDebugPrivilege"]
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1121,6 +1190,7 @@ mod tests {
             observation: Some(json!({
                 "error": "socket inventory command failed"
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1139,6 +1209,7 @@ mod tests {
             thought: "No-op".to_string(),
             tool_call: None,
             observation: None,
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "No significant anomalies detected.");
@@ -1160,6 +1231,7 @@ mod tests {
                 "suspicious_entry_count": 2,
                 "actionable_suspicious_count": 2
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1183,6 +1255,7 @@ mod tests {
                 "newly_privileged_account_count": 1,
                 "newly_privileged_accounts": ["svc-backup"]
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1207,6 +1280,7 @@ mod tests {
                 "high_risk_exposed_count": 2,
                 "network_risk_score": 78
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1231,6 +1305,7 @@ mod tests {
                 "baseline_privileged_account_count": 3,
                 "baseline_exposed_binding_count": 5
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1410,7 +1485,8 @@ mod tests {
     // ── Capability tiering tests (#77) ──
 
     use super::{
-        basic_tier_summary, classify_capability, ModelCapabilityReport, ModelCapabilityTier,
+        basic_tier_summary, basic_tier_summary_for_task, classify_capability,
+        ModelCapabilityReport, ModelCapabilityTier,
     };
     use inference_bridge::ModelCapabilityProbe;
 
@@ -1564,6 +1640,20 @@ mod tests {
         assert_eq!(a, b);
     }
 
+    #[test]
+    fn basic_tier_summary_for_task_includes_task_name() {
+        let findings = vec![make_finding(
+            "Priv-esc detected",
+            FindingSeverity::High,
+            0.85,
+            "check_privilege_escalation_vectors",
+            "observation.indicator_count",
+        )];
+        let summary = basic_tier_summary_for_task(&findings, Some("windows-triage"));
+        assert!(summary.contains("Task \"windows-triage\""));
+        assert!(summary.contains("1 tool(s)"));
+    }
+
     // ── Discrete confidence label tests (#85) ──
 
     use super::{confidence_to_label, FindingConfidence, FindingRelevance};
@@ -1642,6 +1732,7 @@ mod tests {
             observation: Some(json!({
                 "indicator_count": 2,
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "");

@@ -311,7 +311,11 @@ impl ToolRegistry {
             }
             "check_privilege_escalation_vectors" => {
                 #[cfg(target_os = "windows")]
-                self.policy.ensure_command_allowed("whoami")?;
+                {
+                    self.policy.ensure_command_allowed("whoami")?;
+                    self.policy.ensure_command_allowed("reg")?;
+                    self.policy.ensure_command_allowed("sc")?;
+                }
 
                 #[cfg(not(target_os = "windows"))]
                 {
@@ -513,10 +517,17 @@ fn suspicious_windows_privilege_markers() -> &'static Vec<&'static str> {
     static MARKERS: OnceLock<Vec<&'static str>> = OnceLock::new();
     MARKERS.get_or_init(|| {
         vec![
+            // Token privileges (classic escalation vectors)
             "SeImpersonatePrivilege",
             "SeAssignPrimaryTokenPrivilege",
             "SeDebugPrivilege",
             "SeTakeOwnershipPrivilege",
+            // Additional high-value privileges (#125)
+            "SeLoadDriverPrivilege",
+            "SeRestorePrivilege",
+            "SeBackupPrivilege",
+            "SeTcbPrivilege",
+            "SeCreateTokenPrivilege",
         ]
     })
 }
@@ -650,7 +661,7 @@ impl Tool for CheckPrivilegeEscalationVectorsTool {
                 .map(|line| line.to_string())
                 .collect();
 
-            let indicators: Vec<String> = sample
+            let mut indicators: Vec<String> = sample
                 .iter()
                 .filter(|line| {
                     suspicious_windows_privilege_markers()
@@ -659,6 +670,64 @@ impl Tool for CheckPrivilegeEscalationVectorsTool {
                 })
                 .cloned()
                 .collect();
+
+            // Check AlwaysInstallElevated registry keys (#125).
+            for key in &[
+                r"HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer",
+                r"HKCU\SOFTWARE\Policies\Microsoft\Windows\Installer",
+            ] {
+                if let Ok(reg_out) = Command::new("reg")
+                    .args(["query", key, "/v", "AlwaysInstallElevated"])
+                    .output()
+                    .await
+                {
+                    let reg_stdout = String::from_utf8_lossy(&reg_out.stdout);
+                    if reg_out.status.success() && reg_stdout.contains("0x1") {
+                        indicators.push(format!("AlwaysInstallElevated=1 in {key}"));
+                    }
+                }
+            }
+
+            // Check for unquoted service paths (#125).
+            if let Ok(sc_out) = Command::new("sc")
+                .args(["query", "type=", "service", "state=", "all"])
+                .output()
+                .await
+            {
+                let sc_stdout = String::from_utf8_lossy(&sc_out.stdout);
+                let service_names: Vec<&str> = sc_stdout
+                    .lines()
+                    .filter_map(|line| {
+                        let trimmed = line.trim();
+                        trimmed.strip_prefix("SERVICE_NAME: ")
+                    })
+                    .take(200)
+                    .collect();
+
+                for svc in service_names {
+                    if let Ok(qc_out) = Command::new("sc")
+                        .args(["qc", svc])
+                        .output()
+                        .await
+                    {
+                        let qc_stdout = String::from_utf8_lossy(&qc_out.stdout);
+                        for line in qc_stdout.lines() {
+                            let trimmed = line.trim();
+                            if let Some(bin_path) = trimmed.strip_prefix("BINARY_PATH_NAME") {
+                                let bin_path = bin_path.trim_start_matches([' ', ':', '\t']);
+                                if bin_path.contains(' ')
+                                    && !bin_path.starts_with('"')
+                                    && !bin_path.starts_with('\'')
+                                {
+                                    indicators.push(format!(
+                                        "Unquoted service path: {svc} -> {bin_path}"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             return Ok(json!({
                 "indicator_count": indicators.len(),
@@ -706,7 +775,13 @@ impl Tool for CheckPrivilegeEscalationVectorsTool {
             let sample: Vec<String> = lines.into_iter().take(200).collect();
             let indicators: Vec<String> = sample
                 .iter()
-                .filter(|line| line.contains("NOPASSWD") || line.contains("(ALL)"))
+                .filter(|line| {
+                    line.contains("NOPASSWD")
+                        || line.contains("(ALL)")
+                        || line.contains("(root)")
+                        || line.contains("setuid")
+                        || line.contains("setgid")
+                })
                 .cloned()
                 .collect();
 

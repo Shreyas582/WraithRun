@@ -88,16 +88,16 @@ fn is_onnx_path(path: &Path) -> bool {
 
 fn discover_tokenizer_candidates(model_path: &Path) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(parent) = model_path.parent() {
-        candidates.push(parent.join("tokenizer.json"));
 
-        if let Ok(entries) = fs::read_dir(parent) {
+    // Helper: scan a directory for tokenizer JSON files.
+    let scan_dir = |dir: &Path, candidates: &mut Vec<PathBuf>| {
+        candidates.push(dir.join("tokenizer.json"));
+        if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if !path.is_file() {
                     continue;
                 }
-
                 let is_json = path
                     .extension()
                     .and_then(|ext| ext.to_str())
@@ -106,17 +106,26 @@ fn discover_tokenizer_candidates(model_path: &Path) -> Vec<PathBuf> {
                 if !is_json {
                     continue;
                 }
-
                 let has_tokenizer_name = path
                     .file_name()
                     .and_then(|name| name.to_str())
                     .map(|name| name.to_ascii_lowercase().contains("tokenizer"))
                     .unwrap_or(false);
-
                 if has_tokenizer_name {
                     candidates.push(path);
                 }
             }
+        }
+    };
+
+    // Search model's parent directory.
+    if let Some(parent) = model_path.parent() {
+        scan_dir(parent, &mut candidates);
+
+        // Search grandparent directory (#128) — common for HuggingFace layouts
+        // where model.onnx lives in an `onnx/` subdirectory.
+        if let Some(grandparent) = parent.parent() {
+            scan_dir(grandparent, &mut candidates);
         }
     }
 
@@ -467,7 +476,7 @@ fn render_live_setup_summary(runtime: &RuntimeConfig, config_path: &Path) -> Str
 
     output.trim_end().to_string()
 }
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::io::{Cursor, IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -3450,6 +3459,13 @@ fn run_model_download(pack_name: &str) -> Result<String> {
 
     if dest_file.exists() {
         // Verify existing file checksum.
+        if is_placeholder_checksum(pack.sha256) {
+            return Ok(format!(
+                "Model pack '{}' already exists at {} (checksum skipped — placeholder hash).",
+                pack.name,
+                dest_file.display()
+            ));
+        }
         let existing_hash = sha256_file(&dest_file)?;
         if existing_hash == pack.sha256 {
             return Ok(format!(
@@ -3492,24 +3508,35 @@ fn run_model_download(pack_name: &str) -> Result<String> {
 
     match status {
         Ok(exit) if exit.success() => {
-            let hash = sha256_file(&dest_file)?;
-            if hash == pack.sha256 {
+            if is_placeholder_checksum(pack.sha256) {
+                let hash = sha256_file(&dest_file)?;
                 Ok(format!(
-                    "Downloaded '{}' to {} (checksum verified).",
-                    pack.name,
-                    dest_file.display()
-                ))
-            } else {
-                Ok(format!(
-                    "Downloaded '{}' to {} but checksum mismatch!\n\
-                     Expected: {}\n\
-                     Got:      {}\n\
-                     The file may be corrupt or the manifest may need an update.",
+                    "Downloaded '{}' to {} (SHA-256: {}).\n\
+                     Note: checksum verification skipped — manifest contains placeholder hash.",
                     pack.name,
                     dest_file.display(),
-                    pack.sha256,
                     hash,
                 ))
+            } else {
+                let hash = sha256_file(&dest_file)?;
+                if hash == pack.sha256 {
+                    Ok(format!(
+                        "Downloaded '{}' to {} (checksum verified).",
+                        pack.name,
+                        dest_file.display()
+                    ))
+                } else {
+                    Ok(format!(
+                        "Downloaded '{}' to {} but checksum mismatch!\n\
+                         Expected: {}\n\
+                         Got:      {}\n\
+                         The file may be corrupt or the manifest may need an update.",
+                        pack.name,
+                        dest_file.display(),
+                        pack.sha256,
+                        hash,
+                    ))
+                }
             }
         }
         Ok(exit) => bail!(
@@ -3534,6 +3561,12 @@ fn sha256_file(path: &Path) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(&data);
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Returns true when the checksum is a placeholder string that cannot be
+/// meaningfully compared against a real SHA-256 digest (#123).
+fn is_placeholder_checksum(checksum: &str) -> bool {
+    checksum.starts_with("placeholder-")
 }
 
 fn collect_model_pack_candidates(cli: &Cli) -> Result<Vec<ModelPackCandidate>> {
@@ -3601,6 +3634,67 @@ fn collect_model_pack_candidates(cli: &Cli) -> Result<Vec<ModelPackCandidate>> {
             source,
             runtime,
         });
+    }
+
+    // Auto-discover .onnx models in ./models that are not already referenced (#124).
+    let models_dir = PathBuf::from("./models");
+    if models_dir.is_dir() {
+        let already_referenced: HashSet<PathBuf> = packs
+            .iter()
+            .filter_map(|p| fs::canonicalize(&p.runtime.model).ok())
+            .collect();
+
+        if let Ok(dir_entries) = fs::read_dir(&models_dir) {
+            for entry in dir_entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() || !is_onnx_path(&path) {
+                    continue;
+                }
+                let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                if already_referenced.contains(&canonical) {
+                    continue;
+                }
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let tokenizer = discover_tokenizer_path(&path);
+                let runtime = RuntimeConfig {
+                    task: String::new(),
+                    model: path,
+                    tokenizer,
+                    max_steps: 6,
+                    max_new_tokens: 512,
+                    temperature: 0.7,
+                    live: true,
+                    live_fallback_policy: LiveFallbackPolicy::default(),
+                    format: OutputFormat::default(),
+                    output_mode: OutputMode::default(),
+                    automation_adapter: None,
+                    exit_policy: ExitPolicy::default(),
+                    exit_threshold: None,
+                    output_file: None,
+                    case_id: None,
+                    evidence_bundle_dir: None,
+                    evidence_bundle_archive: None,
+                    baseline_bundle: None,
+                    log_mode: LogMode::default(),
+                    vitis_config: None,
+                    vitis_cache_dir: None,
+                    vitis_cache_key: None,
+                    backend: None,
+                    capability_override: None,
+                    tools_dir: None,
+                    allowed_plugins: Vec::new(),
+                };
+                packs.push(ModelPackCandidate {
+                    name: format!("discovered:{stem}"),
+                    source: "auto-discovered".to_string(),
+                    runtime,
+                });
+            }
+        }
     }
 
     if packs.is_empty() {
@@ -6086,6 +6180,13 @@ async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunRep
         (tier, Some(report))
     };
 
+    // Emit small-model warning to stderr if applicable (#120).
+    if let Some(ref report) = capability_report {
+        if let Some(ref warning) = report.warning {
+            eprintln!("⚠ {warning}");
+        }
+    }
+
     let brain = OnnxVitisEngine::new(model_config);
     let mut tools = ToolRegistry::with_default_tools();
     // Load plugin tools if configured.
@@ -6385,6 +6486,7 @@ mod tests {
                     args: json!({ "limit": 40 }),
                 }),
                 observation: Some(json!({ "listener_count": 3, "listeners": [] })),
+                elapsed_ms: None,
             }],
             final_answer: "Dry-run cycle complete.".to_string(),
             findings: vec![Finding::new(

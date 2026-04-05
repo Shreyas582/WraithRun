@@ -143,6 +143,23 @@ fn collect_unix_entries(entries: &mut Vec<PersistenceEntry>, limit: usize) {
         let location = home_autostart.display().to_string();
         scan_directory_entries(&location, "user_autostart", &home_autostart, entries, limit);
     }
+
+    // User-level systemd units (#126).
+    if let Ok(home) = env::var("HOME") {
+        let user_systemd = PathBuf::from(&home).join(".config/systemd/user");
+        if user_systemd.is_dir() {
+            let location = user_systemd.display().to_string();
+            scan_directory_entries(&location, "user_systemd", &user_systemd, entries, limit);
+        }
+    }
+
+    // User crontab via /var/spool/cron (#126).
+    for crontab_dir in &["/var/spool/cron/crontabs", "/var/spool/cron"] {
+        let path = Path::new(crontab_dir);
+        if path.is_dir() {
+            scan_directory_entries(crontab_dir, "user_crontab", path, entries, limit);
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -163,6 +180,15 @@ fn windows_run_keys() -> &'static [&'static str] {
     &[
         r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
         r"HKLM\Software\Microsoft\Windows\CurrentVersion\Run",
+        // RunOnce keys (#126)
+        r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce",
+        r"HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce",
+        // Winlogon persistence (#126)
+        r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon",
+        // Image File Execution Options / debugger hijack (#126)
+        r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
+        // AppInit_DLLs (#126)
+        r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows",
     ]
 }
 
@@ -179,6 +205,11 @@ fn unix_persistence_directories() -> &'static [&'static str] {
         "/etc/cron.hourly",
         "/etc/systemd/system",
         "/etc/init.d",
+        // Additional persistence locations (#126)
+        "/etc/cron.weekly",
+        "/etc/cron.monthly",
+        "/etc/xdg/autostart",
+        "/usr/lib/systemd/system",
     ]
 }
 
@@ -198,6 +229,14 @@ fn is_suspicious_persistence_entry(entry: &str) -> bool {
         "rundll32",
         "wscript",
         "cscript",
+        // Additional suspicious markers (#126)
+        "mshta",
+        "regsvr32",
+        "certutil",
+        "bitsadmin",
+        "msiexec",
+        "base64",
+        "/tmp/",
     ]
     .iter()
     .any(|marker| lower.contains(marker))
