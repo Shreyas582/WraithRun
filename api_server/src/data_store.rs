@@ -361,7 +361,7 @@ fn row_to_run_entry(row: &rusqlite::Row) -> Result<RunEntry> {
         report: report_json
             .as_deref()
             .filter(|s| !s.is_empty())
-            .map(|s| serde_json::from_str(s))
+            .map(serde_json::from_str)
             .transpose()?,
         error: row.get(4)?,
         created_at: row.get(5)?,

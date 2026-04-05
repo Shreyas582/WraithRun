@@ -214,7 +214,7 @@ mod tests {
             log.emit(audit_event(
                 AuditEventKind::RunCreated,
                 "cli",
-                &format!("run/{i}"),
+                format!("run/{i}"),
                 details(&[]),
             ))
             .await;

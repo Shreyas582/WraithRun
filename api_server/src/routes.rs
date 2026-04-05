@@ -258,7 +258,7 @@ async fn create_run(
         .emit(audit_event(
             AuditEventKind::RunCreated,
             "api-token:default",
-            &format!("run/{run_id}"),
+            format!("run/{run_id}"),
             details(&[("task", &entry_task)]),
         ))
         .await;
@@ -310,7 +310,7 @@ async fn execute_run(state: AppState, run_id: Uuid, task: String, max_steps: usi
                     .emit(audit_event(
                         AuditEventKind::RunCompleted,
                         "system",
-                        &format!("run/{run_id}"),
+                        format!("run/{run_id}"),
                         details(&[("task", &task)]),
                     ))
                     .await;
@@ -335,7 +335,7 @@ async fn execute_run(state: AppState, run_id: Uuid, task: String, max_steps: usi
                     .emit(audit_event(
                         AuditEventKind::RunFailed,
                         "system",
-                        &format!("run/{run_id}"),
+                        format!("run/{run_id}"),
                         details(&[("task", &task), ("error", &err_msg)]),
                     ))
                     .await;
@@ -423,7 +423,7 @@ async fn cancel_run(
                     .emit(audit_event(
                         AuditEventKind::RunCancelled,
                         "api-token:default",
-                        &format!("run/{id}"),
+                        format!("run/{id}"),
                         details(&[]),
                     ))
                     .await;
@@ -505,7 +505,7 @@ async fn create_case(
         .emit(audit_event(
             AuditEventKind::CaseCreated,
             "api-token:default",
-            &format!("case/{}", case.id),
+            format!("case/{}", case.id),
             details(&[("title", &title)]),
         ))
         .await;
@@ -648,7 +648,7 @@ async fn update_case(
         .emit(audit_event(
             AuditEventKind::CaseUpdated,
             "api-token:default",
-            &format!("case/{id}"),
+            format!("case/{id}"),
             details(&[]),
         ))
         .await;
@@ -747,8 +747,10 @@ mod tests {
     const TEST_TOKEN: &str = "test-secret-token";
 
     fn test_state() -> AppState {
-        let mut config = ServerConfig::default();
-        config.api_token = TEST_TOKEN.to_string();
+        let config = ServerConfig {
+            api_token: TEST_TOKEN.to_string(),
+            ..ServerConfig::default()
+        };
         AppState::new(config)
     }
 
@@ -887,7 +889,7 @@ mod tests {
         let app = build_router(test_state());
         let fake_id = Uuid::new_v4();
         let req = Request::builder()
-            .uri(&format!("/api/v1/runs/{fake_id}"))
+            .uri(format!("/api/v1/runs/{fake_id}"))
             .header(key, val)
             .body(Body::empty())
             .unwrap();
@@ -902,7 +904,7 @@ mod tests {
         let fake_id = Uuid::new_v4();
         let req = Request::builder()
             .method("POST")
-            .uri(&format!("/api/v1/runs/{fake_id}/cancel"))
+            .uri(format!("/api/v1/runs/{fake_id}/cancel"))
             .header(key, val)
             .body(Body::empty())
             .unwrap();
@@ -925,7 +927,7 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["mode"], "dry-run");
-        assert!(json["tools_available"].as_array().unwrap().len() > 0);
+        assert!(!json["tools_available"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -956,7 +958,7 @@ mod tests {
         let app2 = build_router(state);
         let (key2, val2) = auth_header();
         let req = Request::builder()
-            .uri(&format!("/api/v1/runs/{run_id}"))
+            .uri(format!("/api/v1/runs/{run_id}"))
             .header(key2, val2)
             .body(Body::empty())
             .unwrap();
@@ -971,9 +973,11 @@ mod tests {
 
     #[tokio::test]
     async fn concurrency_limit_rejects_excess_runs() {
-        let mut config = ServerConfig::default();
-        config.max_concurrent_runs = 1;
-        config.api_token = TEST_TOKEN.to_string();
+        let config = ServerConfig {
+            max_concurrent_runs: 1,
+            api_token: TEST_TOKEN.to_string(),
+            ..ServerConfig::default()
+        };
         let state = AppState::new(config);
 
         // Manually occupy one slot.

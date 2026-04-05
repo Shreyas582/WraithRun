@@ -4529,28 +4529,26 @@ fn render_json_compact(report: &RunReport) -> Result<String> {
     object.remove("turns");
 
     // In compact mode, move supplementary findings to supplementary_findings (#86).
-    if let Some(findings_val) = object.remove("findings") {
-        if let Value::Array(all_findings) = findings_val {
-            let mut primary = Vec::new();
-            let mut supplementary = Vec::new();
+    if let Some(Value::Array(all_findings)) = object.remove("findings") {
+        let mut primary = Vec::new();
+        let mut supplementary = Vec::new();
 
-            for f in all_findings {
-                let is_supplementary =
-                    f.get("relevance").and_then(Value::as_str) == Some("supplementary");
-                if is_supplementary {
-                    supplementary.push(f);
-                } else {
-                    primary.push(f);
-                }
+        for f in all_findings {
+            let is_supplementary =
+                f.get("relevance").and_then(Value::as_str) == Some("supplementary");
+            if is_supplementary {
+                supplementary.push(f);
+            } else {
+                primary.push(f);
             }
+        }
 
-            object.insert("findings".to_string(), Value::Array(primary));
-            if !supplementary.is_empty() {
-                object.insert(
-                    "supplementary_findings".to_string(),
-                    Value::Array(supplementary),
-                );
-            }
+        object.insert("findings".to_string(), Value::Array(primary));
+        if !supplementary.is_empty() {
+            object.insert(
+                "supplementary_findings".to_string(),
+                Value::Array(supplementary),
+            );
         }
     }
 
@@ -5434,7 +5432,7 @@ fn render_narrative(report: &RunReport) -> String {
                 let obs_summary = turn
                     .observation
                     .as_ref()
-                    .map(|o| summarize_observation(o))
+                    .map(summarize_observation)
                     .unwrap_or_else(|| "no output".to_string());
                 let _ = writeln!(
                     output,

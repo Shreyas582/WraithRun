@@ -161,10 +161,8 @@ impl ProviderRegistry {
     /// Each backend probes its own availability. The registry stores all
     /// backends (available or not) for diagnostic listing.
     pub fn discover() -> Self {
-        let mut backends: Vec<Box<dyn ExecutionProviderBackend>> = Vec::new();
-
-        // CPU is always available.
-        backends.push(Box::new(CpuBackend));
+        #[allow(unused_mut)]
+        let mut backends: Vec<Box<dyn ExecutionProviderBackend>> = vec![Box::new(CpuBackend)];
 
         // Vitis backend (only when compiled with the `vitis` feature).
         #[cfg(feature = "vitis")]
@@ -245,7 +243,7 @@ impl ProviderRegistry {
             .filter(|b| b.is_available())
             .map(|b| b.as_ref())
             .collect();
-        candidates.sort_by(|a, b| b.priority().cmp(&a.priority()));
+        candidates.sort_by_key(|b| std::cmp::Reverse(b.priority()));
 
         for backend in candidates {
             match backend.build_session(config, options) {
