@@ -688,6 +688,7 @@ async fn list_case_runs(
 struct RuntimeStatusResponse {
     mode: &'static str,
     tools_available: Vec<String>,
+    plugin_tools: Vec<String>,
     max_concurrent_runs: usize,
 }
 
@@ -696,6 +697,7 @@ async fn runtime_status(State(state): State<AppState>) -> Json<RuntimeStatusResp
     Json(RuntimeStatusResponse {
         mode: "dry-run",
         tools_available: registry.tool_names(),
+        plugin_tools: state.config.plugin_tool_names.clone(),
         max_concurrent_runs: state.config.max_concurrent_runs,
     })
 }

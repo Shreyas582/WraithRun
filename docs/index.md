@@ -13,6 +13,23 @@ Use this documentation to install, run, and operate WraithRun in your own enviro
 - [Security and Sandbox](security-sandbox.md): policy controls and environment variables.
 - [Troubleshooting](troubleshooting.md): common errors and fixes.
 
+## Investigation Playbooks
+
+Step-by-step guides for common security investigation scenarios.
+
+- [Investigate Suspicious SSH Keys](playbook-ssh-keys.md)
+- [Triage a Compromised Windows Workstation](playbook-windows-triage.md)
+- [Audit Privileged Accounts After a Credential Leak](playbook-credential-leak.md)
+- [Check for Persistence Mechanisms Post-Breach](playbook-persistence-sweep.md)
+
+## Reference
+
+- [Plugin API](plugin-api.md): extend WraithRun with external tool plugins.
+- [MITRE ATT&CK Mapping](mitre-attack-mapping.md): tools mapped to ATT&CK techniques.
+- [Threat Model](threat-model.md): WraithRun's attack surface, trust boundaries, and security controls.
+- [Sample Report: Linux Persistence](sample-report-linux-persistence.md)
+- [Sample Report: Windows Triage](sample-report-windows-triage.md)
+
 ## Operations and Releases
 
 - [Release Plan](RELEASE_PLAN.md)

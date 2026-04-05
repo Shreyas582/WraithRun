@@ -1,5 +1,41 @@
 # Upgrade Notes
 
+## v1.2.0
+
+### Breaking/visible changes
+
+- Two new CLI flags: `--tools-dir <PATH>` and `--allowed-plugins <name1,name2,...>`. These are optional and have no effect unless explicitly used.
+- The `/api/v1/runtime/status` response now includes a `plugin_tools` array (empty when no plugins are loaded). Clients that strictly validate the response schema may need updating.
+- The web dashboard has been completely redesigned with a 5-tab layout. Bookmarks or scripts that scraped the old single-page layout may need adjustment.
+- Workspace tokio dependency now includes the `io-util` feature. This is transparent to users but may slightly increase binary size.
+
+### New documentation
+
+- **Investigation playbooks**: 4 step-by-step guides for common security tasks (SSH keys, Windows triage, credential leak, persistence sweep).
+- **Plugin API**: full reference for writing external tool plugins (`docs/plugin-api.md`).
+- **MITRE ATT&CK mapping**: all 8 built-in tools mapped to ATT&CK techniques.
+- **Threat model**: attack surface analysis and security control documentation.
+- **Sample reports**: 2 anonymized investigation reports demonstrating output format.
+
+### Migration examples
+
+To load an external plugin tool:
+
+```bash
+# Create a plugin directory with a tool.toml manifest
+mkdir -p ~/.config/wraithrun/tools/my_scanner
+# ... add tool.toml and executable (see docs/plugin-api.md)
+
+# Run with the plugin enabled
+wraithrun --allowed-plugins my_scanner --task "Scan host 10.0.0.1"
+```
+
+To verify plugin discovery:
+
+```bash
+wraithrun --allowed-plugins my_scanner --doctor
+```
+
 ## v1.1.0
 
 ### Breaking/visible changes

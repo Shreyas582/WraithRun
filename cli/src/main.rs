@@ -687,6 +687,15 @@ struct Cli {
     #[arg(long, value_name = "PATH", requires = "serve")]
     audit_log: Option<PathBuf>,
 
+    /// Directory containing plugin tool subdirectories (each with a tool.toml).
+    #[arg(long, value_name = "PATH")]
+    tools_dir: Option<PathBuf>,
+
+    /// Comma-separated list of plugin names to allow. Plugins not on this list
+    /// are ignored during discovery.
+    #[arg(long, value_delimiter = ',')]
+    allowed_plugins: Vec<String>,
+
     #[arg(long)]
     config: Option<PathBuf>,
 
@@ -828,6 +837,8 @@ struct RuntimeConfig {
     vitis_cache_dir: Option<String>,
     vitis_cache_key: Option<String>,
     capability_override: Option<CapabilityOverride>,
+    tools_dir: Option<PathBuf>,
+    allowed_plugins: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1145,6 +1156,8 @@ impl RuntimeConfig {
             vitis_cache_dir: None,
             vitis_cache_key: None,
             capability_override: None,
+            tools_dir: None,
+            allowed_plugins: Vec::new(),
         }
     }
 
@@ -1439,6 +1452,20 @@ async fn main() -> Result<()> {
         }
         if let Some(audit_path) = &cli.audit_log {
             config.audit_log_path = Some(audit_path.clone());
+        }
+        if !cli.allowed_plugins.is_empty() {
+            let tools_dir = cli
+                .tools_dir
+                .clone()
+                .unwrap_or_else(cyber_tools::plugin::PluginConfig::default_tools_dir);
+            let plugin_config = cyber_tools::plugin::PluginConfig::new(
+                tools_dir,
+                cli.allowed_plugins.clone(),
+            );
+            let policy = cyber_tools::SandboxPolicy::default();
+            let plugins = cyber_tools::plugin::discover_plugins(&plugin_config, &policy);
+            config.plugin_tool_names =
+                plugins.iter().map(|t| t.spec().name.clone()).collect();
         }
         run_server(config).await?;
         return Ok(());
@@ -2528,6 +2555,12 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     }
     if let Some(capability_override) = cli.capability_override {
         runtime.capability_override = Some(capability_override);
+    }
+    if let Some(tools_dir) = &cli.tools_dir {
+        runtime.tools_dir = Some(tools_dir.clone());
+    }
+    if !cli.allowed_plugins.is_empty() {
+        runtime.allowed_plugins = cli.allowed_plugins.clone();
     }
 }
 
@@ -3890,6 +3923,55 @@ fn run_doctor(cli: &Cli) -> DoctorReport {
                             format!(
                                 "Vitis config is set but file was not found: {}",
                                 path.display()
+                            ),
+                        );
+                    }
+                }
+
+                // Plugin tools check.
+                if !runtime.allowed_plugins.is_empty() {
+                    let tools_dir = runtime
+                        .tools_dir
+                        .clone()
+                        .unwrap_or_else(cyber_tools::plugin::PluginConfig::default_tools_dir);
+                    if tools_dir.is_dir() {
+                        let config = cyber_tools::plugin::PluginConfig::new(
+                            tools_dir.clone(),
+                            runtime.allowed_plugins.clone(),
+                        );
+                        let policy = cyber_tools::SandboxPolicy::default();
+                        let plugins = cyber_tools::plugin::discover_plugins(&config, &policy);
+                        if plugins.is_empty() {
+                            report.push(
+                                DoctorStatus::Warn,
+                                "plugin-tools",
+                                format!(
+                                    "No plugin tools loaded from {} (allowed: {:?})",
+                                    tools_dir.display(),
+                                    runtime.allowed_plugins,
+                                ),
+                            );
+                        } else {
+                            let names: Vec<String> =
+                                plugins.iter().map(|t| t.spec().name.clone()).collect();
+                            report.push(
+                                DoctorStatus::Pass,
+                                "plugin-tools",
+                                format!(
+                                    "Loaded {} plugin tool(s) from {}: {}",
+                                    plugins.len(),
+                                    tools_dir.display(),
+                                    names.join(", "),
+                                ),
+                            );
+                        }
+                    } else {
+                        report.push(
+                            DoctorStatus::Warn,
+                            "plugin-tools",
+                            format!(
+                                "Plugin tools directory not found: {}",
+                                tools_dir.display(),
                             ),
                         );
                     }
@@ -5678,7 +5760,17 @@ async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunRep
     };
 
     let brain = OnnxVitisEngine::new(model_config);
-    let tools = ToolRegistry::with_default_tools();
+    let mut tools = ToolRegistry::with_default_tools();
+    // Load plugin tools if configured.
+    if !runtime.allowed_plugins.is_empty() {
+        let tools_dir = runtime
+            .tools_dir
+            .clone()
+            .unwrap_or_else(cyber_tools::plugin::PluginConfig::default_tools_dir);
+        let plugin_config =
+            cyber_tools::plugin::PluginConfig::new(tools_dir, runtime.allowed_plugins.clone());
+        tools.load_plugins(&plugin_config);
+    }
     let mut agent = Agent::new(brain, tools)
         .with_max_steps(runtime.max_steps)
         .with_capability_tier(tier);
@@ -5899,6 +5991,8 @@ mod tests {
             vitis_cache_dir: None,
             vitis_cache_key: None,
             capability_override: None,
+            tools_dir: None,
+            allowed_plugins: vec![],
         }
     }
 

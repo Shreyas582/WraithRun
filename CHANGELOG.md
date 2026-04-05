@@ -8,7 +8,19 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
-- (none yet)
+- **Dashboard UX overhaul** (#99): 5-tab layout (Runs, Findings, Cases, Compare, Health) with SVG donut severity charts, clickable evidence chains, run comparison diff view, JSON/CSV export, real-time progress spinners, and case management panel.
+- **Tool plugin API** (#102): extend WraithRun with external tool plugins via `tool.toml` manifests and subprocess JSON I/O.
+  - `--tools-dir` and `--allowed-plugins` CLI flags.
+  - Automatic plugin discovery, platform filtering, sandbox policy enforcement, and timeout support.
+  - Plugin tools appear in `--doctor` output and `/api/v1/runtime/status` endpoint.
+  - Example plugin in `examples/tools/hello_world/`.
+  - Full documentation in `docs/plugin-api.md`.
+- **Security professional documentation** (#100):
+  - Four investigation playbooks: SSH key compromise, Windows triage, credential leak audit, persistence sweep.
+  - MITRE ATT&CK mapping for all 8 built-in tools.
+  - Threat model with attack surface, trust boundaries, and security controls.
+  - Two anonymized sample investigation reports.
+- Added `io-util` feature to workspace tokio dependency for plugin subprocess I/O.
 
 ### Changed
 
