@@ -475,6 +475,7 @@ use std::time::Instant;
 use std::{fmt::Write as _, fs};
 
 use anyhow::{anyhow, bail, Context, Result};
+use api_server::{run_server, ServerConfig};
 use clap::{Parser, ValueEnum};
 use core_engine::agent::Agent;
 use core_engine::{
@@ -488,7 +489,6 @@ use inference_bridge::{probe_model_capability, ModelConfig, OnnxVitisEngine, Vit
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use api_server::{run_server, ServerConfig};
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_CONFIG_FILE: &str = "wraithrun.toml";
@@ -1458,14 +1458,11 @@ async fn main() -> Result<()> {
                 .tools_dir
                 .clone()
                 .unwrap_or_else(cyber_tools::plugin::PluginConfig::default_tools_dir);
-            let plugin_config = cyber_tools::plugin::PluginConfig::new(
-                tools_dir,
-                cli.allowed_plugins.clone(),
-            );
+            let plugin_config =
+                cyber_tools::plugin::PluginConfig::new(tools_dir, cli.allowed_plugins.clone());
             let policy = cyber_tools::SandboxPolicy::default();
             let plugins = cyber_tools::plugin::discover_plugins(&plugin_config, &policy);
-            config.plugin_tool_names =
-                plugins.iter().map(|t| t.spec().name.clone()).collect();
+            config.plugin_tool_names = plugins.iter().map(|t| t.spec().name.clone()).collect();
         }
         run_server(config).await?;
         return Ok(());
@@ -3969,10 +3966,7 @@ fn run_doctor(cli: &Cli) -> DoctorReport {
                         report.push(
                             DoctorStatus::Warn,
                             "plugin-tools",
-                            format!(
-                                "Plugin tools directory not found: {}",
-                                tools_dir.display(),
-                            ),
+                            format!("Plugin tools directory not found: {}", tools_dir.display(),),
                         );
                     }
                 }
@@ -4541,10 +4535,8 @@ fn render_json_compact(report: &RunReport) -> Result<String> {
             let mut supplementary = Vec::new();
 
             for f in all_findings {
-                let is_supplementary = f
-                    .get("relevance")
-                    .and_then(Value::as_str)
-                    == Some("supplementary");
+                let is_supplementary =
+                    f.get("relevance").and_then(Value::as_str) == Some("supplementary");
                 if is_supplementary {
                     supplementary.push(f);
                 } else {
@@ -5401,7 +5393,11 @@ fn render_narrative(report: &RunReport) -> String {
         if total_findings == 1 { "" } else { "s" },
     );
     if let Some(sev) = report.max_severity {
-        let _ = write!(output, " with a maximum severity of **{}**", finding_severity_label(sev));
+        let _ = write!(
+            output,
+            " with a maximum severity of **{}**",
+            finding_severity_label(sev)
+        );
     }
     let _ = writeln!(output, ".");
 
@@ -5481,7 +5477,11 @@ fn render_narrative(report: &RunReport) -> String {
             }
 
             let _ = writeln!(output);
-            let _ = writeln!(output, "**Recommended Action:** {}", finding.recommended_action);
+            let _ = writeln!(
+                output,
+                "**Recommended Action:** {}",
+                finding.recommended_action
+            );
             let _ = writeln!(output);
         }
     }
@@ -5509,7 +5509,10 @@ fn render_narrative(report: &RunReport) -> String {
     let _ = writeln!(output, "{}", report.final_answer);
 
     // ── Metadata ─────────────────────────────────────────────────────
-    if report.model_capability.is_some() || report.live_fallback_decision.is_some() || report.live_run_metrics.is_some() {
+    if report.model_capability.is_some()
+        || report.live_fallback_decision.is_some()
+        || report.live_run_metrics.is_some()
+    {
         let _ = writeln!(output);
         let _ = writeln!(output, "---");
         let _ = writeln!(output, "*Report metadata:*");
@@ -5517,7 +5520,11 @@ fn render_narrative(report: &RunReport) -> String {
             let _ = writeln!(output, "- Model tier: {}", cap.tier);
         }
         if let Some(decision) = &report.live_fallback_decision {
-            let _ = writeln!(output, "- Inference mode: {} ({})", decision.fallback_mode, decision.reason);
+            let _ = writeln!(
+                output,
+                "- Inference mode: {} ({})",
+                decision.fallback_mode, decision.reason
+            );
         }
         if let Some(metrics) = &report.live_run_metrics {
             let _ = writeln!(
@@ -6034,8 +6041,7 @@ mod tests {
                     tool: Some("scan_network".to_string()),
                     field: "observation.listener_count".to_string(),
                 },
-                "Correlate listener PIDs and ports with expected services."
-                    .to_string(),
+                "Correlate listener PIDs and ports with expected services.".to_string(),
             )],
             supplementary_findings: Vec::new(),
         }

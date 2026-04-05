@@ -15,8 +15,8 @@ use core_engine::agent::Agent;
 use cyber_tools::ToolRegistry;
 use inference_bridge::{ModelConfig, OnnxVitisEngine};
 
-use crate::state::{chrono_now, AppState, CaseEntry, CaseStatus, RunEntry, RunStatus};
 use crate::audit::{audit_event, details, AuditEventKind};
+use crate::state::{chrono_now, AppState, CaseEntry, CaseStatus, RunEntry, RunStatus};
 
 /// Build the full application router with all v1 endpoints.
 pub fn build_router(state: AppState) -> Router {
@@ -42,9 +42,7 @@ pub fn build_router(state: AppState) -> Router {
         ));
 
     // Health is unauthenticated.
-    let api_v1 = Router::new()
-        .route("/health", get(health))
-        .merge(authed);
+    let api_v1 = Router::new().route("/health", get(health)).merge(authed);
 
     Router::new()
         .route("/", get(dashboard))
@@ -761,13 +759,15 @@ mod tests {
     #[tokio::test]
     async fn dashboard_returns_html() {
         let app = build_router(test_state());
-        let req = Request::builder()
-            .uri("/")
-            .body(Body::empty())
-            .unwrap();
+        let req = Request::builder().uri("/").body(Body::empty()).unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert!(ct.contains("html"));
     }
 
@@ -781,9 +781,7 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), 4096)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
     }
@@ -823,9 +821,7 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), 4096)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["ready"], true);
         assert!(json["tools_available"].as_u64().unwrap() > 0);
@@ -862,9 +858,7 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::ACCEPTED);
 
-        let body = axum::body::to_bytes(resp.into_body(), 4096)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "queued");
         assert!(json["id"].as_str().is_some());
@@ -882,9 +876,7 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), 4096)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json.is_array());
     }
@@ -930,9 +922,7 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), 4096)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["mode"], "dry-run");
         assert!(json["tools_available"].as_array().unwrap().len() > 0);
@@ -955,9 +945,7 @@ mod tests {
             ))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
-        let body = axum::body::to_bytes(resp.into_body(), 4096)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let create_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let run_id = create_json["id"].as_str().unwrap();
 
@@ -975,9 +963,7 @@ mod tests {
         let resp = app2.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), 65536)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
         let run_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(run_json["id"], run_id);
         assert_eq!(run_json["task"], "Investigate unauthorized SSH keys");

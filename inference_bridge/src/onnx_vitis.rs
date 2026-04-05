@@ -449,10 +449,7 @@ fn discover_custom_ops_library_path(model_path: &Path, configured_path: &str) ->
 fn discover_ort_dylib_path(config: &ModelConfig) -> Option<PathBuf> {
     let mut candidates = Vec::new();
 
-    if let Some(vitis_config_path) = config
-        .backend_config
-        .get("config_file")
-    {
+    if let Some(vitis_config_path) = config.backend_config.get("config_file") {
         let vitis_config_path = PathBuf::from(vitis_config_path);
         if let Some(parent) = vitis_config_path.parent() {
             candidates.push(parent.join("onnxruntime.dll"));

@@ -533,8 +533,7 @@ mod tests {
             backend_override: None,
             backend_config: Default::default(),
         };
-        let result =
-            registry.build_session_with_fallback(&config, &BackendOptions::new(), None);
+        let result = registry.build_session_with_fallback(&config, &BackendOptions::new(), None);
         assert!(result.is_ok());
         let (backend_name, _session) = result.unwrap();
         assert!(!backend_name.is_empty());

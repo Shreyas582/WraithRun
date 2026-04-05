@@ -20,8 +20,8 @@ pub struct DataStore {
 impl DataStore {
     /// Open or create a database at the given path. Runs migrations automatically.
     pub fn open(path: &Path) -> Result<Self> {
-        let conn =
-            Connection::open(path).with_context(|| format!("opening database at {}", path.display()))?;
+        let conn = Connection::open(path)
+            .with_context(|| format!("opening database at {}", path.display()))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -366,10 +366,7 @@ fn row_to_run_entry(row: &rusqlite::Row) -> Result<RunEntry> {
         error: row.get(4)?,
         created_at: row.get(5)?,
         completed_at: row.get(6)?,
-        case_id: case_id_str
-            .as_deref()
-            .map(Uuid::parse_str)
-            .transpose()?,
+        case_id: case_id_str.as_deref().map(Uuid::parse_str).transpose()?,
     })
 }
 

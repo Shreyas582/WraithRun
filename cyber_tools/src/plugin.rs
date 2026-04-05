@@ -176,13 +176,12 @@ impl Tool for PluginTool {
 
         // Parse stdout as JSON.
         let stdout = &output.stdout[..output.stdout.len().min(MAX_STDOUT_BYTES)];
-        let result: Value =
-            serde_json::from_slice(stdout).map_err(|e| {
-                ToolError::Execution(format!(
-                    "plugin '{}' produced invalid JSON: {e}",
-                    self.manifest.name
-                ))
-            })?;
+        let result: Value = serde_json::from_slice(stdout).map_err(|e| {
+            ToolError::Execution(format!(
+                "plugin '{}' produced invalid JSON: {e}",
+                self.manifest.name
+            ))
+        })?;
 
         Ok(result)
     }
@@ -237,10 +236,7 @@ fn dirs_path() -> PathBuf {
 ///
 /// Each subdirectory must contain a `tool.toml`. Plugins not in the
 /// `allowed_plugins` set are skipped.
-pub fn discover_plugins(
-    config: &PluginConfig,
-    policy: &SandboxPolicy,
-) -> Vec<Arc<dyn Tool>> {
+pub fn discover_plugins(config: &PluginConfig, policy: &SandboxPolicy) -> Vec<Arc<dyn Tool>> {
     let mut tools: Vec<Arc<dyn Tool>> = Vec::new();
 
     let entries = match std::fs::read_dir(&config.tools_dir) {
@@ -326,7 +322,10 @@ fn load_plugin(
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("");
-    if policy.command_denylist.contains(&cmd_name.to_ascii_lowercase()) {
+    if policy
+        .command_denylist
+        .contains(&cmd_name.to_ascii_lowercase())
+    {
         return Err(ToolError::PolicyDenied(format!(
             "plugin command '{cmd_name}' is in the sandbox denylist"
         )));
@@ -443,10 +442,8 @@ platforms = ["{platform}"]
             std::fs::set_permissions(&cmd_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
-        let config = PluginConfig::new(
-            tmp.path().to_path_buf(),
-            vec!["allowed_plugin".to_string()],
-        );
+        let config =
+            PluginConfig::new(tmp.path().to_path_buf(), vec!["allowed_plugin".to_string()]);
         let policy = SandboxPolicy::strict_default();
         let tools = discover_plugins(&config, &policy);
         assert_eq!(tools.len(), 1);
@@ -469,10 +466,8 @@ platforms = ["nonexistent_os"]
         );
         std::fs::write(plugin_dir.join("run.sh"), "#!/bin/sh\necho {}").unwrap();
 
-        let config = PluginConfig::new(
-            tmp.path().to_path_buf(),
-            vec!["wrong_platform".to_string()],
-        );
+        let config =
+            PluginConfig::new(tmp.path().to_path_buf(), vec!["wrong_platform".to_string()]);
         let policy = SandboxPolicy::strict_default();
         let tools = discover_plugins(&config, &policy);
         assert!(tools.is_empty(), "wrong-platform plugin should not load");

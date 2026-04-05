@@ -1,5 +1,6 @@
 # Rust build outputs
 /target/
+cli/target/
 
 # Cargo backup files
 **/*.rs.bk

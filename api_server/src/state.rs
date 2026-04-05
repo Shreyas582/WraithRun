@@ -111,9 +111,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: ServerConfig) -> Self {
-        let db = config.database_path.as_ref().map(|path| {
-            DataStore::open(path).expect("failed to open database")
-        });
+        let db = config
+            .database_path
+            .as_ref()
+            .map(|path| DataStore::open(path).expect("failed to open database"));
         let audit = AuditLog::new(AuditLogConfig {
             file_path: config.audit_log_path.clone(),
             max_buffer: None,

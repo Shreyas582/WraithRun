@@ -816,7 +816,10 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
     }
 
     // Backfill confidence labels from float values (#85).
-    findings.into_iter().map(|f| f.with_derived_label()).collect()
+    findings
+        .into_iter()
+        .map(|f| f.with_derived_label())
+        .collect()
 }
 
 /// Tool authority ranking — higher means this tool's findings should be preferred

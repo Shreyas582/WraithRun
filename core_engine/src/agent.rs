@@ -274,8 +274,18 @@ const IN_SCOPE_KEYWORDS: &[&str] = &[
 
 /// Keywords that indicate a task targets capabilities outside the local toolset.
 const OUT_OF_SCOPE_INDICATORS: &[&str] = &[
-    "cloud", "aws", "azure", "gcp", "s3", "iam", "kubernetes", "container", "api", "email",
-    "phishing", "siem",
+    "cloud",
+    "aws",
+    "azure",
+    "gcp",
+    "s3",
+    "iam",
+    "kubernetes",
+    "container",
+    "api",
+    "email",
+    "phishing",
+    "siem",
 ];
 
 /// Check whether a task is within the scope of available host-local tools.
@@ -284,9 +294,7 @@ const OUT_OF_SCOPE_INDICATORS: &[&str] = &[
 pub fn check_task_scope(task: &str) -> Option<Finding> {
     let lower = task.to_lowercase();
 
-    let has_in_scope = IN_SCOPE_KEYWORDS
-        .iter()
-        .any(|kw| has_word(&lower, kw));
+    let has_in_scope = IN_SCOPE_KEYWORDS.iter().any(|kw| has_word(&lower, kw));
 
     if has_in_scope {
         return None;

@@ -163,7 +163,10 @@ pub fn audit_event(
 pub fn details(pairs: &[(&str, &str)]) -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::new();
     for (k, v) in pairs {
-        map.insert((*k).to_string(), serde_json::Value::String((*v).to_string()));
+        map.insert(
+            (*k).to_string(),
+            serde_json::Value::String((*v).to_string()),
+        );
     }
     map
 }
