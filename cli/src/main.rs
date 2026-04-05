@@ -605,7 +605,7 @@ impl CapabilityOverride {
 #[derive(Debug, Parser, Clone)]
 #[command(name = "wraithrun", about = "Local-first cyber investigation runtime")]
 struct Cli {
-    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates", "verify_bundle", "live_setup", "models_list", "models_validate", "models_benchmark", "serve"])]
+    #[arg(long, required_unless_present_any = ["task_file", "task_stdin", "task_template", "doctor", "list_profiles", "list_tools", "describe_tool", "print_effective_config", "init_config", "explain_effective_config", "list_task_templates", "verify_bundle", "live_setup", "models_list", "models_validate", "models_benchmark", "model_download", "serve"])]
     task: Option<String>,
 
     #[arg(long, value_name = "PATH", conflicts_with_all = ["task", "task_stdin", "task_template"])]
@@ -673,6 +673,10 @@ struct Cli {
 
     #[arg(long)]
     models_benchmark: bool,
+
+    /// Download a recommended model pack by name (e.g. "tinyllama-1.1b-chat").
+    #[arg(long, value_name = "NAME")]
+    model_download: Option<String>,
 
     #[arg(long)]
     serve: bool,
@@ -1478,6 +1482,12 @@ async fn main() -> Result<()> {
 
     if cli.models_benchmark {
         let rendered = run_models_benchmark(&cli, cli.introspection_format)?;
+        println!("{rendered}");
+        return Ok(());
+    }
+
+    if let Some(ref pack_name) = cli.model_download {
+        let rendered = run_model_download(pack_name)?;
         println!("{rendered}");
         return Ok(());
     }
@@ -3128,6 +3138,9 @@ fn ensure_exclusive_modes(cli: &Cli) -> Result<()> {
     if cli.models_benchmark {
         selected.push("--models-benchmark");
     }
+    if cli.model_download.is_some() {
+        selected.push("--model-download");
+    }
     if cli.serve {
         selected.push("--serve");
     }
@@ -3357,6 +3370,170 @@ fn run_models_benchmark(cli: &Cli, format: IntrospectionFormat) -> Result<String
         IntrospectionFormat::Text => Ok(render_model_pack_benchmark(&view)),
         IntrospectionFormat::Json => render_json_with_contract(&view),
     }
+}
+
+// ── Model pack download (#94) ──
+
+/// Recommended model pack manifest. Each entry defines a downloadable model
+/// with URL, expected SHA-256 checksum, and estimated size.
+struct ModelPackEntry {
+    name: &'static str,
+    description: &'static str,
+    url: &'static str,
+    sha256: &'static str,
+    size_mb: u64,
+    format: &'static str,
+}
+
+fn recommended_model_packs() -> &'static [ModelPackEntry] {
+    &[
+        ModelPackEntry {
+            name: "tinyllama-1.1b-chat",
+            description: "TinyLlama 1.1B Chat — fast, low-resource host triage",
+            url:
+                "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.onnx",
+            sha256: "placeholder-sha256-tinyllama-1.1b-chat",
+            size_mb: 640,
+            format: "onnx",
+        },
+        ModelPackEntry {
+            name: "phi-2-2.7b",
+            description: "Phi-2 2.7B — balanced quality and speed for investigation",
+            url: "https://huggingface.co/microsoft/phi-2/resolve/main/model.onnx",
+            sha256: "placeholder-sha256-phi-2-2.7b",
+            size_mb: 1800,
+            format: "onnx",
+        },
+        ModelPackEntry {
+            name: "qwen2-0.5b",
+            description: "Qwen2 0.5B — ultra-lightweight for constrained environments",
+            url: "https://huggingface.co/Qwen/Qwen2-0.5B/resolve/main/model.onnx",
+            sha256: "placeholder-sha256-qwen2-0.5b",
+            size_mb: 350,
+            format: "onnx",
+        },
+    ]
+}
+
+fn run_model_download(pack_name: &str) -> Result<String> {
+    let packs = recommended_model_packs();
+
+    // Special case: "list" shows all available packs.
+    if pack_name == "list" {
+        let mut output = String::from("Available model packs:\n\n");
+        for pack in packs {
+            output.push_str(&format!(
+                "  {:<24} {:>6} MB  ({})  {}\n",
+                pack.name, pack.size_mb, pack.format, pack.description
+            ));
+        }
+        output.push_str("\nUsage: wraithrun --model-download <NAME>\n");
+        return Ok(output);
+    }
+
+    let pack = packs
+        .iter()
+        .find(|p| p.name == pack_name)
+        .ok_or_else(|| {
+            let available = packs
+                .iter()
+                .map(|p| p.name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow!(
+                "Unknown model pack '{pack_name}'. Available: {available}. Use --model-download list to see details."
+            )
+        })?;
+
+    let dest_dir = PathBuf::from("./models");
+    let dest_file = dest_dir.join(format!("{}.onnx", pack.name));
+
+    if dest_file.exists() {
+        // Verify existing file checksum.
+        let existing_hash = sha256_file(&dest_file)?;
+        if existing_hash == pack.sha256 {
+            return Ok(format!(
+                "Model pack '{}' already exists at {} (checksum verified).",
+                pack.name,
+                dest_file.display()
+            ));
+        }
+        return Ok(format!(
+            "Model pack '{}' exists at {} but checksum does not match.\n\
+             Expected: {}\n\
+             Got:      {}\n\
+             Re-download with: curl -L -o {} {}\n",
+            pack.name,
+            dest_file.display(),
+            pack.sha256,
+            existing_hash,
+            dest_file.display(),
+            pack.url,
+        ));
+    }
+
+    // Create destination directory.
+    if !dest_dir.exists() {
+        fs::create_dir_all(&dest_dir)
+            .with_context(|| format!("failed to create directory '{}'", dest_dir.display()))?;
+    }
+
+    // Attempt download via curl (available on most platforms).
+    eprintln!(
+        "Downloading {} ({} MB) from {}...",
+        pack.name, pack.size_mb, pack.url
+    );
+
+    let status = std::process::Command::new("curl")
+        .args(["-L", "--progress-bar", "-o"])
+        .arg(&dest_file)
+        .arg(pack.url)
+        .status();
+
+    match status {
+        Ok(exit) if exit.success() => {
+            let hash = sha256_file(&dest_file)?;
+            if hash == pack.sha256 {
+                Ok(format!(
+                    "Downloaded '{}' to {} (checksum verified).",
+                    pack.name,
+                    dest_file.display()
+                ))
+            } else {
+                Ok(format!(
+                    "Downloaded '{}' to {} but checksum mismatch!\n\
+                     Expected: {}\n\
+                     Got:      {}\n\
+                     The file may be corrupt or the manifest may need an update.",
+                    pack.name,
+                    dest_file.display(),
+                    pack.sha256,
+                    hash,
+                ))
+            }
+        }
+        Ok(exit) => bail!(
+            "curl exited with code {}. You can download manually:\n  curl -L -o {} {}",
+            exit.code().unwrap_or(-1),
+            dest_file.display(),
+            pack.url,
+        ),
+        Err(_) => Ok(format!(
+            "curl is not available. Download manually:\n\
+             \n  curl -L -o {} {}\n\n\
+             Expected SHA-256: {}\n",
+            dest_file.display(),
+            pack.url,
+            pack.sha256,
+        )),
+    }
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let data = fs::read(path).with_context(|| format!("failed to read '{}'", path.display()))?;
+    let mut hasher = Sha256::new();
+    hasher.update(&data);
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn collect_model_pack_candidates(cli: &Cli) -> Result<Vec<ModelPackCandidate>> {
@@ -6152,6 +6329,7 @@ mod tests {
             models_list: false,
             models_validate: false,
             models_benchmark: false,
+            model_download: None,
             serve: false,
             port: 8080,
             api_token: None,

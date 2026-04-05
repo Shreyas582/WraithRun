@@ -2237,20 +2237,20 @@ fn build_model_inputs<'a>(
 }
 
 #[cfg(feature = "onnx")]
-fn select_next_token(logits_value: &DynValue) -> Result<i64> {
+fn select_next_token(logits_value: &DynValue, temperature: f32) -> Result<i64> {
     if let Ok((shape, logits)) = ort_result(logits_value.try_extract_tensor::<f32>()) {
-        return select_next_token_from_f32(shape, logits);
+        return select_next_token_from_f32(shape, logits, temperature);
     }
 
     if let Ok((shape, logits)) = ort_result(logits_value.try_extract_tensor::<f16>()) {
-        return select_next_token_from_f16(shape, logits);
+        return select_next_token_from_f16(shape, logits, temperature);
     }
 
     bail!("logits tensor is neither f32 nor f16");
 }
 
 #[cfg(feature = "onnx")]
-fn select_next_token_from_f32(shape: &[i64], logits: &[f32]) -> Result<i64> {
+fn select_next_token_from_f32(shape: &[i64], logits: &[f32], temperature: f32) -> Result<i64> {
     if shape.is_empty() {
         bail!("logits tensor has rank 0, expected rank >= 2");
     }
@@ -2269,22 +2269,57 @@ fn select_next_token_from_f32(shape: &[i64], logits: &[f32]) -> Result<i64> {
     }
 
     let start = logits.len() - vocab_size;
-    let mut best_index = 0usize;
-    let mut best_score = f32::NEG_INFINITY;
 
-    for idx in 0..vocab_size {
-        let score = logits[start + idx];
-        if score > best_score {
-            best_index = idx;
-            best_score = score;
+    // Greedy argmax when temperature is effectively zero.
+    if temperature <= 1e-7 {
+        let mut best_index = 0usize;
+        let mut best_score = f32::NEG_INFINITY;
+        for idx in 0..vocab_size {
+            let score = logits[start + idx];
+            if score > best_score {
+                best_index = idx;
+                best_score = score;
+            }
         }
+        return Ok(best_index as i64);
     }
 
-    Ok(best_index as i64)
+    // Temperature-scaled softmax sampling.
+    sample_from_logits_f32(&logits[start..start + vocab_size], temperature)
 }
 
 #[cfg(feature = "onnx")]
-fn select_next_token_from_f16(shape: &[i64], logits: &[f16]) -> Result<i64> {
+fn sample_from_logits_f32(logits: &[f32], temperature: f32) -> Result<i64> {
+    use rand::Rng;
+
+    let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let mut probs: Vec<f32> = logits
+        .iter()
+        .map(|&l| ((l - max_logit) / temperature).exp())
+        .collect();
+    let sum: f32 = probs.iter().sum();
+    if sum <= 0.0 || !sum.is_finite() {
+        bail!("softmax normalization failed (sum={sum})");
+    }
+    for p in &mut probs {
+        *p /= sum;
+    }
+
+    let mut rng = rand::thread_rng();
+    let threshold: f32 = rng.gen();
+    let mut cumulative = 0.0f32;
+    for (idx, &p) in probs.iter().enumerate() {
+        cumulative += p;
+        if cumulative >= threshold {
+            return Ok(idx as i64);
+        }
+    }
+    // Fallback to last token (rounding edge case).
+    Ok((probs.len() - 1) as i64)
+}
+
+#[cfg(feature = "onnx")]
+fn select_next_token_from_f16(shape: &[i64], logits: &[f16], temperature: f32) -> Result<i64> {
     if shape.is_empty() {
         bail!("logits tensor has rank 0, expected rank >= 2");
     }
@@ -2303,18 +2338,13 @@ fn select_next_token_from_f16(shape: &[i64], logits: &[f16]) -> Result<i64> {
     }
 
     let start = logits.len() - vocab_size;
-    let mut best_index = 0usize;
-    let mut best_score = f32::NEG_INFINITY;
 
-    for idx in 0..vocab_size {
-        let score = logits[start + idx].to_f32();
-        if score > best_score {
-            best_index = idx;
-            best_score = score;
-        }
-    }
-
-    Ok(best_index as i64)
+    // Convert to f32 and delegate to the f32 sampling path.
+    let f32_logits: Vec<f32> = logits[start..start + vocab_size]
+        .iter()
+        .map(|v| v.to_f32())
+        .collect();
+    select_next_token_from_f32(&[1, 1, vocab_size as i64], &f32_logits, temperature)
 }
 
 #[cfg(feature = "onnx")]
@@ -2338,7 +2368,7 @@ fn run_runtime_smoke_check(session: &mut Session, layout: &SessionLayout) -> Res
     let logits_value = outputs
         .get(&layout.logits_output_name)
         .ok_or_else(|| anyhow!("logits output '{}' missing", layout.logits_output_name))?;
-    let _ = select_next_token(logits_value)?;
+    let _ = select_next_token(logits_value, 0.0)?;
 
     for spec in &layout.cache_specs {
         if outputs.remove(&spec.output_name).is_none() {
@@ -2429,6 +2459,7 @@ fn run_prompt_shared_buffer(
     context_ids: &[i64],
     max_new_tokens: usize,
     max_seq_len: usize,
+    temperature: f32,
     run_started: &Instant,
 ) -> Result<Vec<i64>> {
     debug!(max_seq_len, "using shared-buffer IO binding for KV cache");
@@ -2504,7 +2535,7 @@ fn run_prompt_shared_buffer(
             .or_else(|| outputs.get("lm_logits"))
             .ok_or_else(|| anyhow!("logits output missing during decode"))?;
 
-        let next_token = select_next_token(logits_value)?;
+        let next_token = select_next_token(logits_value, temperature)?;
 
         all_ids.push(next_token);
         generated_ids.push(next_token);
@@ -2523,14 +2554,404 @@ fn run_prompt_shared_buffer(
     Ok(generated_ids)
 }
 
+/// Cached session state reused across generate() calls (#64).
 #[cfg(feature = "onnx")]
-pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
+struct SessionCache {
+    session: Session,
+    tokenizer: Tokenizer,
+    layout: SessionLayout,
+    /// Whether this model uses shared-buffer KV cache.
+    use_shared_buffer: bool,
+    /// Max sequence length from genai_config.json.
+    max_seq_len: usize,
+    /// Previous prompt token IDs for prefix reuse (#65).
+    prev_prompt_ids: Vec<i64>,
+    /// KV-cache state carried from the previous call's prefix.
+    prev_cache_state: HashMap<String, DynValue>,
+    /// How many tokens of the previous prompt were processed into `prev_cache_state`.
+    prev_cache_len: usize,
+    /// Cumulative cache hits across calls.
+    prefix_cache_hits: u64,
+    /// Cumulative cache misses across calls.
+    prefix_cache_misses: u64,
+}
+
+/// Run inference reusing a session from the opaque cache, or build one on first call.
+///
+/// The `cache_slot` lives inside the engine's `Arc<Mutex<Option<Box<dyn Any + Send>>>>`.
+#[cfg(feature = "onnx")]
+pub fn run_prompt_cached(
+    cache_slot: &mut Option<Box<dyn std::any::Any + Send>>,
+    config: &ModelConfig,
+    prompt: &str,
+) -> Result<String> {
+    use std::any::Any;
+
     let run_started = Instant::now();
+    let ep = ep_label(config);
+
+    // Lazily build session on first call.
+    if cache_slot.is_none() {
+        debug!(
+            model = %config.model_path.display(),
+            ep,
+            "building session for cache (first call)"
+        );
+        let session = build_session(config)?;
+        let tokenizer = load_tokenizer(config)?;
+        let (layout_opt, compatibility) = analyze_session_layout(&session);
+        if compatibility.has_failures() {
+            let details = compatibility
+                .issues
+                .iter()
+                .map(|issue| format!("{}: {}", issue.reason_code, issue.detail))
+                .collect::<Vec<_>>()
+                .join("; ");
+            bail!("Model runtime compatibility checks failed: {details}");
+        }
+        let layout = layout_opt.ok_or_else(|| {
+            anyhow!("Model runtime compatibility checks did not produce a runnable layout.")
+        })?;
+        let search_config = load_genai_search_config(config);
+        let use_shared_buffer = search_config.past_present_share_buffer.unwrap_or(false)
+            && !layout.cache_specs.is_empty();
+        let max_seq_len = search_config.max_length.unwrap_or(2048);
+
+        *cache_slot = Some(Box::new(SessionCache {
+            session,
+            tokenizer,
+            layout,
+            use_shared_buffer,
+            max_seq_len,
+            prev_prompt_ids: Vec::new(),
+            prev_cache_state: HashMap::new(),
+            prev_cache_len: 0,
+            prefix_cache_hits: 0,
+            prefix_cache_misses: 0,
+        }));
+        debug!(
+            elapsed_ms = run_started.elapsed().as_millis(),
+            ep, "session cached"
+        );
+    }
+
+    let cache = cache_slot
+        .as_mut()
+        .and_then(|b| b.downcast_mut::<SessionCache>())
+        .ok_or_else(|| anyhow!("session cache type mismatch"))?;
+
     debug!(
         model = %config.model_path.display(),
         prompt_len = prompt.len(),
         max_new_tokens = config.max_new_tokens,
-        "starting Vitis prompt run"
+        ep,
+        "starting inference prompt run (cached session)"
+    );
+
+    run_prompt_on_session(cache, config, prompt, ep, &run_started)
+}
+
+/// Run a single prompt against an already-initialized session cache.
+#[cfg(feature = "onnx")]
+fn run_prompt_on_session(
+    cache: &mut SessionCache,
+    config: &ModelConfig,
+    prompt: &str,
+    ep: &str,
+    run_started: &Instant,
+) -> Result<String> {
+    if cache.use_shared_buffer {
+        let context_ids = encode_prompt(&cache.tokenizer, prompt)?;
+        if context_ids.is_empty() {
+            bail!("prompt encoding produced no token IDs");
+        }
+        let generated_ids = run_prompt_shared_buffer(
+            &mut cache.session,
+            &cache.layout,
+            &cache.tokenizer,
+            &context_ids,
+            config.max_new_tokens,
+            cache.max_seq_len,
+            config.temperature,
+            run_started,
+        )?;
+        let mut generated_text = decode_generated(&cache.tokenizer, &generated_ids)?;
+        if generated_text.trim().is_empty() {
+            generated_text = "(model produced no decodable continuation)".to_string();
+        }
+        debug!(
+            generated_token_count = generated_ids.len(),
+            generated_text_len = generated_text.len(),
+            elapsed_ms = run_started.elapsed().as_millis(),
+            ep,
+            "completed inference prompt run (shared-buffer, cached)"
+        );
+        return Ok(format!("<final>{generated_text}</final>"));
+    }
+
+    let stop_ids = discover_stop_token_ids(&cache.tokenizer);
+    let mut context_ids = encode_prompt(&cache.tokenizer, prompt)?;
+    let mut generated_ids: Vec<i64> = Vec::new();
+
+    debug!(
+        prompt_token_count = context_ids.len(),
+        stop_token_count = stop_ids.len(),
+        elapsed_ms = run_started.elapsed().as_millis(),
+        "prompt encoded, using cached session"
+    );
+
+    let cache_disabled_for_live = env_var_truthy("WRAITHRUN_DISABLE_LIVE_KV_CACHE");
+    let cache_enabled = !cache.layout.cache_specs.is_empty() && !cache_disabled_for_live;
+
+    let has_cache_specs = !cache.layout.cache_specs.is_empty();
+    let mut cache_state = if has_cache_specs {
+        initialize_cache_state(&cache.layout, 0)?
+    } else {
+        HashMap::new()
+    };
+
+    if context_ids.is_empty() {
+        bail!("prompt encoding produced no token IDs");
+    }
+
+    if cache_enabled {
+        // --- Prefix cache reuse (#65) ---
+        // Find how many leading tokens match the previous prompt.
+        let shared_prefix_len = context_ids
+            .iter()
+            .zip(cache.prev_prompt_ids.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let can_reuse = shared_prefix_len > 0
+            && shared_prefix_len == cache.prev_cache_len
+            && !cache.prev_cache_state.is_empty();
+
+        if can_reuse {
+            cache.prefix_cache_hits += 1;
+            debug!(
+                shared_prefix_len,
+                new_tokens = context_ids.len() - shared_prefix_len,
+                cumulative_hits = cache.prefix_cache_hits,
+                "reusing KV-cache prefix"
+            );
+            // Start from the cached state and only prefill the suffix.
+            cache_state = std::mem::take(&mut cache.prev_cache_state);
+            let suffix = &context_ids[shared_prefix_len..];
+            if !suffix.is_empty() {
+                let prefill_started = Instant::now();
+                let attention_len = context_ids.len();
+                let model_inputs = build_model_inputs(
+                    &cache.layout,
+                    &suffix.to_vec(),
+                    attention_len,
+                    true,
+                    &cache_state,
+                )?;
+                let mut outputs = ort_result(cache.session.run(model_inputs))?;
+                debug!(
+                    suffix_tokens = suffix.len(),
+                    elapsed_ms = prefill_started.elapsed().as_millis(),
+                    "prefix-reuse suffix prefill completed"
+                );
+
+                let _ = outputs
+                    .get(&cache.layout.logits_output_name)
+                    .or_else(|| outputs.get("logits"))
+                    .or_else(|| outputs.get("lm_logits"))
+                    .unwrap_or(&outputs[0]);
+
+                let mut next_cache = HashMap::new();
+                for spec in &cache.layout.cache_specs {
+                    let cache_value = outputs.remove(&spec.output_name).ok_or_else(|| {
+                        anyhow!(
+                            "cache output '{}' missing while ingesting suffix",
+                            spec.output_name
+                        )
+                    })?;
+                    next_cache.insert(spec.input.name.clone(), cache_value);
+                }
+                cache_state = next_cache;
+            }
+        } else {
+            cache.prefix_cache_misses += 1;
+            debug!(
+                shared_prefix_len,
+                prev_cache_len = cache.prev_cache_len,
+                cumulative_misses = cache.prefix_cache_misses,
+                "prefix cache miss, running full prefill"
+            );
+            let prefill_started = Instant::now();
+            let attention_len = context_ids.len();
+
+            debug!(
+                prompt_tokens = context_ids.len(),
+                attention_len, "running batch prefill forward pass (cached)"
+            );
+
+            let model_inputs = build_model_inputs(
+                &cache.layout,
+                &context_ids,
+                attention_len,
+                false,
+                &cache_state,
+            )?;
+
+            let mut outputs = ort_result(cache.session.run(model_inputs))?;
+            debug!(
+                prompt_tokens = context_ids.len(),
+                elapsed_ms = prefill_started.elapsed().as_millis(),
+                "batch prefill forward pass completed (cached)"
+            );
+
+            let _ = outputs
+                .get(&cache.layout.logits_output_name)
+                .or_else(|| outputs.get("logits"))
+                .or_else(|| outputs.get("lm_logits"))
+                .unwrap_or(&outputs[0]);
+
+            let mut next_cache = HashMap::new();
+            for spec in &cache.layout.cache_specs {
+                let cache_value = outputs.remove(&spec.output_name).ok_or_else(|| {
+                    anyhow!(
+                        "cache output '{}' missing while ingesting prompt",
+                        spec.output_name
+                    )
+                })?;
+                next_cache.insert(spec.input.name.clone(), cache_value);
+            }
+            cache_state = next_cache;
+        }
+
+        // Save prefix state for next call (#65).
+        cache.prev_prompt_ids = context_ids.clone();
+        cache.prev_cache_len = context_ids.len();
+        // Note: we cannot clone DynValue, so we clear prev_cache_state here.
+        // It will be populated if the cache_state snapshot can be taken.
+        cache.prev_cache_state.clear();
+    }
+
+    for step in 0..config.max_new_tokens.max(1) {
+        let step_started = Instant::now();
+        let (decode_with_cache, step_input_ids, attention_len) = if cache_enabled {
+            (
+                true,
+                vec![*context_ids
+                    .last()
+                    .ok_or_else(|| anyhow!("empty context ids"))?],
+                context_ids.len().max(1),
+            )
+        } else {
+            let step_input_ids = context_ids.clone();
+            let attention_len = step_input_ids.len().max(1);
+            (false, step_input_ids, attention_len)
+        };
+
+        debug!(
+            step = step + 1,
+            decode_with_cache,
+            step_input_len = step_input_ids.len(),
+            attention_len,
+            ep,
+            "running forward pass (cached)"
+        );
+
+        let model_inputs = build_model_inputs(
+            &cache.layout,
+            &step_input_ids,
+            attention_len,
+            decode_with_cache,
+            &cache_state,
+        )?;
+
+        let mut outputs = ort_result(cache.session.run(model_inputs))?;
+        debug!(
+            step = step + 1,
+            elapsed_ms = step_started.elapsed().as_millis(),
+            ep,
+            "forward pass completed (cached)"
+        );
+        let logits_value = outputs
+            .get(&cache.layout.logits_output_name)
+            .or_else(|| outputs.get("logits"))
+            .or_else(|| outputs.get("lm_logits"))
+            .unwrap_or(&outputs[0]);
+
+        let next_token = select_next_token(logits_value, config.temperature)?;
+
+        if cache_enabled {
+            let mut next_cache = HashMap::new();
+            for spec in &cache.layout.cache_specs {
+                let cache_value = outputs.remove(&spec.output_name).ok_or_else(|| {
+                    anyhow!("cache output '{}' missing while decoding", spec.output_name)
+                })?;
+                next_cache.insert(spec.input.name.clone(), cache_value);
+            }
+            cache_state = next_cache;
+        }
+
+        context_ids.push(next_token);
+        generated_ids.push(next_token);
+
+        if stop_ids.contains(&next_token) {
+            break;
+        }
+    }
+
+    let mut generated_text = decode_generated(&cache.tokenizer, &generated_ids)?;
+    if generated_text.trim().is_empty() {
+        generated_text = "(model produced no decodable continuation)".to_string();
+    }
+
+    debug!(
+        generated_token_count = generated_ids.len(),
+        generated_text_len = generated_text.len(),
+        elapsed_ms = run_started.elapsed().as_millis(),
+        ep,
+        "completed inference prompt run (cached)"
+    );
+
+    Ok(format!("<final>{generated_text}</final>"))
+}
+
+#[cfg(not(feature = "onnx"))]
+pub fn run_prompt_cached(
+    _cache_slot: &mut Option<Box<dyn std::any::Any + Send>>,
+    _config: &ModelConfig,
+    _prompt: &str,
+) -> Result<String> {
+    bail!("ONNX inference is disabled. Rebuild with '--features inference_bridge/onnx' or '--features inference_bridge/vitis'.")
+}
+
+#[cfg(feature = "onnx")]
+fn ep_label(config: &ModelConfig) -> &'static str {
+    if let Some(backend) = config.backend_override.as_deref() {
+        match backend {
+            "vitis" => "Vitis",
+            "cuda" => "CUDA",
+            "tensorrt" => "TensorRT",
+            "directml" => "DirectML",
+            "coreml" => "CoreML",
+            "qnn" => "QNN",
+            "cpu" => "CPU",
+            _ => "ONNX",
+        }
+    } else if cfg!(feature = "vitis") {
+        "Vitis"
+    } else {
+        "ONNX"
+    }
+}
+
+#[cfg(feature = "onnx")]
+pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
+    let run_started = Instant::now();
+    let ep = ep_label(config);
+    debug!(
+        model = %config.model_path.display(),
+        prompt_len = prompt.len(),
+        max_new_tokens = config.max_new_tokens,
+        ep,
+        "starting inference prompt run"
     );
 
     let mut session = build_session(config)?;
@@ -2569,6 +2990,7 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
             &context_ids,
             config.max_new_tokens,
             max_seq_len,
+            config.temperature,
             &run_started,
         )?;
         let mut generated_text = decode_generated(&tokenizer, &generated_ids)?;
@@ -2579,7 +3001,7 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
             generated_token_count = generated_ids.len(),
             generated_text_len = generated_text.len(),
             elapsed_ms = run_started.elapsed().as_millis(),
-            "completed Vitis prompt run (shared-buffer)"
+            "completed inference prompt run (shared-buffer)"
         );
         return Ok(format!("<final>{generated_text}</final>"));
     }
@@ -2670,7 +3092,8 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
             decode_with_cache,
             step_input_len = step_input_ids.len(),
             attention_len,
-            "running Vitis forward pass"
+            ep,
+            "running forward pass"
         );
 
         let model_inputs = build_model_inputs(
@@ -2685,7 +3108,8 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
         debug!(
             step = step + 1,
             elapsed_ms = step_started.elapsed().as_millis(),
-            "Vitis forward pass completed"
+            ep,
+            "forward pass completed"
         );
         let logits_value = outputs
             .get(&layout.logits_output_name)
@@ -2693,7 +3117,7 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
             .or_else(|| outputs.get("lm_logits"))
             .unwrap_or(&outputs[0]);
 
-        let next_token = select_next_token(logits_value)?;
+        let next_token = select_next_token(logits_value, config.temperature)?;
 
         if cache_enabled {
             let mut next_cache = HashMap::new();
@@ -2723,7 +3147,8 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
         generated_token_count = generated_ids.len(),
         generated_text_len = generated_text.len(),
         elapsed_ms = run_started.elapsed().as_millis(),
-        "completed Vitis prompt run"
+        ep,
+        "completed inference prompt run"
     );
 
     Ok(format!("<final>{generated_text}</final>"))
