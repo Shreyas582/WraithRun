@@ -8,6 +8,20 @@ WraithRun runs security investigations on your machine using your own model (ONN
 wraithrun --task "Investigate unauthorized SSH keys" --live --model ./models/llm.onnx --tokenizer ./models/tokenizer.json
 ```
 
+## Who This Is For / Not For
+
+Who this is for:
+
+- Incident response and SOC teams that need fast host-level triage with auditable outputs.
+- Security engineering teams that need local execution and data control.
+- Teams integrating triage results into SIEM/SOAR or CI workflows.
+
+Who this is not for:
+
+- Teams expecting autonomous remediation without analyst oversight.
+- Environments that cannot provide a local model/tokenizer for live mode.
+- Workflows focused on broad internet scanning instead of host-centric investigation.
+
 ## Key Features
 
 - **AI-guided investigation.** An agentic ReAct loop reasons about which tools to run, collects evidence iteratively, and synthesizes structured findings (Summary, Key Findings, Risk Assessment, Recommendations).
