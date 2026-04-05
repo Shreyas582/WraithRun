@@ -18,6 +18,24 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 1.5.0 - 2026-04-05
+
+### Added
+
+- **DirectML backend** (#56): Windows GPU inference via DirectX 12, priority 100, feature-gated behind `directml`.
+- **CoreML backend** (#57): macOS/Apple Silicon inference, priority 100, feature-gated behind `coreml`.
+- **CUDA backend** (#58): NVIDIA GPU inference, priority 200, feature-gated behind `cuda`.
+- **TensorRT backend** (#58): NVIDIA TensorRT optimized inference, priority 250, feature-gated behind `tensorrt`.
+- **QNN backend** (#59): Qualcomm Hexagon NPU inference, priority 280, feature-gated behind `qnn`.
+- **`ModelFormat` enum** (#60): `Onnx`, `Gguf`, `SafeTensors` with auto-detection from file extension via `ModelFormat::from_path()`.
+- **`QuantFormat` enum** (#61): `Fp32`, `Fp16`, `Int8`, `Int4`, `BlockQuantized(String)`, `Unknown` with filename-based detection via `QuantFormat::detect_from_path()`.
+- `ExecutionProviderBackend::supported_formats()` — default `[Onnx]`, overridable per backend.
+- `ExecutionProviderBackend::supported_quant_formats()` — each backend declares supported quantization formats.
+- Backend conformance tests expanded with `supported_formats_is_non_empty` and `supported_quant_formats_is_non_empty`.
+- 15 new unit tests for format/quant detection, display, and serialization.
+
+- (none yet)
+
 ## 1.4.0 - 2026-04-12
 
 ### Added
