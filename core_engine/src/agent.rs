@@ -7,7 +7,8 @@ use cyber_tools::ToolRegistry;
 use inference_bridge::InferenceEngine;
 
 use crate::{
-    basic_tier_summary, builtin_investigation_templates, deduplicate_findings, derive_findings,
+    basic_tier_summary_for_task, builtin_investigation_templates, deduplicate_findings,
+    derive_findings,
     extract_tag, max_severity, quality_checked_final_answer, sort_findings, AgentTurn,
     CoverageBaseline, EvidencePointer, Finding, FindingSeverity, InvestigationTemplate,
     ModelCapabilityReport, ModelCapabilityTier, RunReport, RunTimingMetrics, ToolCall,
@@ -137,7 +138,7 @@ impl<B: InferenceEngine> Agent<B> {
                 let raw_findings = derive_findings(&turns, "");
                 let findings = deduplicate_findings(raw_findings);
                 debug!("Basic tier: skipping LLM synthesis");
-                let answer = basic_tier_summary(&findings);
+                let answer = basic_tier_summary_for_task(&findings, Some(task));
                 (turns, answer, None)
             }
             ModelCapabilityTier::Moderate | ModelCapabilityTier::Strong => {
