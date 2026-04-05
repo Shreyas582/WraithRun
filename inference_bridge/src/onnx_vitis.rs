@@ -2833,12 +2833,13 @@ fn run_prompt_on_session(
     for step in 0..config.max_new_tokens.max(1) {
         let step_started = Instant::now();
         let (decode_with_cache, step_input_ids, attention_len) = if cache_enabled {
+            // attention_len = past KV-cache entries + 1 current decode token (#114).
             (
                 true,
                 vec![*context_ids
                     .last()
                     .ok_or_else(|| anyhow!("empty context ids"))?],
-                context_ids.len().max(1),
+                (context_ids.len() + 1).max(1),
             )
         } else {
             let step_input_ids = context_ids.clone();
@@ -3074,12 +3075,13 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
     for step in 0..config.max_new_tokens.max(1) {
         let step_started = Instant::now();
         let (decode_with_cache, step_input_ids, attention_len) = if cache_enabled {
+            // attention_len = past KV-cache entries + 1 current decode token (#114).
             (
                 true,
                 vec![*context_ids
                     .last()
                     .ok_or_else(|| anyhow!("empty context ids"))?],
-                context_ids.len().max(1),
+                (context_ids.len() + 1).max(1),
             )
         } else {
             let step_input_ids = context_ids.clone();

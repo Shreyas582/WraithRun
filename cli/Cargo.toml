@@ -8,6 +8,10 @@ license.workspace = true
 default = []
 onnx = ["inference_bridge/onnx"]
 vitis = ["inference_bridge/vitis"]
+directml = ["inference_bridge/directml"]
+cuda = ["inference_bridge/cuda"]
+tensorrt = ["inference_bridge/tensorrt"]
+qnn = ["inference_bridge/qnn"]
 
 [dependencies]
 anyhow.workspace = true
