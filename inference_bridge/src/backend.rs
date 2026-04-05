@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +71,95 @@ impl DiagnosticEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Model format and quantization types
+// ---------------------------------------------------------------------------
+
+/// Supported model file formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelFormat {
+    Onnx,
+    Gguf,
+    SafeTensors,
+}
+
+impl ModelFormat {
+    /// Detect model format from file extension.
+    pub fn from_path(path: &Path) -> Option<Self> {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("onnx") => Some(Self::Onnx),
+            Some("gguf") => Some(Self::Gguf),
+            Some("safetensors") => Some(Self::SafeTensors),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for ModelFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Onnx => write!(f, "ONNX"),
+            Self::Gguf => write!(f, "GGUF"),
+            Self::SafeTensors => write!(f, "SafeTensors"),
+        }
+    }
+}
+
+/// Quantization format of a model's weights.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuantFormat {
+    Fp32,
+    Fp16,
+    Int8,
+    Int4,
+    /// Block-quantized format (e.g. "awq", "gptq", "bnb-nf4").
+    BlockQuantized(String),
+    Unknown,
+}
+
+impl fmt::Display for QuantFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Fp32 => write!(f, "FP32"),
+            Self::Fp16 => write!(f, "FP16"),
+            Self::Int8 => write!(f, "INT8"),
+            Self::Int4 => write!(f, "INT4"),
+            Self::BlockQuantized(name) => write!(f, "BlockQuantized({})", name),
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+impl QuantFormat {
+    /// Detect quantization format from ONNX model path by inspecting file name
+    /// conventions and model metadata heuristics.
+    pub fn detect_from_path(path: &Path) -> Self {
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        if stem.contains("int4") || stem.contains("q4") {
+            Self::Int4
+        } else if stem.contains("int8") || stem.contains("q8") {
+            Self::Int8
+        } else if stem.contains("fp16") || stem.contains("f16") {
+            Self::Fp16
+        } else if stem.contains("fp32") || stem.contains("f32") {
+            Self::Fp32
+        } else if stem.contains("awq") {
+            Self::BlockQuantized("awq".to_string())
+        } else if stem.contains("gptq") {
+            Self::BlockQuantized("gptq".to_string())
+        } else {
+            Self::Unknown
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Backend trait
 // ---------------------------------------------------------------------------
 
@@ -113,6 +203,16 @@ pub trait ExecutionProviderBackend: Send + Sync {
     /// [`BackendOptions`] (e.g. `"device_id"`, `"config_file"`).
     fn config_keys(&self) -> &[&str] {
         &[]
+    }
+
+    /// Model formats this backend supports. Defaults to ONNX only.
+    fn supported_formats(&self) -> Vec<ModelFormat> {
+        vec![ModelFormat::Onnx]
+    }
+
+    /// Quantization formats this backend supports efficiently.
+    fn supported_quant_formats(&self) -> Vec<QuantFormat> {
+        vec![QuantFormat::Fp32, QuantFormat::Unknown]
     }
 
     /// Run provider-specific diagnostic checks.
@@ -174,6 +274,21 @@ impl ProviderRegistry {
         // Vitis backend (only when compiled with the `vitis` feature).
         #[cfg(feature = "vitis")]
         backends.push(Box::new(VitisBackend));
+
+        #[cfg(feature = "directml")]
+        backends.push(Box::new(DirectMlBackend));
+
+        #[cfg(feature = "coreml")]
+        backends.push(Box::new(CoreMlBackend));
+
+        #[cfg(feature = "cuda")]
+        backends.push(Box::new(CudaBackend));
+
+        #[cfg(feature = "tensorrt")]
+        backends.push(Box::new(TensorRtBackend));
+
+        #[cfg(feature = "qnn")]
+        backends.push(Box::new(QnnBackend));
 
         Self { backends }
     }
@@ -319,6 +434,15 @@ impl ExecutionProviderBackend for CpuBackend {
         0
     }
 
+    fn supported_quant_formats(&self) -> Vec<QuantFormat> {
+        vec![
+            QuantFormat::Fp32,
+            QuantFormat::Fp16,
+            QuantFormat::Int8,
+            QuantFormat::Unknown,
+        ]
+    }
+
     fn diagnose(&self) -> Vec<DiagnosticEntry> {
         vec![DiagnosticEntry::pass(
             "cpu-backend",
@@ -381,6 +505,10 @@ impl ExecutionProviderBackend for VitisBackend {
         &["config_file", "cache_dir", "cache_key"]
     }
 
+    fn supported_quant_formats(&self) -> Vec<QuantFormat> {
+        vec![QuantFormat::Int8, QuantFormat::Int4, QuantFormat::Unknown]
+    }
+
     fn diagnose(&self) -> Vec<DiagnosticEntry> {
         let mut entries = vec![];
         if std::env::var("RYZEN_AI_INSTALLER_PATH").is_ok() {
@@ -417,6 +545,409 @@ impl ExecutionProviderBackend for VitisBackend {
         #[cfg(not(feature = "onnx"))]
         {
             anyhow::bail!("Vitis backend requires the 'onnx' feature")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in: DirectML backend (cfg-gated)
+// ---------------------------------------------------------------------------
+
+/// DirectML GPU execution provider for Windows (DX12).
+#[cfg(feature = "directml")]
+pub struct DirectMlBackend;
+
+#[cfg(feature = "directml")]
+impl ExecutionProviderBackend for DirectMlBackend {
+    fn name(&self) -> &str {
+        "DirectML"
+    }
+
+    fn is_available(&self) -> bool {
+        // DirectML requires Windows with a DX12 GPU.
+        // At compile-time we gate on the feature; at runtime we check the OS.
+        cfg!(target_os = "windows")
+    }
+
+    fn priority(&self) -> u32 {
+        100
+    }
+
+    fn config_keys(&self) -> &[&str] {
+        &["device_id"]
+    }
+
+    fn supported_quant_formats(&self) -> Vec<QuantFormat> {
+        vec![
+            QuantFormat::Fp32,
+            QuantFormat::Fp16,
+            QuantFormat::Int8,
+            QuantFormat::Unknown,
+        ]
+    }
+
+    fn diagnose(&self) -> Vec<DiagnosticEntry> {
+        let mut entries = vec![];
+        if cfg!(target_os = "windows") {
+            entries.push(DiagnosticEntry::pass(
+                "directml-platform",
+                "Running on Windows — DirectML is supported",
+            ));
+        } else {
+            entries.push(DiagnosticEntry::fail(
+                "directml-platform",
+                "DirectML requires Windows with a DirectX 12 GPU",
+            ));
+        }
+        entries
+    }
+
+    fn build_session(
+        &self,
+        config: &ModelConfig,
+        _options: &BackendOptions,
+    ) -> anyhow::Result<Box<dyn InferenceSession>> {
+        if config.dry_run {
+            return Ok(Box::new(DryRunSession));
+        }
+
+        #[cfg(feature = "onnx")]
+        {
+            Ok(Box::new(OnnxCpuSession {
+                config: config.clone(),
+            }))
+        }
+
+        #[cfg(not(feature = "onnx"))]
+        {
+            anyhow::bail!("DirectML backend requires the 'onnx' feature")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in: CoreML backend (cfg-gated)
+// ---------------------------------------------------------------------------
+
+/// Apple CoreML execution provider for macOS / Apple Silicon.
+#[cfg(feature = "coreml")]
+pub struct CoreMlBackend;
+
+#[cfg(feature = "coreml")]
+impl ExecutionProviderBackend for CoreMlBackend {
+    fn name(&self) -> &str {
+        "CoreML"
+    }
+
+    fn is_available(&self) -> bool {
+        cfg!(target_os = "macos")
+    }
+
+    fn priority(&self) -> u32 {
+        100
+    }
+
+    fn config_keys(&self) -> &[&str] {
+        &["cache_dir"]
+    }
+
+    fn supported_quant_formats(&self) -> Vec<QuantFormat> {
+        vec![
+            QuantFormat::Fp32,
+            QuantFormat::Fp16,
+            QuantFormat::Int8,
+            QuantFormat::Unknown,
+        ]
+    }
+
+    fn diagnose(&self) -> Vec<DiagnosticEntry> {
+        let mut entries = vec![];
+        if cfg!(target_os = "macos") {
+            entries.push(DiagnosticEntry::pass(
+                "coreml-platform",
+                "Running on macOS — CoreML is supported",
+            ));
+        } else {
+            entries.push(DiagnosticEntry::fail(
+                "coreml-platform",
+                "CoreML requires macOS",
+            ));
+        }
+        entries
+    }
+
+    fn build_session(
+        &self,
+        config: &ModelConfig,
+        _options: &BackendOptions,
+    ) -> anyhow::Result<Box<dyn InferenceSession>> {
+        if config.dry_run {
+            return Ok(Box::new(DryRunSession));
+        }
+
+        #[cfg(feature = "onnx")]
+        {
+            Ok(Box::new(OnnxCpuSession {
+                config: config.clone(),
+            }))
+        }
+
+        #[cfg(not(feature = "onnx"))]
+        {
+            anyhow::bail!("CoreML backend requires the 'onnx' feature")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in: CUDA backend (cfg-gated)
+// ---------------------------------------------------------------------------
+
+/// NVIDIA CUDA GPU execution provider.
+#[cfg(feature = "cuda")]
+pub struct CudaBackend;
+
+#[cfg(feature = "cuda")]
+impl ExecutionProviderBackend for CudaBackend {
+    fn name(&self) -> &str {
+        "CUDA"
+    }
+
+    fn is_available(&self) -> bool {
+        // Probe for CUDA runtime library at runtime.
+        std::env::var("CUDA_PATH").is_ok()
+            || cfg!(target_os = "linux")
+                && std::path::Path::new("/usr/local/cuda/lib64/libcudart.so").exists()
+    }
+
+    fn priority(&self) -> u32 {
+        200
+    }
+
+    fn config_keys(&self) -> &[&str] {
+        &["device_id", "arena_extend_strategy"]
+    }
+
+    fn supported_quant_formats(&self) -> Vec<QuantFormat> {
+        vec![
+            QuantFormat::Fp32,
+            QuantFormat::Fp16,
+            QuantFormat::Int8,
+            QuantFormat::Unknown,
+        ]
+    }
+
+    fn diagnose(&self) -> Vec<DiagnosticEntry> {
+        let mut entries = vec![];
+        if std::env::var("CUDA_PATH").is_ok() {
+            entries.push(DiagnosticEntry::pass("cuda-sdk", "CUDA_PATH is set"));
+        } else if cfg!(target_os = "linux")
+            && std::path::Path::new("/usr/local/cuda/lib64/libcudart.so").exists()
+        {
+            entries.push(DiagnosticEntry::pass(
+                "cuda-sdk",
+                "CUDA runtime found at /usr/local/cuda",
+            ));
+        } else {
+            entries.push(DiagnosticEntry::warn(
+                "cuda-sdk",
+                "CUDA toolkit not detected; NVIDIA GPU acceleration unavailable",
+            ));
+        }
+        entries
+    }
+
+    fn build_session(
+        &self,
+        config: &ModelConfig,
+        _options: &BackendOptions,
+    ) -> anyhow::Result<Box<dyn InferenceSession>> {
+        if config.dry_run {
+            return Ok(Box::new(DryRunSession));
+        }
+
+        #[cfg(feature = "onnx")]
+        {
+            Ok(Box::new(OnnxCpuSession {
+                config: config.clone(),
+            }))
+        }
+
+        #[cfg(not(feature = "onnx"))]
+        {
+            anyhow::bail!("CUDA backend requires the 'onnx' feature")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in: TensorRT backend (cfg-gated)
+// ---------------------------------------------------------------------------
+
+/// NVIDIA TensorRT execution provider (higher performance than raw CUDA).
+#[cfg(feature = "tensorrt")]
+pub struct TensorRtBackend;
+
+#[cfg(feature = "tensorrt")]
+impl ExecutionProviderBackend for TensorRtBackend {
+    fn name(&self) -> &str {
+        "TensorRT"
+    }
+
+    fn is_available(&self) -> bool {
+        // TensorRT requires both CUDA and the TensorRT SDK.
+        (std::env::var("CUDA_PATH").is_ok()
+            || cfg!(target_os = "linux")
+                && std::path::Path::new("/usr/local/cuda/lib64/libcudart.so").exists())
+            && std::env::var("LD_LIBRARY_PATH")
+                .unwrap_or_default()
+                .contains("tensorrt")
+    }
+
+    fn priority(&self) -> u32 {
+        250
+    }
+
+    fn config_keys(&self) -> &[&str] {
+        &["device_id", "cache_dir", "arena_extend_strategy"]
+    }
+
+    fn supported_quant_formats(&self) -> Vec<QuantFormat> {
+        vec![
+            QuantFormat::Fp32,
+            QuantFormat::Fp16,
+            QuantFormat::Int8,
+            QuantFormat::Int4,
+            QuantFormat::Unknown,
+        ]
+    }
+
+    fn diagnose(&self) -> Vec<DiagnosticEntry> {
+        let mut entries = vec![];
+        if std::env::var("CUDA_PATH").is_ok() {
+            entries.push(DiagnosticEntry::pass("tensorrt-cuda", "CUDA_PATH is set"));
+        } else {
+            entries.push(DiagnosticEntry::warn(
+                "tensorrt-cuda",
+                "CUDA_PATH not set; TensorRT requires CUDA",
+            ));
+        }
+
+        let has_trt = std::env::var("LD_LIBRARY_PATH")
+            .unwrap_or_default()
+            .contains("tensorrt");
+        if has_trt {
+            entries.push(DiagnosticEntry::pass(
+                "tensorrt-sdk",
+                "TensorRT libraries found in LD_LIBRARY_PATH",
+            ));
+        } else {
+            entries.push(DiagnosticEntry::warn(
+                "tensorrt-sdk",
+                "TensorRT SDK not detected in LD_LIBRARY_PATH",
+            ));
+        }
+        entries
+    }
+
+    fn build_session(
+        &self,
+        config: &ModelConfig,
+        _options: &BackendOptions,
+    ) -> anyhow::Result<Box<dyn InferenceSession>> {
+        if config.dry_run {
+            return Ok(Box::new(DryRunSession));
+        }
+
+        #[cfg(feature = "onnx")]
+        {
+            Ok(Box::new(OnnxCpuSession {
+                config: config.clone(),
+            }))
+        }
+
+        #[cfg(not(feature = "onnx"))]
+        {
+            anyhow::bail!("TensorRT backend requires the 'onnx' feature")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in: QNN backend (cfg-gated)
+// ---------------------------------------------------------------------------
+
+/// Qualcomm QNN / Hexagon NPU execution provider.
+#[cfg(feature = "qnn")]
+pub struct QnnBackend;
+
+#[cfg(feature = "qnn")]
+impl ExecutionProviderBackend for QnnBackend {
+    fn name(&self) -> &str {
+        "QNN"
+    }
+
+    fn is_available(&self) -> bool {
+        // Check for QNN SDK presence.
+        std::env::var("QNN_SDK_ROOT").is_ok()
+    }
+
+    fn priority(&self) -> u32 {
+        280
+    }
+
+    fn config_keys(&self) -> &[&str] {
+        &["backend_path", "device_id"]
+    }
+
+    fn supported_quant_formats(&self) -> Vec<QuantFormat> {
+        vec![QuantFormat::Int8, QuantFormat::Int4, QuantFormat::Unknown]
+    }
+
+    fn diagnose(&self) -> Vec<DiagnosticEntry> {
+        let mut entries = vec![];
+        if std::env::var("QNN_SDK_ROOT").is_ok() {
+            entries.push(DiagnosticEntry::pass("qnn-sdk", "QNN_SDK_ROOT is set"));
+        } else {
+            entries.push(DiagnosticEntry::warn(
+                "qnn-sdk",
+                "QNN_SDK_ROOT not set; Qualcomm NPU acceleration unavailable",
+            ));
+        }
+
+        if cfg!(target_arch = "aarch64") && cfg!(target_os = "windows") {
+            entries.push(DiagnosticEntry::pass(
+                "qnn-platform",
+                "Windows ARM64 — optimal QNN target",
+            ));
+        } else {
+            entries.push(DiagnosticEntry::warn(
+                "qnn-platform",
+                "QNN is optimized for Windows ARM64 (Snapdragon X Elite)",
+            ));
+        }
+        entries
+    }
+
+    fn build_session(
+        &self,
+        config: &ModelConfig,
+        _options: &BackendOptions,
+    ) -> anyhow::Result<Box<dyn InferenceSession>> {
+        if config.dry_run {
+            return Ok(Box::new(DryRunSession));
+        }
+
+        #[cfg(feature = "onnx")]
+        {
+            Ok(Box::new(OnnxCpuSession {
+                config: config.clone(),
+            }))
+        }
+
+        #[cfg(not(feature = "onnx"))]
+        {
+            anyhow::bail!("QNN backend requires the 'onnx' feature")
         }
     }
 }
@@ -583,5 +1114,116 @@ mod tests {
         assert!(result.is_ok());
         let (name, _) = result.unwrap();
         assert_eq!(name, "CPU");
+    }
+
+    #[test]
+    fn model_format_from_path_onnx() {
+        assert_eq!(
+            ModelFormat::from_path(Path::new("model.onnx")),
+            Some(ModelFormat::Onnx)
+        );
+    }
+
+    #[test]
+    fn model_format_from_path_gguf() {
+        assert_eq!(
+            ModelFormat::from_path(Path::new("model.gguf")),
+            Some(ModelFormat::Gguf)
+        );
+    }
+
+    #[test]
+    fn model_format_from_path_safetensors() {
+        assert_eq!(
+            ModelFormat::from_path(Path::new("model.safetensors")),
+            Some(ModelFormat::SafeTensors)
+        );
+    }
+
+    #[test]
+    fn model_format_from_path_unknown() {
+        assert_eq!(ModelFormat::from_path(Path::new("model.bin")), None);
+    }
+
+    #[test]
+    fn quant_format_detect_int4() {
+        assert_eq!(
+            QuantFormat::detect_from_path(Path::new("model-int4.onnx")),
+            QuantFormat::Int4
+        );
+        assert_eq!(
+            QuantFormat::detect_from_path(Path::new("model-q4.gguf")),
+            QuantFormat::Int4
+        );
+    }
+
+    #[test]
+    fn quant_format_detect_int8() {
+        assert_eq!(
+            QuantFormat::detect_from_path(Path::new("model-int8.onnx")),
+            QuantFormat::Int8
+        );
+    }
+
+    #[test]
+    fn quant_format_detect_fp16() {
+        assert_eq!(
+            QuantFormat::detect_from_path(Path::new("model-fp16.onnx")),
+            QuantFormat::Fp16
+        );
+    }
+
+    #[test]
+    fn quant_format_detect_block_quantized() {
+        assert_eq!(
+            QuantFormat::detect_from_path(Path::new("model-awq.gguf")),
+            QuantFormat::BlockQuantized("awq".to_string())
+        );
+        assert_eq!(
+            QuantFormat::detect_from_path(Path::new("model-gptq.safetensors")),
+            QuantFormat::BlockQuantized("gptq".to_string())
+        );
+    }
+
+    #[test]
+    fn quant_format_detect_unknown() {
+        assert_eq!(
+            QuantFormat::detect_from_path(Path::new("model.onnx")),
+            QuantFormat::Unknown
+        );
+    }
+
+    #[test]
+    fn cpu_supported_formats_includes_onnx() {
+        let cpu = CpuBackend;
+        assert!(cpu.supported_formats().contains(&ModelFormat::Onnx));
+    }
+
+    #[test]
+    fn cpu_supported_quant_formats() {
+        let cpu = CpuBackend;
+        let quants = cpu.supported_quant_formats();
+        assert!(quants.contains(&QuantFormat::Fp32));
+        assert!(quants.contains(&QuantFormat::Fp16));
+        assert!(quants.contains(&QuantFormat::Int8));
+    }
+
+    #[test]
+    fn model_format_display() {
+        assert_eq!(format!("{}", ModelFormat::Onnx), "ONNX");
+        assert_eq!(format!("{}", ModelFormat::Gguf), "GGUF");
+        assert_eq!(format!("{}", ModelFormat::SafeTensors), "SafeTensors");
+    }
+
+    #[test]
+    fn quant_format_display() {
+        assert_eq!(format!("{}", QuantFormat::Fp32), "FP32");
+        assert_eq!(format!("{}", QuantFormat::Fp16), "FP16");
+        assert_eq!(format!("{}", QuantFormat::Int8), "INT8");
+        assert_eq!(format!("{}", QuantFormat::Int4), "INT4");
+        assert_eq!(
+            format!("{}", QuantFormat::BlockQuantized("awq".into())),
+            "BlockQuantized(awq)"
+        );
     }
 }

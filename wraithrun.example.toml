@@ -26,7 +26,8 @@ log = "normal"
 
 # Inference backend selection.
 # "auto" (default) picks the highest-priority available backend.
-# Explicit values: "cpu", "vitis", etc.
+# Available backends (when compiled with feature flags):
+#   cpu, vitis, directml, coreml, cuda, tensorrt, qnn
 [inference]
 backend = "auto"
 
