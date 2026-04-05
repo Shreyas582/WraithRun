@@ -61,7 +61,8 @@ wraithrun models benchmark [OPTIONS]
 - `--tokenizer <TOKENIZER>`: tokenizer path used in live mode.
 - `--max-steps <MAX_STEPS>`: max tools executed in the investigation plan. Default fallback: `8`.
 - `--max-new-tokens <MAX_NEW_TOKENS>`: generation cap per model response. Default fallback: `256`.
-- `--temperature <TEMPERATURE>`: generation temperature. Default fallback: `0.2`.
+- `--temperature <TEMPERATURE>`: generation temperature. Default fallback: `0.2`. Use `0` for greedy (deterministic) decoding; values above `0` enable softmax sampling (e.g., `0.1`–`0.3` for careful reasoning, `0.5`+ for creative exploration).
+- `--model-download <NAME>`: download a curated model pack. Use `--model-download list` to see available packs. Downloads to `./models/`, verifies SHA-256, and skips if already present.
 - `--live`: enable ONNX/Vitis live inference mode.
 - `--dry-run`: force dry-run mode.
 - `--live-fallback-policy <LIVE_FALLBACK_POLICY>`: live-mode fallback behavior. Values: `none`, `dry-run-on-error`. Default: `none`.

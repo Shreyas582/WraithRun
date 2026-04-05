@@ -18,6 +18,8 @@ Live-mode note:
 - Doctor introspection checks now include an optional `remediation` field with actionable fix guidance for each `reason_code`.
 - Run report findings now include `confidence_label` (discrete tier) and `relevance` (primary/supplementary) fields.
 - Run report includes an optional `supplementary_findings` array for lower-relevance findings (compact output mode).
+- Since v1.6.0, Moderate/Strong investigations use a ReAct agent loop that may produce richer, multi-step `turns` with tool observations. The `final_answer` is produced by task-aware synthesis with structured sections (Summary, Key Findings, Risk Assessment, Recommendations).
+- Run report includes an optional `backend` field recording which inference backend was used.
 
 ## Schema Files
 

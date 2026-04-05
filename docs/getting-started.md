@@ -137,9 +137,9 @@ cargo run -p wraithrun -- models benchmark --introspection-format json
 
 When running in live mode, WraithRun automatically probes the loaded model to classify it into a capability tier:
 
-- **Basic**: small models (≤2B params or ≥200ms latency). Agent skips LLM synthesis and uses a deterministic structured summary.
-- **Moderate**: medium models. Agent reduces evidence window to top-5 findings before LLM synthesis.
-- **Strong**: large models (≥10B params and ≤50ms latency). Agent runs full evidence synthesis.
+- **Basic**: small models (≤2B params or ≥200ms latency). Agent uses template-driven tool execution and a deterministic structured summary (no LLM synthesis).
+- **Moderate**: medium models. Agent uses a ReAct (Reason + Act) loop, iteratively choosing tools based on observations, then synthesizes findings via LLM.
+- **Strong**: large models (≥10B params and ≤50ms latency). Agent uses a full ReAct loop with the complete evidence window for deep iterative reasoning and synthesis.
 
 Override automatic classification when you know your model's capability:
 

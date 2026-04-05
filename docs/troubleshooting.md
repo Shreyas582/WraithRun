@@ -178,6 +178,20 @@ Symptom:
 Fix:
 
 - This happens when the model is classified as Basic tier (deterministic summary) or when LLM output quality is detected as low.
+- Since v1.6.0, Moderate/Strong tiers use a ReAct loop that typically produces richer output. If output is still generic, try `--capability-override strong` or increase `--temperature` slightly (e.g., `0.1`).
+
+## Agent not calling expected tools
+
+Symptom:
+
+- The agent finishes quickly without calling tools you expected, or calls fewer tools than anticipated.
+
+Fix:
+
+- Moderate/Strong tiers use a ReAct loop where the LLM decides which tools to call. The model may not choose the same tools as the template-driven Basic tier.
+- Increase `--max-steps` if the agent is exhausting its step budget before reaching all relevant tools.
+- If the model is too small, it may produce a `<final>` answer immediately. Try `--capability-override strong` to allow full iterative reasoning.
+- Check `RUST_LOG=debug` output for `react_step` entries showing the agent's reasoning at each step.
 
 ## Task returned a scope-boundary finding instead of running
 

@@ -122,7 +122,21 @@ If live mode repeatedly falls back:
 5. Review `live_fallback_decision.reason_code` and `live_fallback_decision.live_error` in run output and capture both in incident notes.
 6. If `live-runtime-compatibility` reports FAIL, verify the model is a valid ONNX file and matches the runtime (CPU vs Vitis).
 
-## 6. Operator Recording Guidance
+## 6. Session Caching and Performance (v1.6.0)
+
+WraithRun caches the ONNX session and tokenizer across investigation steps within a single run. This eliminates per-step session rebuild overhead for multi-step investigations.
+
+The agent also tracks prompt prefix reuse across steps. When consecutive prompts share a common prefix (e.g., system prompt + prior context), the prefix hit/miss ratio is logged for observability. Full KV-state reuse is scaffolded for a future release.
+
+Temperature controls affect live inference behavior:
+
+- `--temperature 0` (or omit): greedy decoding — fastest, fully deterministic output.
+- `--temperature 0.1`–`0.3`: low-entropy sampling — slight variation while staying focused.
+- `--temperature 0.5`+: higher-entropy sampling — more creative but less predictable.
+
+For incident response triage, `0` or `0.1` is recommended to keep findings deterministic and reproducible.
+
+## 7. Operator Recording Guidance
 
 When fallback is triggered during an active case:
 

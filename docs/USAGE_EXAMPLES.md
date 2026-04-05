@@ -287,6 +287,26 @@ Extract only the final answer (jq):
 cat ./launch-assets/network-report.json | jq -r .final_answer
 ```
 
+## Download a Model Pack
+
+List available curated model packs:
+
+```powershell
+wraithrun --model-download list
+```
+
+Download a specific pack (SHA-256 verified, skips if already present):
+
+```powershell
+wraithrun --model-download tinyllama-1.1b-chat
+```
+
+Models are saved to `./models/`. After downloading, validate with doctor:
+
+```powershell
+wraithrun --doctor --live --model ./models/tinyllama-1.1b-chat.onnx --tokenizer ./models/tokenizer.json
+```
+
 ## Live ONNX/Vitis Inference
 
 Validate build path:
@@ -299,6 +319,12 @@ Run with live model:
 
 ```powershell
 cargo run -p wraithrun --features inference_bridge/vitis -- --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --task "Investigate unauthorized SSH keys"
+```
+
+Control generation temperature (greedy decoding with `0`, sampling with `> 0`):
+
+```powershell
+wraithrun --task "Investigate suspicious processes" --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --temperature 0.1
 ```
 
 Optional Vitis config knobs:
