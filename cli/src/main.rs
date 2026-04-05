@@ -6086,6 +6086,13 @@ async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunRep
         (tier, Some(report))
     };
 
+    // Emit small-model warning to stderr if applicable (#120).
+    if let Some(ref report) = capability_report {
+        if let Some(ref warning) = report.warning {
+            eprintln!("⚠ {warning}");
+        }
+    }
+
     let brain = OnnxVitisEngine::new(model_config);
     let mut tools = ToolRegistry::with_default_tools();
     // Load plugin tools if configured.
@@ -6385,6 +6392,7 @@ mod tests {
                     args: json!({ "limit": 40 }),
                 }),
                 observation: Some(json!({ "listener_count": 3, "listeners": [] })),
+                elapsed_ms: None,
             }],
             final_answer: "Dry-run cycle complete.".to_string(),
             findings: vec![Finding::new(

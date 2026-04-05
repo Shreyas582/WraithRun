@@ -186,6 +186,9 @@ pub struct AgentTurn {
     pub thought: String,
     pub tool_call: Option<ToolCall>,
     pub observation: Option<Value>,
+    /// Wall-clock tool execution time in milliseconds (#129).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -1007,10 +1010,25 @@ pub struct ModelCapabilityReport {
     pub vocab_size: usize,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub r#override: bool,
+    /// Warning emitted when the model is likely too small for ReAct (#120).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 impl ModelCapabilityReport {
     pub fn from_probe(probe: &ModelCapabilityProbe, tier: ModelCapabilityTier) -> Self {
+        let warning = if tier >= ModelCapabilityTier::Moderate
+            && probe.estimated_param_billions > 0.0
+            && probe.estimated_param_billions < 3.0
+        {
+            Some(format!(
+                "Model estimated at {:.1}B params — ReAct tool-use may be unreliable below 7B. \
+                 Consider --capability-override basic for deterministic mode.",
+                probe.estimated_param_billions,
+            ))
+        } else {
+            None
+        };
         Self {
             tier,
             estimated_params_b: probe.estimated_param_billions,
@@ -1018,6 +1036,7 @@ impl ModelCapabilityReport {
             smoke_latency_ms: probe.smoke_latency_ms,
             vocab_size: probe.vocab_size,
             r#override: false,
+            warning,
         }
     }
 }
@@ -1099,6 +1118,7 @@ mod tests {
                 "indicator_count": 2,
                 "potential_vectors": ["SeDebugPrivilege"]
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1121,6 +1141,7 @@ mod tests {
             observation: Some(json!({
                 "error": "socket inventory command failed"
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1139,6 +1160,7 @@ mod tests {
             thought: "No-op".to_string(),
             tool_call: None,
             observation: None,
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "No significant anomalies detected.");
@@ -1160,6 +1182,7 @@ mod tests {
                 "suspicious_entry_count": 2,
                 "actionable_suspicious_count": 2
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1183,6 +1206,7 @@ mod tests {
                 "newly_privileged_account_count": 1,
                 "newly_privileged_accounts": ["svc-backup"]
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1207,6 +1231,7 @@ mod tests {
                 "high_risk_exposed_count": 2,
                 "network_risk_score": 78
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1231,6 +1256,7 @@ mod tests {
                 "baseline_privileged_account_count": 3,
                 "baseline_exposed_binding_count": 5
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "final");
@@ -1642,6 +1668,7 @@ mod tests {
             observation: Some(json!({
                 "indicator_count": 2,
             })),
+            elapsed_ms: None,
         }];
 
         let findings = derive_findings(&turns, "");

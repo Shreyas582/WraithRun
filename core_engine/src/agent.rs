@@ -204,17 +204,20 @@ impl<B: InferenceEngine> Agent<B> {
             };
             self.apply_coverage_baseline_to_call(&mut call);
 
+            let tool_started = Instant::now();
             let observation = match self.tools.execute(&call.tool, call.args.clone()).await {
                 Ok(value) => value,
                 Err(err) => json!({ "error": err.to_string() }),
             };
+            let tool_elapsed = tool_started.elapsed().as_millis() as u64;
 
-            info!(tool = %call.tool, "tool executed");
+            info!(tool = %call.tool, elapsed_ms = tool_elapsed, "tool executed");
 
             turns.push(AgentTurn {
                 thought: format!("Executing {} to gather evidence.", call.tool),
                 tool_call: Some(call),
                 observation: Some(observation),
+                elapsed_ms: Some(tool_elapsed),
             });
         }
 
@@ -263,13 +266,15 @@ impl<B: InferenceEngine> Agent<B> {
                     Some(mut call) => {
                         self.apply_coverage_baseline_to_call(&mut call);
 
+                        let tool_started = Instant::now();
                         let observation =
                             match self.tools.execute(&call.tool, call.args.clone()).await {
                                 Ok(value) => value,
                                 Err(err) => json!({ "error": err.to_string() }),
                             };
+                        let tool_elapsed = tool_started.elapsed().as_millis() as u64;
 
-                        info!(tool = %call.tool, step = step + 1, "ReAct tool executed");
+                        info!(tool = %call.tool, step = step + 1, elapsed_ms = tool_elapsed, "ReAct tool executed");
 
                         // Append observation to transcript for next iteration.
                         let obs_str = serde_json::to_string(&observation).unwrap_or_default();
@@ -280,10 +285,17 @@ impl<B: InferenceEngine> Agent<B> {
                         };
                         transcript.push_str(&format!("\n{output}\nObservation: {obs_truncated}\n"));
 
+                        // Extract LLM chain-of-thought: text before <call> tag (#119).
+                        let thought = extract_pre_tag_thought(&output, "call")
+                            .unwrap_or_else(|| {
+                                format!("ReAct step {}: invoking {}", step + 1, call.tool)
+                            });
+
                         turns.push(AgentTurn {
-                            thought: format!("ReAct step {}: invoking {}", step + 1, call.tool),
+                            thought,
                             tool_call: Some(call),
                             observation: Some(observation),
+                            elapsed_ms: Some(tool_elapsed),
                         });
                     }
                     None => {
@@ -349,6 +361,21 @@ fn elapsed_ms_since(started_at: Instant) -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+/// Extract LLM free-text reasoning that appears before an XML action tag (#119).
+///
+/// Returns `None` if the text before the tag is empty or whitespace-only,
+/// allowing the caller to fall back to a generated format string.
+fn extract_pre_tag_thought(output: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let idx = output.find(&open)?;
+    let pre = output[..idx].trim();
+    if pre.is_empty() {
+        None
+    } else {
+        Some(pre.to_string())
+    }
 }
 
 /// Keywords that indicate a task is within scope of host-local investigation tools.
