@@ -99,14 +99,15 @@ fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
 /// Infer bytes-per-parameter from filename conventions.
 /// Falls back to 2.2 (FP16) if no quantization hint is found.
 fn detect_quant_bytes_per_param(model_path: &Path) -> f64 {
-    let path_lower = model_path
-        .to_string_lossy()
-        .to_lowercase();
+    let path_lower = model_path.to_string_lossy().to_lowercase();
 
     // Check filename and parent directory for quantization hints.
     if path_lower.contains("q4") || path_lower.contains("int4") || path_lower.contains("4bit") {
         0.55
-    } else if path_lower.contains("q8") || path_lower.contains("int8") || path_lower.contains("8bit") {
+    } else if path_lower.contains("q8")
+        || path_lower.contains("int8")
+        || path_lower.contains("8bit")
+    {
         1.1
     } else if path_lower.contains("fp32") || path_lower.contains("float32") {
         4.4
@@ -130,7 +131,9 @@ struct DryRunTemplate {
 static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
     // baseline-capture — must outrank baseline-drift when "capture"/"coverage" present.
     DryRunTemplate {
-        keywords: &["capture", "snapshot", "collect", "coverage", "baseline", "golden"],
+        keywords: &[
+            "capture", "snapshot", "collect", "coverage", "baseline", "golden",
+        ],
         tools: &["capture_coverage_baseline"],
     },
     // file-integrity
@@ -192,8 +195,14 @@ static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
     // network-exposure-audit
     DryRunTemplate {
         keywords: &[
-            "network", "connection", "port", "listen", "listener", "lateral",
-            "beacon", "socket",
+            "network",
+            "connection",
+            "port",
+            "listen",
+            "listener",
+            "lateral",
+            "beacon",
+            "socket",
         ],
         tools: &[
             "scan_network",
@@ -203,7 +212,15 @@ static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
     },
     // privilege-escalation
     DryRunTemplate {
-        keywords: &["privilege", "escalat", "admin", "root", "sudo", "whoami", "unauthori"],
+        keywords: &[
+            "privilege",
+            "escalat",
+            "admin",
+            "root",
+            "sudo",
+            "whoami",
+            "unauthori",
+        ],
         tools: &[
             "check_privilege_escalation_vectors",
             "audit_account_changes",
@@ -644,7 +661,8 @@ mod tests {
         let out2 = engine.dry_run_response(&format!("{task}\nObservation: {{}}"));
         assert!(out2.contains("\"tool\":\"audit_account_changes\""));
 
-        let out3 = engine.dry_run_response(&format!("{task}\nObservation: {{}}\nObservation: {{}}"));
+        let out3 =
+            engine.dry_run_response(&format!("{task}\nObservation: {{}}\nObservation: {{}}"));
         assert!(out3.contains("\"tool\":\"inspect_persistence_locations\""));
 
         let out4 = engine.dry_run_response(&format!("{task}\n...Observation x3..."));

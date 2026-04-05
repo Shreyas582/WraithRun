@@ -2799,8 +2799,7 @@ fn run_prompt_on_session(
 
             debug!(
                 prompt_tokens = context_ids.len(),
-                initial_cache_len,
-                attention_len, "running batch prefill forward pass (cached)"
+                initial_cache_len, attention_len, "running batch prefill forward pass (cached)"
             );
 
             let model_inputs = build_model_inputs(
@@ -3076,8 +3075,7 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
 
         debug!(
             prompt_tokens = context_ids.len(),
-            initial_cache_len,
-            attention_len, "running batch prefill forward pass"
+            initial_cache_len, attention_len, "running batch prefill forward pass"
         );
 
         let model_inputs =

@@ -621,7 +621,8 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                     FindingSeverity::Low
                 };
                 // Extract account names for detail.
-                let detail = extract_string_list_summary(observation, "non_default_privileged_accounts", 3);
+                let detail =
+                    extract_string_list_summary(observation, "non_default_privileged_accounts", 3);
                 let title = if detail.is_empty() {
                     format!("Non-default privileged accounts observed ({non_default_privileged_account_count})")
                 } else {
@@ -848,20 +849,28 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                 };
 
                 // Build detail string from directories.
-                let detail = if let Some(dirs) = observation.get("directories").and_then(Value::as_array) {
-                    let summaries: Vec<String> = dirs.iter().take(3).map(|d| {
-                        let dir = d.get("ssh_dir").and_then(Value::as_str).unwrap_or("?");
-                        let has_ak = d.get("has_authorized_keys").and_then(Value::as_bool).unwrap_or(false);
-                        format!("{dir} (authorized_keys: {has_ak})")
-                    }).collect();
-                    if dirs.len() > 3 {
-                        format!("{} and {} more", summaries.join(", "), dirs.len() - 3)
+                let detail =
+                    if let Some(dirs) = observation.get("directories").and_then(Value::as_array) {
+                        let summaries: Vec<String> = dirs
+                            .iter()
+                            .take(3)
+                            .map(|d| {
+                                let dir = d.get("ssh_dir").and_then(Value::as_str).unwrap_or("?");
+                                let has_ak = d
+                                    .get("has_authorized_keys")
+                                    .and_then(Value::as_bool)
+                                    .unwrap_or(false);
+                                format!("{dir} (authorized_keys: {has_ak})")
+                            })
+                            .collect();
+                        if dirs.len() > 3 {
+                            format!("{} and {} more", summaries.join(", "), dirs.len() - 3)
+                        } else {
+                            summaries.join(", ")
+                        }
                     } else {
-                        summaries.join(", ")
-                    }
-                } else {
-                    String::new()
-                };
+                        String::new()
+                    };
 
                 findings.push(Finding::new(
                     format!(
@@ -1097,8 +1106,11 @@ fn is_low_quality(text: &str) -> bool {
         .lines()
         .filter(|line| {
             let l = line.trim();
-            l.starts_with("1)") || l.starts_with("2)") || l.starts_with("3)")
-                || l.starts_with("4)") || l.starts_with("5)")
+            l.starts_with("1)")
+                || l.starts_with("2)")
+                || l.starts_with("3)")
+                || l.starts_with("4)")
+                || l.starts_with("5)")
         })
         .count();
     if numbered_lines >= 3 && menu_hits >= 1 {
@@ -1159,7 +1171,9 @@ pub fn basic_tier_summary(findings: &[Finding]) -> String {
 pub fn basic_tier_summary_for_task(findings: &[Finding], task: Option<&str>) -> String {
     if findings.is_empty() {
         let prefix = match task {
-            Some(t) => format!("SUMMARY: Task \"{t}\" completed with 0 findings. Maximum severity: info."),
+            Some(t) => {
+                format!("SUMMARY: Task \"{t}\" completed with 0 findings. Maximum severity: info.")
+            }
             None => "SUMMARY: 0 findings detected. Maximum severity: info.".to_string(),
         };
         return format!("{prefix}\nFINDINGS:\n(none)\nRISK: info\nACTIONS:\n(none)");
@@ -1266,12 +1280,7 @@ fn extract_string_list_summary(observation: &Value, field: &str, max: usize) -> 
     let items: Vec<&str> = observation
         .get(field)
         .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(Value::as_str)
-                .take(max + 1)
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(Value::as_str).take(max + 1).collect())
         .unwrap_or_default();
 
     if items.is_empty() {

@@ -8,9 +8,8 @@ use inference_bridge::InferenceEngine;
 
 use crate::{
     basic_tier_summary_for_task, builtin_investigation_templates, deduplicate_findings,
-    derive_findings,
-    extract_tag, max_severity, quality_checked_final_answer, sort_findings, AgentTurn,
-    CoverageBaseline, EvidencePointer, Finding, FindingSeverity, InvestigationTemplate,
+    derive_findings, extract_tag, max_severity, quality_checked_final_answer, sort_findings,
+    AgentTurn, CoverageBaseline, EvidencePointer, Finding, FindingSeverity, InvestigationTemplate,
     ModelCapabilityReport, ModelCapabilityTier, RunReport, RunTimingMetrics, ToolCall,
 };
 
@@ -299,8 +298,8 @@ impl<B: InferenceEngine> Agent<B> {
                         transcript.push_str(&format!("\n{output}\nObservation: {obs_truncated}\n"));
 
                         // Extract LLM chain-of-thought: text before <call> tag (#119).
-                        let thought = extract_pre_tag_thought(&output, "call")
-                            .unwrap_or_else(|| {
+                        let thought =
+                            extract_pre_tag_thought(&output, "call").unwrap_or_else(|| {
                                 format!("ReAct step {}: invoking {}", step + 1, call.tool)
                             });
 

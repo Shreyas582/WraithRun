@@ -709,11 +709,7 @@ impl Tool for CheckPrivilegeEscalationVectorsTool {
                     .collect();
 
                 for svc in service_names {
-                    if let Ok(qc_out) = Command::new("sc")
-                        .args(["qc", svc])
-                        .output()
-                        .await
-                    {
+                    if let Ok(qc_out) = Command::new("sc").args(["qc", svc]).output().await {
                         let qc_stdout = String::from_utf8_lossy(&qc_out.stdout);
                         for line in qc_stdout.lines() {
                             let trimmed = line.trim();
@@ -1206,7 +1202,9 @@ impl Tool for EnumerateSshKeysTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "enumerate_ssh_keys".to_string(),
-            description: "Enumerates SSH keys and authorized_keys files for all user accounts on the host.".to_string(),
+            description:
+                "Enumerates SSH keys and authorized_keys files for all user accounts on the host."
+                    .to_string(),
             args_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1260,7 +1258,11 @@ impl Tool for EnumerateSshKeysTool {
                 if let Ok(entries) = std::fs::read_dir(ssh_dir) {
                     for entry in entries.flatten() {
                         let path = entry.path();
-                        let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        let fname = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
 
                         if fname == "authorized_keys" || fname == "authorized_keys2" {
                             has_authorized_keys = true;
@@ -1327,7 +1329,11 @@ impl Tool for EnumerateSshKeysTool {
                 if let Ok(entries) = std::fs::read_dir(ssh_dir) {
                     for entry in entries.flatten() {
                         let path = entry.path();
-                        let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        let fname = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
 
                         if fname == "authorized_keys" || fname == "authorized_keys2" {
                             has_authorized_keys = true;
