@@ -38,6 +38,7 @@ nav:
   - Automation Workflows: automation-workflows.md
   - Live-Mode Operations: live-mode-operations.md
   - Tool Reference: tool-reference.md
+  - Plugin API: plugin-api.md
   - Security and Sandbox: security-sandbox.md
   - Troubleshooting: troubleshooting.md
   - Release and Operations:

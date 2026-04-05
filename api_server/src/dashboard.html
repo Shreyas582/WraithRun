@@ -63,7 +63,8 @@ header .health { margin-left: auto; display: flex; align-items: center; gap: 0.5
 .sev.info { background: #1f2937; color: var(--muted); }
 
 /* Findings */
-.finding { padding: 0.75rem; border-left: 3px solid var(--border); margin-bottom: 0.5rem; }
+.finding { padding: 0.75rem; border-left: 3px solid var(--border); margin-bottom: 0.5rem; cursor: pointer; }
+.finding:hover { background: rgba(88,166,255,0.05); }
 .finding.Critical { border-left-color: var(--red); }
 .finding.High { border-left-color: var(--orange); }
 .finding.Medium { border-left-color: var(--yellow); }
@@ -85,6 +86,9 @@ header .health { margin-left: auto; display: flex; align-items: center; gap: 0.5
 .btn:hover { opacity: 0.9; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-danger { background: var(--red); }
+.btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-secondary:hover { border-color: var(--accent); }
+.btn-sm { padding: 0.25rem 0.625rem; font-size: 0.75rem; }
 
 /* Detail panel */
 .detail-panel { position: fixed; top: 0; right: -500px; width: 500px; height: 100vh;
@@ -105,6 +109,41 @@ header .health { margin-left: auto; display: flex; align-items: center; gap: 0.5
 .token-box h2 { margin-bottom: 1rem; font-size: 1.125rem; }
 .token-box input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px;
   background: var(--bg); color: var(--text); font-size: 0.875rem; margin-bottom: 1rem; }
+
+/* Donut chart */
+.donut-container { display: flex; align-items: center; gap: 1rem; margin: 0.75rem 0; }
+.donut-legend { font-size: 0.8125rem; }
+.donut-legend div { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+.donut-legend .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* Evidence chain */
+.evidence-chain { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; margin-top: 0.5rem; font-size: 0.8125rem; }
+.evidence-chain .step { padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
+.evidence-chain .step:last-child { border-bottom: none; }
+.evidence-chain .tool-name { color: var(--accent); font-weight: 600; }
+.evidence-chain .turn-num { color: var(--muted); }
+
+/* Compare view */
+.compare-controls { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+.compare-controls select { padding: 0.375rem 0.5rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font-size: 0.8125rem; }
+.diff-new { border-left: 3px solid var(--green); padding-left: 0.5rem; margin-bottom: 0.5rem; }
+.diff-resolved { border-left: 3px solid var(--muted); padding-left: 0.5rem; margin-bottom: 0.5rem; opacity: 0.7; text-decoration: line-through; }
+.diff-changed { border-left: 3px solid var(--yellow); padding-left: 0.5rem; margin-bottom: 0.5rem; }
+
+/* Export bar */
+.export-bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+
+/* Case list */
+.case-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 1rem; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); cursor: pointer; }
+.case-row:hover { background: rgba(88,166,255,0.05); }
+.case-row:last-child { border-bottom: none; }
+
+/* Progress indicator */
+.progress-indicator { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: var(--accent); }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -131,6 +170,8 @@ header .health { margin-left: auto; display: flex; align-items: center; gap: 0.5
   <div class="tabs">
     <div class="tab active" data-tab="runs" onclick="switchTab('runs')">Runs</div>
     <div class="tab" data-tab="findings" onclick="switchTab('findings')">Findings</div>
+    <div class="tab" data-tab="cases" onclick="switchTab('cases')">Cases</div>
+    <div class="tab" data-tab="compare" onclick="switchTab('compare')">Compare</div>
     <div class="tab" data-tab="health" onclick="switchTab('health')">Health</div>
   </div>
 
@@ -145,8 +186,28 @@ header .health { margin-left: auto; display: flex; align-items: center; gap: 0.5
 
   <!-- FINDINGS TAB -->
   <div id="tab-findings" style="display:none">
+    <div class="export-bar">
+      <button class="btn btn-secondary btn-sm" onclick="exportJSON()">Export JSON</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportCSV()">Export CSV</button>
+    </div>
     <div class="filters" id="severity-filters"></div>
     <div id="findings-list"></div>
+  </div>
+
+  <!-- CASES TAB -->
+  <div id="tab-cases" style="display:none">
+    <div id="cases-list"></div>
+  </div>
+
+  <!-- COMPARE TAB -->
+  <div id="tab-compare" style="display:none">
+    <div class="compare-controls">
+      <label style="font-size:0.875rem;color:var(--muted)">Run A:</label>
+      <select id="compare-a" onchange="renderCompare()"></select>
+      <label style="font-size:0.875rem;color:var(--muted)">Run B:</label>
+      <select id="compare-b" onchange="renderCompare()"></select>
+    </div>
+    <div id="compare-result"></div>
   </div>
 
   <!-- HEALTH TAB -->
@@ -164,6 +225,8 @@ header .health { margin-left: auto; display: flex; align-items: center; gap: 0.5
 <script>
 let TOKEN = localStorage.getItem('wraithrun_token') || '';
 let allRuns = [];
+let allRunDetails = {};
+let allCases = [];
 let activeSeverities = new Set(['Critical','High','Medium','Low','Info']);
 let pollTimer = null;
 
@@ -195,7 +258,7 @@ async function pollHealth() {
     document.getElementById('health-dot').className = 'dot ok';
     document.getElementById('health-text').textContent = 'online';
     document.getElementById('uptime-text').textContent = formatUptime(d.uptime_secs);
-   } catch {
+  } catch {
     document.getElementById('health-dot').className = 'dot down';
     document.getElementById('health-text').textContent = 'offline';
   }
@@ -207,31 +270,104 @@ function formatUptime(secs) {
   return Math.floor(secs/3600) + 'h ' + Math.floor((secs%3600)/60) + 'm';
 }
 
+// ---------------------------------------------------------------------------
+// SVG Donut Chart
+// ---------------------------------------------------------------------------
+const SEV_COLORS = { Critical: '#f85149', High: '#db6d28', Medium: '#d29922', Low: '#3fb950', Info: '#8b949e' };
+
+function severityCounts(findings) {
+  const counts = { Critical: 0, High: 0, Medium: 0, Low: 0, Info: 0 };
+  (findings || []).forEach(f => { if (counts.hasOwnProperty(f.severity)) counts[f.severity]++; });
+  return counts;
+}
+
+function renderDonut(counts, size) {
+  size = size || 80;
+  const r = size / 2 - 4;
+  const cx = size / 2, cy = size / 2;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (!total) return '<svg width="' + size + '" height="' + size + '"></svg>';
+  let angle = -90;
+  let paths = '';
+  for (const [sev, count] of Object.entries(counts)) {
+    if (!count) continue;
+    const slice = (count / total) * 360;
+    const startRad = angle * Math.PI / 180;
+    const endRad = (angle + slice) * Math.PI / 180;
+    const x1 = cx + r * Math.cos(startRad), y1 = cy + r * Math.sin(startRad);
+    const x2 = cx + r * Math.cos(endRad), y2 = cy + r * Math.sin(endRad);
+    const large = slice > 180 ? 1 : 0;
+    if (slice >= 359.99) {
+      paths += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + SEV_COLORS[sev] + '" stroke-width="8"/>';
+    } else {
+      paths += '<path d="M ' + x1 + ' ' + y1 + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2 + ' ' + y2 + '" fill="none" stroke="' + SEV_COLORS[sev] + '" stroke-width="8"/>';
+    }
+    angle += slice;
+  }
+  return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">'
+    + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--border)" stroke-width="8"/>'
+    + paths
+    + '<text x="' + cx + '" y="' + cy + '" text-anchor="middle" dominant-baseline="central" fill="var(--text)" font-size="16" font-weight="700">' + total + '</text>'
+    + '</svg>';
+}
+
+function renderDonutLegend(counts) {
+  let html = '';
+  for (const [sev, count] of Object.entries(counts)) {
+    if (!count) continue;
+    html += '<div><span class="swatch" style="background:' + SEV_COLORS[sev] + '"></span>' + sev + ': ' + count + '</div>';
+  }
+  return html;
+}
+
+// ---------------------------------------------------------------------------
 // Runs
+// ---------------------------------------------------------------------------
 async function loadRuns() {
   try {
     const r = await api('/runs');
     allRuns = await r.json();
+    // Fetch full details for completed runs (for donut charts and comparisons)
+    for (const run of allRuns) {
+      if (run.status === 'completed' && !allRunDetails[run.id]) {
+        try {
+          const dr = await api('/runs/' + run.id);
+          allRunDetails[run.id] = await dr.json();
+        } catch {}
+      }
+    }
     renderRuns();
     renderFindings();
+    populateCompareSelects();
   } catch {}
 }
 
 function renderRuns() {
   const el = document.getElementById('run-list');
   if (!allRuns.length) { el.innerHTML = '<div class="empty">No runs yet. Start an investigation above.</div>'; return; }
-  el.innerHTML = allRuns.map(run => `
-    <div class="card run-row" onclick="showDetail('${run.id}')" style="cursor:pointer">
-      <div>
-        <div class="run-task">${esc(run.task)}</div>
-        <div class="meta">${run.id.slice(0,8)}… · ${run.created_at}</div>
-      </div>
-      <span class="badge ${run.status}">${run.status}</span>
-      <span class="meta">${run.completed_at || ''}</span>
-      ${run.status === 'queued' || run.status === 'running'
-        ? '<button class="btn btn-danger" onclick="event.stopPropagation();cancelRun(\'' + run.id + '\')">Cancel</button>'
-        : ''}
-    </div>`).join('');
+  el.innerHTML = allRuns.map(run => {
+    const detail = allRunDetails[run.id];
+    const isActive = run.status === 'queued' || run.status === 'running';
+    let donutHtml = '';
+    if (detail && detail.report && detail.report.findings && detail.report.findings.length) {
+      const counts = severityCounts(detail.report.findings);
+      donutHtml = '<div class="donut-container">' + renderDonut(counts, 56) + '<div class="donut-legend" style="font-size:0.75rem">' + renderDonutLegend(counts) + '</div></div>';
+    }
+    let progressHtml = '';
+    if (isActive) {
+      progressHtml = '<div class="progress-indicator"><span class="spinner"></span>' + (run.status === 'running' ? 'Running…' : 'Queued') + '</div>';
+    }
+    return '<div class="card run-row" onclick="showDetail(\'' + run.id + '\')" style="cursor:pointer">'
+      + '<div>'
+      + '<div class="run-task">' + esc(run.task) + '</div>'
+      + '<div class="meta">' + run.id.slice(0,8) + '… · ' + run.created_at + '</div>'
+      + donutHtml + progressHtml
+      + '</div>'
+      + '<span class="badge ' + run.status + '">' + run.status + '</span>'
+      + '<span class="meta">' + (run.completed_at || '') + '</span>'
+      + (isActive ? '<button class="btn btn-danger" onclick="event.stopPropagation();cancelRun(\'' + run.id + '\')">Cancel</button>' : '')
+      + '</div>';
+  }).join('');
 }
 
 async function createRun() {
@@ -240,7 +376,7 @@ async function createRun() {
   if (!task) return;
   document.getElementById('run-btn').disabled = true;
   try {
-    await api('/runs', { method: 'POST', body: JSON.stringify({ task }) });
+    await api('/runs', { method: 'POST', body: JSON.stringify({ task: task }) });
     input.value = '';
     await loadRuns();
   } catch(e) { console.error(e); }
@@ -252,66 +388,133 @@ async function cancelRun(id) {
   await loadRuns();
 }
 
+// ---------------------------------------------------------------------------
+// Run detail panel with evidence chain
+// ---------------------------------------------------------------------------
 async function showDetail(id) {
   try {
     const r = await api('/runs/' + id);
     const run = await r.json();
+    allRunDetails[id] = run;
     const panel = document.getElementById('detail-panel');
-    let html = `<h2 style="margin-bottom:1rem">${esc(run.task)}</h2>
-      <p><span class="badge ${run.status}">${run.status}</span></p>
-      <p class="meta" style="margin:0.5rem 0">ID: ${run.id}<br>Created: ${run.created_at}${run.completed_at ? '<br>Completed: ' + run.completed_at : ''}</p>`;
-    if (run.error) html += `<div class="card" style="border-color:var(--red);margin-top:1rem"><strong>Error:</strong> ${esc(run.error)}</div>`;
+    let html = '<h2 style="margin-bottom:1rem">' + esc(run.task) + '</h2>'
+      + '<p><span class="badge ' + run.status + '">' + run.status + '</span></p>'
+      + '<p class="meta" style="margin:0.5rem 0">ID: ' + run.id + '<br>Created: ' + run.created_at + (run.completed_at ? '<br>Completed: ' + run.completed_at : '') + '</p>';
+
+    // Export buttons
+    if (run.report) {
+      html += '<div class="export-bar" style="margin-top:0.75rem">'
+        + '<button class="btn btn-secondary btn-sm" onclick="exportRunJSON(\'' + run.id + '\')">Export JSON</button>'
+        + '<button class="btn btn-secondary btn-sm" onclick="exportRunCSV(\'' + run.id + '\')">Export CSV</button>'
+        + '</div>';
+    }
+
+    // Severity donut chart
     if (run.report && run.report.findings && run.report.findings.length) {
-      html += '<h3 style="margin-top:1rem">Findings</h3>';
-      run.report.findings.forEach(f => {
-        html += `<div class="finding ${f.severity}" style="margin-top:0.5rem">
-          <div style="display:flex;gap:0.5rem;align-items:center">
-            <span class="sev ${(f.severity||'').toLowerCase()}">${f.severity}</span>
-            <strong>${esc(f.title)}</strong>
-          </div>
-          <div class="meta" style="margin-top:0.25rem">Confidence: ${(f.confidence*100).toFixed(0)}%</div>
-          <div style="margin-top:0.25rem;font-size:0.875rem">${esc(f.recommended_action)}</div>
-        </div>`;
+      const counts = severityCounts(run.report.findings);
+      html += '<div class="donut-container" style="margin-top:0.75rem">' + renderDonut(counts, 100) + '<div class="donut-legend">' + renderDonutLegend(counts) + '</div></div>';
+    }
+
+    if (run.error) html += '<div class="card" style="border-color:var(--red);margin-top:1rem"><strong>Error:</strong> ' + esc(run.error) + '</div>';
+
+    // Findings with evidence chain
+    if (run.report && run.report.findings && run.report.findings.length) {
+      html += '<h3 style="margin-top:1rem">Findings (' + run.report.findings.length + ')</h3>';
+      run.report.findings.forEach(function(f, idx) {
+        const confLabel = typeof f.confidence === 'number' ? (f.confidence * 100).toFixed(0) + '%' : (f.confidence || '');
+        html += '<div class="finding ' + (f.severity || '') + '" style="margin-top:0.5rem" onclick="event.stopPropagation();toggleEvidence(' + idx + ')">'
+          + '<div style="display:flex;gap:0.5rem;align-items:center">'
+          + '<span class="sev ' + (f.severity || '').toLowerCase() + '">' + (f.severity || '') + '</span>'
+          + '<strong>' + esc(f.title) + '</strong>'
+          + '</div>'
+          + '<div class="meta" style="margin-top:0.25rem">Confidence: ' + confLabel + '</div>'
+          + '<div style="margin-top:0.25rem;font-size:0.875rem">' + esc(f.recommended_action) + '</div>';
+
+        // Evidence chain: tool name, turn, observation excerpt
+        if (f.evidence_refs && f.evidence_refs.length) {
+          html += '<div class="evidence-chain" id="evidence-' + idx + '" style="display:none">';
+          f.evidence_refs.forEach(function(ref) {
+            html += '<div class="step">'
+              + '<span class="tool-name">' + esc(ref.tool || ref.tool_name || 'unknown') + '</span>'
+              + ' <span class="turn-num">(turn ' + (ref.turn != null ? ref.turn : '?') + ')</span>';
+            if (ref.observation_excerpt || ref.excerpt) {
+              html += '<div style="color:var(--muted);margin-top:0.125rem;font-family:monospace;font-size:0.75rem;white-space:pre-wrap;max-height:6rem;overflow-y:auto">'
+                + esc(ref.observation_excerpt || ref.excerpt) + '</div>';
+            }
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+        html += '</div>';
       });
     }
-    if (run.report && run.report.final_answer) {
-      html += `<h3 style="margin-top:1rem">Final Answer</h3><div class="card">${esc(run.report.final_answer)}</div>`;
+
+    // Investigation timeline (steps)
+    if (run.report && run.report.steps && run.report.steps.length) {
+      html += '<h3 style="margin-top:1rem">Investigation Timeline</h3>';
+      run.report.steps.forEach(function(step, i) {
+        html += '<div style="padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.875rem">'
+          + '<span style="color:var(--accent);font-weight:600">Step ' + (i + 1) + '</span> '
+          + '<span class="tool-name">' + esc(step.tool || '') + '</span>'
+          + (step.duration_ms ? ' <span class="meta">(' + step.duration_ms + 'ms)</span>' : '')
+          + '</div>';
+      });
     }
+
+    if (run.report && run.report.final_answer) {
+      html += '<h3 style="margin-top:1rem">Final Answer</h3><div class="card">' + esc(run.report.final_answer) + '</div>';
+    }
+
     document.getElementById('detail-content').innerHTML = html;
     panel.classList.add('open');
   } catch {}
 }
 
+function toggleEvidence(idx) {
+  var el = document.getElementById('evidence-' + idx);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
 function closeDetail() { document.getElementById('detail-panel').classList.remove('open'); }
 
-// Findings aggregation
+// ---------------------------------------------------------------------------
+// Findings aggregation with export
+// ---------------------------------------------------------------------------
+function gatherFindings() {
+  const findings = [];
+  allRuns.forEach(function(run) {
+    const detail = allRunDetails[run.id];
+    if (detail && detail.report && detail.report.findings) {
+      detail.report.findings.forEach(function(f) {
+        findings.push(Object.assign({}, f, { run_id: run.id, run_task: run.task }));
+      });
+    }
+  });
+  return findings;
+}
+
 function renderFindings() {
   const container = document.getElementById('findings-list');
   const filterEl = document.getElementById('severity-filters');
   const severities = ['Critical','High','Medium','Low','Info'];
-  filterEl.innerHTML = severities.map(s =>
-    `<button class="filter-btn ${activeSeverities.has(s)?'active':''}" onclick="toggleSeverity('${s}')">${s}</button>`
-  ).join('');
+  filterEl.innerHTML = severities.map(function(s) {
+    return '<button class="filter-btn ' + (activeSeverities.has(s) ? 'active' : '') + '" onclick="toggleSeverity(\'' + s + '\')">' + s + '</button>';
+  }).join('');
 
-  const findings = [];
-  allRuns.forEach(run => {
-    if (run.report && run.report.findings) {
-      run.report.findings.forEach(f => findings.push({ ...f, run_id: run.id, run_task: run.task }));
-    }
-  });
-
-  const filtered = findings.filter(f => activeSeverities.has(f.severity));
+  const findings = gatherFindings();
+  const filtered = findings.filter(function(f) { return activeSeverities.has(f.severity); });
   if (!filtered.length) { container.innerHTML = '<div class="empty">No findings match the current filters.</div>'; return; }
 
-  container.innerHTML = filtered.map(f => `
-    <div class="finding ${f.severity}" style="cursor:pointer" onclick="showDetail('${f.run_id}')">
-      <div style="display:flex;gap:0.5rem;align-items:center">
-        <span class="sev ${(f.severity||'').toLowerCase()}">${f.severity}</span>
-        <strong>${esc(f.title)}</strong>
-      </div>
-      <div class="meta">Confidence: ${(f.confidence*100).toFixed(0)}% · Run: ${f.run_id.slice(0,8)}…</div>
-      <div style="font-size:0.875rem;margin-top:0.25rem">${esc(f.recommended_action)}</div>
-    </div>`).join('');
+  container.innerHTML = filtered.map(function(f) {
+    return '<div class="finding ' + (f.severity || '') + '" onclick="showDetail(\'' + f.run_id + '\')">'
+      + '<div style="display:flex;gap:0.5rem;align-items:center">'
+      + '<span class="sev ' + (f.severity || '').toLowerCase() + '">' + (f.severity || '') + '</span>'
+      + '<strong>' + esc(f.title) + '</strong>'
+      + '</div>'
+      + '<div class="meta">Confidence: ' + (typeof f.confidence === 'number' ? (f.confidence * 100).toFixed(0) + '%' : (f.confidence || '')) + ' · Run: ' + f.run_id.slice(0, 8) + '…</div>'
+      + '<div style="font-size:0.875rem;margin-top:0.25rem">' + esc(f.recommended_action) + '</div>'
+      + '</div>';
+  }).join('');
 }
 
 function toggleSeverity(s) {
@@ -319,7 +522,172 @@ function toggleSeverity(s) {
   renderFindings();
 }
 
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+function downloadBlob(blob, filename) {
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportJSON() {
+  var findings = gatherFindings().filter(function(f) { return activeSeverities.has(f.severity); });
+  var blob = new Blob([JSON.stringify(findings, null, 2)], { type: 'application/json' });
+  downloadBlob(blob, 'wraithrun-findings.json');
+}
+
+function exportCSV() {
+  var findings = gatherFindings().filter(function(f) { return activeSeverities.has(f.severity); });
+  var rows = [['severity', 'title', 'confidence', 'recommended_action', 'run_id']];
+  findings.forEach(function(f) {
+    rows.push([f.severity || '', csvCell(f.title), typeof f.confidence === 'number' ? f.confidence.toString() : '', csvCell(f.recommended_action), f.run_id || '']);
+  });
+  var csv = rows.map(function(r) { return r.join(','); }).join('\n');
+  downloadBlob(new Blob([csv], { type: 'text/csv' }), 'wraithrun-findings.csv');
+}
+
+function exportRunJSON(id) {
+  var detail = allRunDetails[id];
+  if (!detail || !detail.report) return;
+  downloadBlob(new Blob([JSON.stringify(detail.report, null, 2)], { type: 'application/json' }), 'wraithrun-run-' + id.slice(0, 8) + '.json');
+}
+
+function exportRunCSV(id) {
+  var detail = allRunDetails[id];
+  if (!detail || !detail.report || !detail.report.findings) return;
+  var rows = [['severity', 'title', 'confidence', 'recommended_action']];
+  detail.report.findings.forEach(function(f) {
+    rows.push([f.severity || '', csvCell(f.title), typeof f.confidence === 'number' ? f.confidence.toString() : '', csvCell(f.recommended_action)]);
+  });
+  downloadBlob(new Blob([rows.map(function(r) { return r.join(','); }).join('\n')], { type: 'text/csv' }), 'wraithrun-run-' + id.slice(0, 8) + '.csv');
+}
+
+function csvCell(s) { s = s || ''; return s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s; }
+
+// ---------------------------------------------------------------------------
+// Cases
+// ---------------------------------------------------------------------------
+async function loadCases() {
+  try {
+    const r = await api('/cases');
+    allCases = await r.json();
+    renderCases();
+  } catch {}
+}
+
+function renderCases() {
+  const el = document.getElementById('cases-list');
+  if (!allCases.length) { el.innerHTML = '<div class="empty">No cases yet. Create cases via the API.</div>'; return; }
+  el.innerHTML = allCases.map(function(c) {
+    var sevBadge = c.max_severity ? '<span class="sev ' + c.max_severity.toLowerCase() + '">' + c.max_severity + '</span>' : '';
+    return '<div class="card case-row" onclick="showCaseDetail(\'' + c.id + '\')">'
+      + '<div><div style="font-weight:500">' + esc(c.title) + '</div>'
+      + '<div class="meta">' + c.id.slice(0, 8) + '… · ' + c.created_at + (c.description ? ' · ' + esc(c.description) : '') + '</div></div>'
+      + '<span class="badge ' + c.status + '">' + c.status + '</span>'
+      + sevBadge
+      + '<span class="meta">' + c.run_count + ' run' + (c.run_count !== 1 ? 's' : '') + '</span>'
+      + '</div>';
+  }).join('');
+}
+
+async function showCaseDetail(id) {
+  try {
+    const [caseR, runsR] = await Promise.all([api('/cases/' + id), api('/cases/' + id + '/runs')]);
+    const caseData = await caseR.json();
+    const caseRuns = await runsR.json();
+    const panel = document.getElementById('detail-panel');
+    let html = '<h2 style="margin-bottom:1rem">' + esc(caseData.title) + '</h2>'
+      + '<p><span class="badge ' + caseData.status + '">' + caseData.status + '</span>'
+      + (caseData.max_severity ? ' <span class="sev ' + caseData.max_severity.toLowerCase() + '">' + caseData.max_severity + '</span>' : '') + '</p>'
+      + '<p class="meta" style="margin:0.5rem 0">ID: ' + caseData.id + '<br>Created: ' + caseData.created_at + '<br>Updated: ' + caseData.updated_at + '</p>';
+    if (caseData.description) html += '<p style="margin-top:0.5rem;font-size:0.875rem">' + esc(caseData.description) + '</p>';
+    html += '<h3 style="margin-top:1rem">Runs (' + caseRuns.length + ')</h3>';
+    if (caseRuns.length) {
+      caseRuns.forEach(function(run) {
+        html += '<div class="card" style="cursor:pointer;margin-top:0.5rem" onclick="showDetail(\'' + run.id + '\')">'
+          + '<div style="font-weight:500">' + esc(run.task) + '</div>'
+          + '<div class="meta">' + run.id.slice(0, 8) + '… · <span class="badge ' + run.status + '">' + run.status + '</span></div>'
+          + '</div>';
+      });
+    } else {
+      html += '<div class="empty" style="padding:1rem">No runs linked to this case.</div>';
+    }
+    document.getElementById('detail-content').innerHTML = html;
+    panel.classList.add('open');
+  } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// Run comparison
+// ---------------------------------------------------------------------------
+function populateCompareSelects() {
+  var completed = allRuns.filter(function(r) { return r.status === 'completed'; });
+  ['compare-a', 'compare-b'].forEach(function(selId) {
+    var sel = document.getElementById(selId);
+    var cur = sel.value;
+    sel.innerHTML = '<option value="">— select —</option>' + completed.map(function(r) {
+      return '<option value="' + r.id + '">' + r.id.slice(0, 8) + '… ' + esc(r.task).slice(0, 40) + '</option>';
+    }).join('');
+    if (cur) sel.value = cur;
+  });
+}
+
+function renderCompare() {
+  var container = document.getElementById('compare-result');
+  var idA = document.getElementById('compare-a').value;
+  var idB = document.getElementById('compare-b').value;
+  if (!idA || !idB || idA === idB) { container.innerHTML = '<div class="empty">Select two different completed runs to compare.</div>'; return; }
+  var detA = allRunDetails[idA], detB = allRunDetails[idB];
+  if (!detA || !detB) { container.innerHTML = '<div class="empty">Run details not loaded yet.</div>'; return; }
+
+  var findingsA = (detA.report && detA.report.findings) || [];
+  var findingsB = (detB.report && detB.report.findings) || [];
+  var titlesA = new Set(findingsA.map(function(f) { return f.title; }));
+  var titlesB = new Set(findingsB.map(function(f) { return f.title; }));
+  var sevMapA = {}; findingsA.forEach(function(f) { sevMapA[f.title] = f.severity; });
+  var sevMapB = {}; findingsB.forEach(function(f) { sevMapB[f.title] = f.severity; });
+
+  var newFindings = findingsB.filter(function(f) { return !titlesA.has(f.title); });
+  var resolvedFindings = findingsA.filter(function(f) { return !titlesB.has(f.title); });
+  var changedFindings = findingsB.filter(function(f) { return titlesA.has(f.title) && sevMapA[f.title] !== f.severity; });
+
+  var html = '<div class="card"><h3>Comparison: ' + idA.slice(0, 8) + '… vs ' + idB.slice(0, 8) + '…</h3>'
+    + '<div class="meta" style="margin-bottom:0.75rem">Run A: ' + findingsA.length + ' findings · Run B: ' + findingsB.length + ' findings</div>';
+
+  if (newFindings.length) {
+    html += '<h4 style="color:var(--green);margin:0.5rem 0">New in Run B (' + newFindings.length + ')</h4>';
+    newFindings.forEach(function(f) {
+      html += '<div class="diff-new"><span class="sev ' + (f.severity || '').toLowerCase() + '">' + (f.severity || '') + '</span> ' + esc(f.title) + '</div>';
+    });
+  }
+  if (resolvedFindings.length) {
+    html += '<h4 style="color:var(--muted);margin:0.5rem 0">Resolved from Run A (' + resolvedFindings.length + ')</h4>';
+    resolvedFindings.forEach(function(f) {
+      html += '<div class="diff-resolved"><span class="sev ' + (f.severity || '').toLowerCase() + '">' + (f.severity || '') + '</span> ' + esc(f.title) + '</div>';
+    });
+  }
+  if (changedFindings.length) {
+    html += '<h4 style="color:var(--yellow);margin:0.5rem 0">Changed Severity (' + changedFindings.length + ')</h4>';
+    changedFindings.forEach(function(f) {
+      html += '<div class="diff-changed"><span class="sev ' + (sevMapA[f.title] || '').toLowerCase() + '">' + (sevMapA[f.title] || '') + '</span> → <span class="sev ' + (f.severity || '').toLowerCase() + '">' + (f.severity || '') + '</span> ' + esc(f.title) + '</div>';
+    });
+  }
+  if (!newFindings.length && !resolvedFindings.length && !changedFindings.length) {
+    html += '<div class="empty" style="padding:1rem">No differences found between these runs.</div>';
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// ---------------------------------------------------------------------------
 // Health tab
+// ---------------------------------------------------------------------------
 async function loadHealth() {
   const grid = document.getElementById('health-grid');
   try {
@@ -329,29 +697,32 @@ async function loadHealth() {
     const health = await healthR.json();
     const ready = await readyR.json();
     const status = await statusR.json();
-    grid.innerHTML = `
-      <div class="stat-card"><div class="value" style="color:var(--green)">${health.status}</div><div class="label">Status</div></div>
-      <div class="stat-card"><div class="value">${health.version}</div><div class="label">Version</div></div>
-      <div class="stat-card"><div class="value">${formatUptime(health.uptime_secs)}</div><div class="label">Uptime</div></div>
-      <div class="stat-card"><div class="value">${ready.tools_available}</div><div class="label">Tools</div></div>
-      <div class="stat-card"><div class="value">${status.mode}</div><div class="label">Mode</div></div>
-      <div class="stat-card"><div class="value">${status.max_concurrent_runs}</div><div class="label">Max Concurrent</div></div>
-      <div class="stat-card"><div class="value">${allRuns.length}</div><div class="label">Total Runs</div></div>
-      <div class="stat-card"><div class="value">${allRuns.filter(r=>r.status==='running').length}</div><div class="label">Active Runs</div></div>
-    `;
+    grid.innerHTML =
+      '<div class="stat-card"><div class="value" style="color:var(--green)">' + esc(health.status) + '</div><div class="label">Status</div></div>'
+      + '<div class="stat-card"><div class="value">' + esc(health.version) + '</div><div class="label">Version</div></div>'
+      + '<div class="stat-card"><div class="value">' + formatUptime(health.uptime_secs) + '</div><div class="label">Uptime</div></div>'
+      + '<div class="stat-card"><div class="value">' + ready.tools_available + '</div><div class="label">Tools</div></div>'
+      + '<div class="stat-card"><div class="value">' + esc(status.mode) + '</div><div class="label">Mode</div></div>'
+      + '<div class="stat-card"><div class="value">' + status.max_concurrent_runs + '</div><div class="label">Max Concurrent</div></div>'
+      + '<div class="stat-card"><div class="value">' + allRuns.length + '</div><div class="label">Total Runs</div></div>'
+      + '<div class="stat-card"><div class="value">' + allRuns.filter(function(r) { return r.status === 'running'; }).length + '</div><div class="label">Active Runs</div></div>';
   } catch { grid.innerHTML = '<div class="empty">Cannot load health data.</div>'; }
 }
 
+// ---------------------------------------------------------------------------
 // Tab switching
+// ---------------------------------------------------------------------------
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-  ['runs','findings','health'].forEach(t => {
+  document.querySelectorAll('.tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === name); });
+  ['runs','findings','cases','compare','health'].forEach(function(t) {
     document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
   });
   if (name === 'health') loadHealth();
+  if (name === 'cases') loadCases();
+  if (name === 'compare') populateCompareSelects();
 }
 
-function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
 async function refresh() {
   await pollHealth();

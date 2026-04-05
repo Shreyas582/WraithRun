@@ -2,6 +2,7 @@ pub mod account_audit;
 pub mod log_parser;
 pub mod network_scanner;
 pub mod persistence_checker;
+pub mod plugin;
 pub mod process_correlation;
 
 use std::{
@@ -273,6 +274,14 @@ impl ToolRegistry {
     pub fn register(&mut self, tool: Arc<dyn Tool>) {
         let name = tool.spec().name;
         self.tools.insert(name, tool);
+    }
+
+    /// Load plugin tools from a directory. Plugins must be explicitly allowed.
+    pub fn load_plugins(&mut self, config: &plugin::PluginConfig) {
+        let plugins = plugin::discover_plugins(config, &self.policy);
+        for tool in plugins {
+            self.register(tool);
+        }
     }
 
     pub fn policy(&self) -> &SandboxPolicy {

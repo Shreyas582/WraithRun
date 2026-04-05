@@ -1,0 +1,10 @@
+name = "hello_world"
+description = "Example plugin tool that echoes its input with a greeting."
+version = "0.1.0"
+command = "hello_world.sh"
+platforms = ["linux", "macos"]
+
+[parameters.target]
+type = "string"
+required = true
+description = "Name or host to greet."

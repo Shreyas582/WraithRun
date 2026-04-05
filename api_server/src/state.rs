@@ -27,6 +27,8 @@ pub struct ServerConfig {
     pub database_path: Option<PathBuf>,
     /// Path to the audit log file. If None, audit events are kept in-memory only.
     pub audit_log_path: Option<PathBuf>,
+    /// Names of loaded plugin tools (populated at startup).
+    pub plugin_tool_names: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -39,6 +41,7 @@ impl Default for ServerConfig {
             max_request_body_bytes: 1_048_576,
             database_path: None,
             audit_log_path: None,
+            plugin_tool_names: Vec::new(),
         }
     }
 }
