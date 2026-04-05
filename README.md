@@ -2,7 +2,7 @@
 
 **Local-first AI-powered incident triage for defenders.**
 
-WraithRun runs security investigations on your machine using your own ONNX model. Point it at a task, and it reasons through host-level evidence (logs, listeners, persistence, accounts, processes) then delivers severity-scored findings with full audit trails. No cloud APIs, no data exfiltration, no vendor lock-in.
+WraithRun runs security investigations on your machine using your own model (ONNX, GGUF, or SafeTensors). Point it at a task, and it reasons through host-level evidence (logs, listeners, persistence, accounts, processes) then delivers severity-scored findings with full audit trails. No cloud APIs, no data exfiltration, no vendor lock-in.
 
 ```powershell
 wraithrun --task "Investigate unauthorized SSH keys" --live --model ./models/llm.onnx --tokenizer ./models/tokenizer.json
@@ -11,7 +11,7 @@ wraithrun --task "Investigate unauthorized SSH keys" --live --model ./models/llm
 ## Key Features
 
 - **AI-guided investigation.** An agentic ReAct loop reasons about which tools to run, collects evidence iteratively, and synthesizes structured findings (Summary, Key Findings, Risk Assessment, Recommendations).
-- **Runs entirely on your hardware.** Bring your own ONNX model. Supports CPU, DirectML, CoreML, CUDA, TensorRT, QNN, and AMD Vitis backends.
+- **Runs entirely on your hardware.** Bring your own model in ONNX, GGUF, or SafeTensors format. Supports CPU, DirectML, CoreML, CUDA, TensorRT, QNN, and AMD Vitis backends.
 - **Deterministic fallback.** If live inference fails, the agent falls back to dry-run mode so triage never stalls. Machine-readable reason codes explain every fallback.
 - **Auditable evidence.** Case IDs, evidence bundles with SHA-256 checksums, and structured JSON output for analyst review and automation ingestion.
 - **Host coverage out of the box.** Logs, network listeners, file hashes, privilege indicators, persistence drift, account drift, and process-network risk correlation.
