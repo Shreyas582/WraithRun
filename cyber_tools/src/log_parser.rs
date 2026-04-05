@@ -54,5 +54,5 @@ pub fn sha256_file(path: &Path) -> Result<String, ToolError> {
     }
 
     let digest = hasher.finalize();
-    Ok(format!("{digest:x}"))
+    Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
 }

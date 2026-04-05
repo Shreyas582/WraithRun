@@ -3560,7 +3560,7 @@ fn sha256_file(path: &Path) -> Result<String> {
     let data = fs::read(path).with_context(|| format!("failed to read '{}'", path.display()))?;
     let mut hasher = Sha256::new();
     hasher.update(&data);
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Returns true when the checksum is a placeholder string that cannot be
@@ -5561,7 +5561,7 @@ fn extract_string_array(value: Option<&Value>, max_items: usize, max_chars: usiz
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn render_summary(report: &RunReport) -> String {
