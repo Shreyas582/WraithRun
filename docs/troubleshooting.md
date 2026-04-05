@@ -168,6 +168,7 @@ wraithrun --task "Investigate ..." --live --model C:/models/llm.onnx --tokenizer
 ```
 
 - Tier thresholds: Basic ≤2B params or ≥200ms latency; Strong ≥10B params and ≤50ms latency; Moderate is everything in between.
+- Since v1.8.0, parameter estimation is quantization-aware. Q4 models use 0.55 bytes/param, Q8 uses 1.1, FP16 uses 2.2, FP32 uses 4.4. This may reclassify models that were previously under-estimated (e.g., a Q4 model that reported 0.5B may now correctly report ~2B and shift from Basic to Moderate).
 
 ## Final answer looks generic or templated
 
@@ -179,6 +180,7 @@ Fix:
 
 - This happens when the model is classified as Basic tier (deterministic summary) or when LLM output quality is detected as low.
 - Since v1.6.0, Moderate/Strong tiers use a ReAct loop that typically produces richer output. If output is still generic, try `--capability-override strong` or increase `--temperature` slightly (e.g., `0.1`).
+- Since v1.8.0, the quality guard also catches hallucinated `<call>` tags and `[observation]` markers inside the final answer. When detected, the agent replaces the garbage with a deterministic summary built from real findings. This means even Moderate/Strong tier runs may show a structured summary if the model hallucinates.
 
 ## Agent not calling expected tools
 
@@ -191,6 +193,7 @@ Fix:
 - Moderate/Strong tiers use a ReAct loop where the LLM decides which tools to call. The model may not choose the same tools as the template-driven Basic tier.
 - Increase `--max-steps` if the agent is exhausting its step budget before reaching all relevant tools.
 - If the model is too small, it may produce a `<final>` answer immediately. Try `--capability-override strong` to allow full iterative reasoning.
+- Since v1.8.0, if the model produces `<final>` at step 0 without calling any tools, the agent automatically falls back to template-driven execution so that real host data is still collected.
 - Check `RUST_LOG=debug` output for `react_step` entries showing the agent's reasoning at each step.
 
 ## Task returned a scope-boundary finding instead of running

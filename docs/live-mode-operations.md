@@ -128,6 +128,10 @@ WraithRun caches the ONNX session and tokenizer across investigation steps withi
 
 The agent also tracks prompt prefix reuse across steps. When consecutive prompts share a common prefix (e.g., system prompt + prior context), the prefix hit/miss ratio is logged for observability. Full KV-state reuse is scaffolded for a future release.
 
+Since v1.8.0, the prefill attention mask correctly accounts for forced cache padding on models that lack a `use_cache` branch toggle (#136). Previously, models like Qwen2.5 and Llama 3.2 could crash with a shape broadcast error during prefill because the attention mask length did not include the initial cache dimension.
+
+Also since v1.8.0, execution provider reporting now detects DirectML and CUDA backend overrides (#142), so `model_capability.execution_provider` in JSON output accurately reflects the active backend instead of always showing `CPUExecutionProvider`.
+
 Temperature controls affect live inference behavior:
 
 - `--temperature 0` (or omit): greedy decoding — fastest, fully deterministic output.

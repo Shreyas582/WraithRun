@@ -142,6 +142,23 @@ Output fields:
 - `network_risk_level`
 - `records`
 
+## enumerate_ssh_keys
+
+Purpose:
+
+- Enumerates SSH key material across user home directories. Cross-platform: scans Windows `%USERPROFILE%\.ssh`, `ProgramData\ssh`, and other user profiles; on Linux/macOS scans `/root/.ssh` and `/home/*/.ssh`.
+
+Arguments:
+
+- none
+
+Output fields:
+
+- `directories` (array): per-directory summary including path, `has_authorized_keys`, `private_key_count`, and `public_key_count`.
+- `total_authorized_keys_files` (integer)
+- `total_private_keys` (integer)
+- `total_public_keys` (integer)
+
 ## capture_coverage_baseline
 
 Purpose:

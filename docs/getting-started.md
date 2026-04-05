@@ -141,6 +141,8 @@ When running in live mode, WraithRun automatically probes the loaded model to cl
 - **Moderate**: medium models. Agent uses a ReAct (Reason + Act) loop, iteratively choosing tools based on observations, then synthesizes findings via LLM.
 - **Strong**: large models (≥10B params and ≤50ms latency). Agent uses a full ReAct loop with the complete evidence window for deep iterative reasoning and synthesis.
 
+Since v1.8.0, parameter estimation is quantization-aware: Q4 models use 0.55 bytes/param, Q8 uses 1.1, FP16 uses 2.2, FP32 uses 4.4. This means Q4 models are classified more accurately — a 750 MB Q4 file now correctly estimates ~1.4B parameters instead of ~0.3B.
+
 Override automatic classification when you know your model's capability:
 
 ```powershell
