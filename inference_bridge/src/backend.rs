@@ -482,7 +482,8 @@ mod tests {
             max_new_tokens: 1,
             temperature: 0.0,
             dry_run: true,
-            vitis_config: None,
+            backend_override: None,
+            backend_config: Default::default(),
         };
         let cpu = CpuBackend;
         let session = cpu.build_session(&config, &BackendOptions::new());
@@ -529,7 +530,8 @@ mod tests {
             max_new_tokens: 1,
             temperature: 0.0,
             dry_run: true,
-            vitis_config: None,
+            backend_override: None,
+            backend_config: Default::default(),
         };
         let result =
             registry.build_session_with_fallback(&config, &BackendOptions::new(), None);
@@ -547,7 +549,8 @@ mod tests {
             max_new_tokens: 1,
             temperature: 0.0,
             dry_run: true,
-            vitis_config: None,
+            backend_override: None,
+            backend_config: Default::default(),
         };
         let result =
             registry.build_session_with_fallback(&config, &BackendOptions::new(), Some("CPU"));

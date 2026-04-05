@@ -4405,6 +4405,11 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
         return;
     }
 
+    let vitis_cfg = build_vitis_config(runtime);
+    let (bo, bc) = match vitis_cfg {
+        Some(cfg) => (Some("vitis".to_string()), cfg.into_backend_config()),
+        None => (None, Default::default()),
+    };
     let compatibility = inspect_runtime_compatibility(
         &ModelConfig {
             model_path: runtime.model.clone(),
@@ -4412,7 +4417,8 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
             max_new_tokens: 1,
             temperature: runtime.temperature,
             dry_run: false,
-            vitis_config: build_vitis_config(runtime),
+            backend_override: bo,
+            backend_config: bc,
         },
         true,
     );
@@ -5734,13 +5740,18 @@ async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunRep
     }
 
     let vitis_config = build_vitis_config(runtime);
+    let (backend_override, backend_config) = match vitis_config {
+        Some(cfg) => (Some("vitis".to_string()), cfg.into_backend_config()),
+        None => (None, Default::default()),
+    };
     let model_config = ModelConfig {
         model_path: runtime.model.clone(),
         tokenizer_path: runtime.tokenizer.clone(),
         max_new_tokens: runtime.max_new_tokens,
         temperature: runtime.temperature,
         dry_run,
-        vitis_config,
+        backend_override,
+        backend_config,
     };
 
     // Determine capability tier: override > probe > default.

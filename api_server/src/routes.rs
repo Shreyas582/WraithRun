@@ -353,7 +353,8 @@ async fn run_investigation(task: &str, max_steps: usize) -> anyhow::Result<core_
         max_new_tokens: 256,
         temperature: 0.2,
         dry_run: true,
-        vitis_config: None,
+        backend_override: None,
+        backend_config: Default::default(),
     };
     let engine = OnnxVitisEngine::new(model_config);
     let tools = ToolRegistry::with_default_tools();

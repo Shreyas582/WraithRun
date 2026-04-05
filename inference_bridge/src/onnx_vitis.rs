@@ -450,9 +450,8 @@ fn discover_ort_dylib_path(config: &ModelConfig) -> Option<PathBuf> {
     let mut candidates = Vec::new();
 
     if let Some(vitis_config_path) = config
-        .vitis_config
-        .as_ref()
-        .and_then(|cfg| cfg.config_file.as_deref())
+        .backend_config
+        .get("config_file")
     {
         let vitis_config_path = PathBuf::from(vitis_config_path);
         if let Some(parent) = vitis_config_path.parent() {
@@ -1203,16 +1202,14 @@ fn build_base_session_builder_with_provider(
     let mut vitis = ep::Vitis::default();
 
     if use_vitis_provider {
-        if let Some(vitis_cfg) = &config.vitis_config {
-            if let Some(config_file) = &vitis_cfg.config_file {
-                vitis = vitis.with_config_file(config_file);
-            }
-            if let Some(cache_dir) = &vitis_cfg.cache_dir {
-                vitis = vitis.with_cache_dir(cache_dir);
-            }
-            if let Some(cache_key) = &vitis_cfg.cache_key {
-                vitis = vitis.with_cache_key(cache_key);
-            }
+        if let Some(config_file) = config.backend_config.get("config_file") {
+            vitis = vitis.with_config_file(config_file);
+        }
+        if let Some(cache_dir) = config.backend_config.get("cache_dir") {
+            vitis = vitis.with_cache_dir(cache_dir);
+        }
+        if let Some(cache_key) = config.backend_config.get("cache_key") {
+            vitis = vitis.with_cache_key(cache_key);
         }
     }
 
@@ -1254,7 +1251,7 @@ fn build_session_with_vitis_cascade(config: &ModelConfig) -> Result<Session> {
     let force_cpu_provider = env_var_truthy("WRAITHRUN_FORCE_CPU_EP");
     debug!(
         model = %config.model_path.display(),
-        has_vitis_config = config.vitis_config.is_some(),
+        has_vitis_config = config.backend_config.contains_key("config_file"),
         force_cpu_provider,
         "building Vitis ONNX Runtime session"
     );
@@ -2792,7 +2789,8 @@ mod tests {
             max_new_tokens: 1,
             temperature: 0.0,
             dry_run: false,
-            vitis_config: None,
+            backend_override: None,
+            backend_config: Default::default(),
         };
 
         let report = inspect_runtime_compatibility(&config, true);
