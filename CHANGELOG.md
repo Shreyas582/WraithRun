@@ -18,6 +18,19 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 1.4.0 - 2026-04-12
+
+### Added
+
+- **Provider-aware doctor diagnostics** (#52): `wraithrun doctor` now enumerates all registered inference backends, reports their availability and priority, and surfaces per-backend diagnostic entries. The JSON doctor report includes a new `backends` array with structured diagnostic data.
+- **CLI `--backend` flag and auto-select** (#53): new `--backend <NAME>` flag (and `WRAITHRUN_BACKEND` env var / `[inference] backend` TOML key) lets users explicitly choose an inference backend. When omitted or set to `"auto"`, the engine picks the highest-priority available backend. Includes helpful error messages listing available backends if an invalid name is given.
+- **Integration test harness for multi-backend conformance** (#54): `backend_contract_tests!` macro generates 9 contract tests per backend (name, priority, availability, config keys, diagnostics, dry-run session). Five registry-level tests verify discovery, ordering, and fallback behavior. CPU conformance always runs; Vitis conformance is feature-gated.
+
+### Changed
+
+- `RunReport` now includes an optional `backend` field recording which inference backend was used.
+- `run-report.schema.json` and `doctor-introspection.schema.json` updated to reflect new fields.
+
 ## 1.3.1 - 2026-04-12
 
 ### Added
