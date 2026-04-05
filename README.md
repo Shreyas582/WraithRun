@@ -2,7 +2,7 @@
 
 **Local-first AI-powered incident triage for defenders.**
 
-WraithRun runs security investigations on your machine using your own ONNX model. Point it at a task, and it reasons through host-level evidence — logs, listeners, persistence, accounts, processes — then delivers severity-scored findings with full audit trails. No cloud APIs, no data exfiltration, no vendor lock-in.
+WraithRun runs security investigations on your machine using your own ONNX model. Point it at a task, and it reasons through host-level evidence (logs, listeners, persistence, accounts, processes) then delivers severity-scored findings with full audit trails. No cloud APIs, no data exfiltration, no vendor lock-in.
 
 ```powershell
 wraithrun --task "Investigate unauthorized SSH keys" --live --model ./models/llm.onnx --tokenizer ./models/tokenizer.json
@@ -10,11 +10,11 @@ wraithrun --task "Investigate unauthorized SSH keys" --live --model ./models/llm
 
 ## Key Features
 
-- **AI-guided investigation** — an agentic ReAct loop reasons about which tools to run, collects evidence iteratively, and synthesizes structured findings (Summary, Key Findings, Risk Assessment, Recommendations).
-- **Runs entirely on your hardware** — bring your own ONNX model. Supports CPU, DirectML, CoreML, CUDA, TensorRT, QNN, and AMD Vitis backends.
-- **Deterministic fallback** — if live inference fails, the agent falls back to dry-run mode so triage never stalls. Machine-readable reason codes explain every fallback.
-- **Auditable evidence** — case IDs, evidence bundles with SHA-256 checksums, and structured JSON output for analyst review and automation ingestion.
-- **Host coverage out of the box** — logs, network listeners, file hashes, privilege indicators, persistence drift, account drift, and process-network risk correlation.
+- **AI-guided investigation.** An agentic ReAct loop reasons about which tools to run, collects evidence iteratively, and synthesizes structured findings (Summary, Key Findings, Risk Assessment, Recommendations).
+- **Runs entirely on your hardware.** Bring your own ONNX model. Supports CPU, DirectML, CoreML, CUDA, TensorRT, QNN, and AMD Vitis backends.
+- **Deterministic fallback.** If live inference fails, the agent falls back to dry-run mode so triage never stalls. Machine-readable reason codes explain every fallback.
+- **Auditable evidence.** Case IDs, evidence bundles with SHA-256 checksums, and structured JSON output for analyst review and automation ingestion.
+- **Host coverage out of the box.** Logs, network listeners, file hashes, privilege indicators, persistence drift, account drift, and process-network risk correlation.
 
 ## Quick Start
 
@@ -71,11 +71,11 @@ wraithrun --task "Check suspicious listener ports" --dry-run --format summary
 
 Each run returns a JSON report containing:
 
-- **`findings`** — severity-scored, deduplicated observations with evidence pointers and recommended actions.
-- **`max_severity`** — highest severity across all findings for quick alert routing.
-- **`model_capability`** — tier classification, execution provider, latency, and parameters (live mode).
-- **`live_fallback_decision`** — why fallback triggered, if applicable.
-- **`case_id` / evidence bundle** — for chain-of-custody tracking.
+- **`findings`**: severity-scored, deduplicated observations with evidence pointers and recommended actions.
+- **`max_severity`**: highest severity across all findings for quick alert routing.
+- **`model_capability`**: tier classification, execution provider, latency, and parameters (live mode).
+- **`live_fallback_decision`**: why fallback triggered, if applicable.
+- **`case_id` / evidence bundle**: for chain-of-custody tracking.
 
 Use `--format summary` for human-readable output, `--automation-adapter findings-v1` for pipeline ingestion, or `--output-mode full` for complete turn-by-turn reasoning.
 
@@ -91,17 +91,17 @@ wraithrun serve                                        # start local API server 
 
 ## Features
 
-**Agentic investigation** — Moderate/Strong-tier models use a ReAct loop that iteratively selects tools, collects observations, and synthesizes findings. Basic-tier models use fast template-driven execution with deterministic summaries.
+**Agentic investigation.** Moderate/Strong-tier models use a ReAct loop that iteratively selects tools, collects observations, and synthesizes findings. Basic-tier models use fast template-driven execution with deterministic summaries.
 
-**Multi-backend inference** — pluggable execution providers (CPU, DirectML, CoreML, CUDA, TensorRT, QNN, Vitis). Auto-selects the best available backend, or pin one with `--backend <NAME>`. Supports ONNX, GGUF, and SafeTensors model formats with automatic quantization detection.
+**Multi-backend inference.** Pluggable execution providers (CPU, DirectML, CoreML, CUDA, TensorRT, QNN, Vitis). Auto-selects the best available backend, or pin one with `--backend <NAME>`. Supports ONNX, GGUF, and SafeTensors model formats with automatic quantization detection.
 
-**Model management** — download curated model packs with `--model-download`, automatic capability tiering (Basic/Moderate/Strong) based on model size and latency, and `--capability-override` for manual control.
+**Model management.** Download curated model packs with `--model-download`, automatic capability tiering (Basic/Moderate/Strong) based on model size and latency, and `--capability-override` for manual control.
 
-**Operational reliability** — preflight doctor checks, live-mode fallback with `--live-fallback-policy`, deterministic executive summaries when LLM quality is low, and configurable temperature for greedy vs. sampling decoding.
+**Operational reliability.** Preflight doctor checks, live-mode fallback with `--live-fallback-policy`, deterministic executive summaries when LLM quality is low, and configurable temperature for greedy vs. sampling decoding.
 
-**Evidence and automation** — case ID tracking, deterministic evidence bundles with checksum verification, `findings-v1` automation adapter, severity-threshold exit policy for CI/CD gating, and baseline-aware drift detection.
+**Evidence and automation.** Case ID tracking, deterministic evidence bundles with checksum verification, `findings-v1` automation adapter, severity-threshold exit policy for CI/CD gating, and baseline-aware drift detection.
 
-**API server and dashboard** — `wraithrun serve` exposes REST endpoints with bearer token auth, an embedded HTML dashboard, case management, and structured audit logging backed by SQLite.
+**API server and dashboard.** `wraithrun serve` exposes REST endpoints with bearer token auth, an embedded HTML dashboard, case management, and structured audit logging backed by SQLite.
 
 ## Documentation
 
@@ -129,9 +129,9 @@ Use only on systems and networks you own or are explicitly authorized to assess.
 
 ## Contributing
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guide
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — code of conduct
-- [SECURITY.md](SECURITY.md) — security policy
+- [CONTRIBUTING.md](CONTRIBUTING.md): contribution guide
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): code of conduct
+- [SECURITY.md](SECURITY.md): security policy
 
 ## License
 
