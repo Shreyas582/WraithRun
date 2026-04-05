@@ -1,197 +1,137 @@
 # WraithRun
 
-WraithRun is a live-first incident triage CLI for defenders.
+**Local-first AI-powered incident triage for defenders.**
 
-Run investigations locally with your own ONNX model, keep evidence auditable, and avoid stalled workflows with deterministic fallback when live inference fails.
+WraithRun runs security investigations on your machine using your own ONNX model. Point it at a task, and it reasons through host-level evidence — logs, listeners, persistence, accounts, processes — then delivers severity-scored findings with full audit trails. No cloud APIs, no data exfiltration, no vendor lock-in.
 
-## Why WraithRun For Live Triage
+```powershell
+wraithrun --task "Investigate unauthorized SSH keys" --live --model ./models/llm.onnx --tokenizer ./models/tokenizer.json
+```
 
-- Practical live triage: bring your own model and tokenizer, run on your infrastructure.
-- Operational reliability: preflight checks, doctor diagnostics, and `dry-run-on-error` fallback.
-- Automation-ready outputs: structured JSON, findings adapter, evidence bundles, and checksum verification.
-- Useful host coverage out of the box: logs, listeners, file hashes, privilege indicators, persistence drift, account drift, and process-network risk.
+## Key Features
 
-## Who This Is For / Not For
+- **AI-guided investigation** — an agentic ReAct loop reasons about which tools to run, collects evidence iteratively, and synthesizes structured findings (Summary, Key Findings, Risk Assessment, Recommendations).
+- **Runs entirely on your hardware** — bring your own ONNX model. Supports CPU, DirectML, CoreML, CUDA, TensorRT, QNN, and AMD Vitis backends.
+- **Deterministic fallback** — if live inference fails, the agent falls back to dry-run mode so triage never stalls. Machine-readable reason codes explain every fallback.
+- **Auditable evidence** — case IDs, evidence bundles with SHA-256 checksums, and structured JSON output for analyst review and automation ingestion.
+- **Host coverage out of the box** — logs, network listeners, file hashes, privilege indicators, persistence drift, account drift, and process-network risk correlation.
 
-Who this is for:
+## Quick Start
 
-- Incident response and SOC teams that need fast host-level triage with auditable outputs.
-- Security engineering teams that need local execution and data control.
-- Teams integrating triage results into SIEM/SOAR or CI workflows.
+### Install
 
-Who this is not for:
+Download from [Releases](https://github.com/Shreyas582/WraithRun/releases) (Windows `.msi`/`.zip`, Linux `.deb`/`.rpm`/`.tar.gz`, macOS `.pkg`/`.tar.gz`).
 
-- Teams expecting autonomous remediation without analyst oversight.
-- Environments that cannot provide a local model/tokenizer for live mode.
-- Workflows focused on broad internet scanning instead of host-centric investigation.
-
-## Live Mode Quick Start (Recommended)
-
-These steps are the fastest path to evaluate real operational value.
-
-### 1. Install
-
-Download a release binary from [Releases](https://github.com/Shreyas582/WraithRun/releases).
-
-- Windows: `.msi` or `.zip`
-- Linux: `.deb`, `.rpm`, or `.tar.gz`
-- macOS: `.pkg` or `.tar.gz`
-
-If you run from source (Rust stable):
+Or build from source (Rust stable):
 
 ```powershell
 git clone https://github.com/Shreyas582/WraithRun.git
 cd WraithRun
+cargo build -p wraithrun --release
 ```
 
-### 2. Validate Live Readiness
+### Get a Model
 
 ```powershell
-wraithrun --doctor --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --introspection-format json
+wraithrun --model-download list                        # see available packs
+wraithrun --model-download tinyllama-1.1b-chat         # download + SHA-256 verify
 ```
 
-Optional remediation for common setup issues:
+### Validate Setup
 
 ```powershell
-wraithrun --doctor --live --fix --model C:/models/llm.onnx --introspection-format json
+wraithrun --doctor --live --model ./models/llm.onnx --tokenizer ./models/tokenizer.json
 ```
 
-### 3. Run Your First Live Investigation
+### Run an Investigation
 
 ```powershell
-wraithrun --task "Investigate unauthorized SSH keys" --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --live-fallback-policy dry-run-on-error --automation-adapter findings-v1
+wraithrun --task "Investigate unauthorized SSH keys" --live \
+  --model ./models/llm.onnx --tokenizer ./models/tokenizer.json \
+  --live-fallback-policy dry-run-on-error
 ```
 
-### 4. Export and Verify Evidence
+### Export Evidence
 
 ```powershell
-wraithrun --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json --evidence-bundle-dir .\evidence\CASE-2026-IR-0042
-wraithrun --verify-bundle .\evidence\CASE-2026-IR-0042 --introspection-format json
+wraithrun --task "Investigate unauthorized SSH keys" --case-id CASE-2026-IR-0042 \
+  --live --model ./models/llm.onnx --tokenizer ./models/tokenizer.json \
+  --evidence-bundle-dir ./evidence/CASE-2026-IR-0042
+
+wraithrun --verify-bundle ./evidence/CASE-2026-IR-0042
 ```
 
-If you run from source, replace `wraithrun ...` with:
+### Dry-Run (No Model Required)
 
 ```powershell
-cargo run -p wraithrun -- ...
-```
-
-And for live inference support in source builds, enable the feature:
-
-```powershell
-cargo run -p wraithrun --features inference_bridge/vitis -- --task "Investigate unauthorized SSH keys" --live --model C:/models/llm.onnx --tokenizer C:/models/tokenizer.json
+wraithrun --task "Check suspicious listener ports" --dry-run --format summary
 ```
 
 ## What You Get Back
 
-Each run emits structured output that is useful to both analysts and automation:
+Each run returns a JSON report containing:
 
-- `max_severity`: highest severity level across all deduplicated findings.
-- `findings`: severity-scored, actionable observations with evidence pointers (deduplicated and sorted).
-- `model_capability`: capability tier, estimated parameters, execution provider, latency, and vocab size (live mode).
-- `live_fallback_decision`: machine-readable reason codes when fallback triggers.
-- `run_timing` and `live_run_metrics`: latency and reliability telemetry for operations.
-- `case_id` and evidence bundle artifacts for case tracking and auditability.
+- **`findings`** — severity-scored, deduplicated observations with evidence pointers and recommended actions.
+- **`max_severity`** — highest severity across all findings for quick alert routing.
+- **`model_capability`** — tier classification, execution provider, latency, and parameters (live mode).
+- **`live_fallback_decision`** — why fallback triggered, if applicable.
+- **`case_id` / evidence bundle** — for chain-of-custody tracking.
 
-Default output uses compact mode (omits intermediate reasoning). Use `--output-mode full` for complete turn-by-turn output.
+Use `--format summary` for human-readable output, `--automation-adapter findings-v1` for pipeline ingestion, or `--output-mode full` for complete turn-by-turn reasoning.
 
-## Common Operational Commands
+## Useful Commands
 
 ```powershell
-wraithrun --list-tools
+wraithrun --list-tools                                 # available investigation tools
+wraithrun --list-profiles                              # built-in config profiles
 wraithrun --task-template listener-risk --format summary
-wraithrun models list --introspection-format json
-wraithrun models validate --introspection-format json
-wraithrun models benchmark --introspection-format json
-wraithrun --list-profiles
+wraithrun --doctor --live --fix --model ./models/llm.onnx  # auto-fix setup issues
+wraithrun serve                                        # start local API server + dashboard
 ```
 
-Need an offline-only path first? Use dry-run mode:
+## Features
 
-```powershell
-wraithrun --task "Check suspicious listener ports and summarize risk" --dry-run --format summary
-```
+**Agentic investigation** — Moderate/Strong-tier models use a ReAct loop that iteratively selects tools, collects observations, and synthesizes findings. Basic-tier models use fast template-driven execution with deterministic summaries.
 
-## Advanced Features
+**Multi-backend inference** — pluggable execution providers (CPU, DirectML, CoreML, CUDA, TensorRT, QNN, Vitis). Auto-selects the best available backend, or pin one with `--backend <NAME>`. Supports ONNX, GGUF, and SafeTensors model formats with automatic quantization detection.
 
-**Agentic investigation (v1.6.0)**
+**Model management** — download curated model packs with `--model-download`, automatic capability tiering (Basic/Moderate/Strong) based on model size and latency, and `--capability-override` for manual control.
 
-- ReAct agent loop: Moderate/Strong tiers reason iteratively, choosing which tool to call based on observations so far.
-- Task-aware LLM synthesis with structured output (Summary, Key Findings, Risk Assessment, Recommendations).
-- Session caching eliminates per-step ONNX session rebuild; KV-cache prefix reuse detects shared prompt prefixes.
-- Temperature-scaled sampling for creative vs. deterministic output (`temperature` config key).
+**Operational reliability** — preflight doctor checks, live-mode fallback with `--live-fallback-policy`, deterministic executive summaries when LLM quality is low, and configurable temperature for greedy vs. sampling decoding.
 
-**Model management**
+**Evidence and automation** — case ID tracking, deterministic evidence bundles with checksum verification, `findings-v1` automation adapter, severity-threshold exit policy for CI/CD gating, and baseline-aware drift detection.
 
-- `--model-download list` shows curated model packs; `--model-download <NAME>` fetches and verifies with SHA-256.
-- Capability tiering: automatic probe classifies models as Basic/Moderate/Strong and adapts agent behavior.
-- `--capability-override` to manually set tier classification.
-- Model-pack lifecycle: discover, validate, and benchmark candidate packs.
+**API server and dashboard** — `wraithrun serve` exposes REST endpoints with bearer token auth, an embedded HTML dashboard, case management, and structured audit logging backed by SQLite.
 
-**Multi-backend inference (v1.4.0–v1.5.0)**
+## Documentation
 
-- Pluggable backends: CPU, Vitis (AMD RyzenAI), DirectML, CoreML, CUDA, TensorRT, QNN.
-- `--backend <NAME>` flag (or auto-select by priority). EP-aware debug logging.
-- `ModelFormat` (ONNX/GGUF/SafeTensors) and `QuantFormat` (FP32/FP16/INT8/INT4) auto-detection.
-
-**Operational reliability**
-
-- Live preflight validation to fail fast on missing model or tokenizer assets.
-- Deterministic fallback controls with `--live-fallback-policy` and machine-readable reason codes.
-- Findings deduplication, severity sorting, and quality-checked summaries.
-- Compact output (default) with `--output-mode full` for verbose turn-by-turn output.
-
-**Evidence and automation**
-
-- Evidence bundle export with deterministic archive creation and checksum verification.
-- Automation contracts with `findings-v1` adapter and severity-threshold exit policy.
-- Baseline-aware drift workflows for persistence, account changes, and process-network risk.
-- Effective configuration introspection (`--print-effective-config` and `--explain-effective-config`).
-
-**Local API server and web UI (v1.0.0)**
-
-- `wraithrun serve` with 7 REST endpoints, embedded HTML dashboard, bearer token auth.
-- Case management, structured audit logging, and SQLite-backed data model.
-
-## Documentation Map
-
-- Hosted docs: https://wraithrun.readthedocs.io/en/latest/
-- Getting started: [docs/getting-started.md](docs/getting-started.md)
-- Live-mode operations: [docs/live-mode-operations.md](docs/live-mode-operations.md)
-- CLI reference: [docs/cli-reference.md](docs/cli-reference.md)
-- Tool reference: [docs/tool-reference.md](docs/tool-reference.md)
-- Usage examples: [docs/USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md)
-- Automation contracts and schemas: [docs/automation-contracts.md](docs/automation-contracts.md)
-- Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
-- Security sandbox controls: [docs/security-sandbox.md](docs/security-sandbox.md)
+| Resource | Link |
+|----------|------|
+| Full docs | [wraithrun.readthedocs.io](https://wraithrun.readthedocs.io/en/latest/) |
+| Getting started | [docs/getting-started.md](docs/getting-started.md) |
+| CLI reference | [docs/cli-reference.md](docs/cli-reference.md) |
+| Tool reference | [docs/tool-reference.md](docs/tool-reference.md) |
+| Live-mode operations | [docs/live-mode-operations.md](docs/live-mode-operations.md) |
+| Usage examples | [docs/USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md) |
+| Automation contracts | [docs/automation-contracts.md](docs/automation-contracts.md) |
+| Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| Security sandbox | [docs/security-sandbox.md](docs/security-sandbox.md) |
 
 ## Project Status
 
-**Current release: [v1.6.0](https://github.com/Shreyas582/WraithRun/releases/tag/v1.6.0)** — Agentic Investigation Engine
+**Latest release: [v1.6.0](https://github.com/Shreyas582/WraithRun/releases/tag/v1.6.0)**
 
-| Version | Milestone | Highlights |
-|---------|-----------|------------|
-| v1.6.0 | Agentic Investigation Engine | ReAct agent loop, task-aware synthesis, temperature sampling, session caching, model-pack download |
-| v1.5.0 | Concrete Hardware Backends | DirectML, CoreML, CUDA/TensorRT, QNN, ModelFormat/QuantFormat auto-detection |
-| v1.4.0 | Multi-Backend Abstraction | Provider registry, `--backend` flag, provider-aware doctor diagnostics |
-| v1.3.0 | Backend Trait Extraction | `ExecutionProviderBackend` trait, CPU/Vitis trait impls, conformance harness |
-| v1.2.0 | Integrations & Extensibility | Tool plugin API, CI/CD pipeline integration |
-| v1.1.0 | Professional Workflow Depth | Narrative reports, case management API, structured audit logging |
-| v1.0.0 | Local API Server & Web UI | REST API, embedded dashboard, bearer auth, SQLite data model |
-
-See [CHANGELOG.md](CHANGELOG.md) for full release history.
+Active development. See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Responsible Use
 
 Use only on systems and networks you own or are explicitly authorized to assess.
 
-## Contributing and Governance
+## Contributing
 
-- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-- Security policy: [SECURITY.md](SECURITY.md)
-- Changelog: [CHANGELOG.md](CHANGELOG.md)
-- Release plan: [docs/RELEASE_PLAN.md](docs/RELEASE_PLAN.md)
-- CI/CD details: [docs/CI_CD.md](docs/CI_CD.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guide
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — code of conduct
+- [SECURITY.md](SECURITY.md) — security policy
 
 ## License
 
