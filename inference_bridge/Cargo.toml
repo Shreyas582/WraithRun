@@ -8,6 +8,11 @@ license.workspace = true
 default = []
 onnx = ["dep:ort", "dep:tokenizers", "dep:half"]
 vitis = ["onnx", "ort/vitis"]
+directml = ["onnx", "ort/directml"]
+coreml = ["onnx", "ort/coreml"]
+cuda = ["onnx", "ort/cuda"]
+tensorrt = ["cuda", "ort/tensorrt"]
+qnn = ["onnx", "ort/qnn"]
 
 [dependencies]
 anyhow.workspace = true

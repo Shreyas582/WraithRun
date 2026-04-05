@@ -122,6 +122,24 @@ macro_rules! backend_contract_tests {
                     "dry-run generate should return non-empty text"
                 );
             }
+
+            #[test]
+            fn supported_formats_is_non_empty() {
+                let formats = backend().supported_formats();
+                assert!(
+                    !formats.is_empty(),
+                    "supported_formats() must return at least one format"
+                );
+            }
+
+            #[test]
+            fn supported_quant_formats_is_non_empty() {
+                let quants = backend().supported_quant_formats();
+                assert!(
+                    !quants.is_empty(),
+                    "supported_quant_formats() must return at least one format"
+                );
+            }
         }
     };
 }
@@ -134,6 +152,27 @@ backend_contract_tests!(cpu_conformance, CpuBackend);
 
 #[cfg(feature = "vitis")]
 backend_contract_tests!(vitis_conformance, inference_bridge::backend::VitisBackend);
+
+#[cfg(feature = "directml")]
+backend_contract_tests!(
+    directml_conformance,
+    inference_bridge::backend::DirectMlBackend
+);
+
+#[cfg(feature = "coreml")]
+backend_contract_tests!(coreml_conformance, inference_bridge::backend::CoreMlBackend);
+
+#[cfg(feature = "cuda")]
+backend_contract_tests!(cuda_conformance, inference_bridge::backend::CudaBackend);
+
+#[cfg(feature = "tensorrt")]
+backend_contract_tests!(
+    tensorrt_conformance,
+    inference_bridge::backend::TensorRtBackend
+);
+
+#[cfg(feature = "qnn")]
+backend_contract_tests!(qnn_conformance, inference_bridge::backend::QnnBackend);
 
 // -----------------------------------------------------------------------
 // Registry-level tests
