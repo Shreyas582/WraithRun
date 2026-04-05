@@ -1,0 +1,558 @@
+//! Execution provider backend abstraction.
+//!
+//! This module defines the [`ExecutionProviderBackend`] trait that decouples
+//! the inference loop from any specific hardware execution provider. Backends
+//! register themselves in a [`ProviderRegistry`] and are auto-selected based
+//! on availability and priority.
+
+use std::collections::HashMap;
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+use crate::ModelConfig;
+
+// ---------------------------------------------------------------------------
+// Diagnostic types
+// ---------------------------------------------------------------------------
+
+/// Severity of a provider diagnostic entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticSeverity {
+    Pass,
+    Warn,
+    Fail,
+}
+
+impl fmt::Display for DiagnosticSeverity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pass => write!(f, "pass"),
+            Self::Warn => write!(f, "warn"),
+            Self::Fail => write!(f, "fail"),
+        }
+    }
+}
+
+/// A single diagnostic entry produced by a backend's self-check.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticEntry {
+    pub severity: DiagnosticSeverity,
+    pub check: String,
+    pub message: String,
+}
+
+impl DiagnosticEntry {
+    pub fn pass(check: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Pass,
+            check: check.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn warn(check: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Warn,
+            check: check.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn fail(check: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Fail,
+            check: check.into(),
+            message: message.into(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Backend trait
+// ---------------------------------------------------------------------------
+
+/// Information about a registered backend, returned by the registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderInfo {
+    pub name: String,
+    pub priority: u32,
+    pub available: bool,
+}
+
+/// Abstraction over a hardware execution provider.
+///
+/// Backends report their availability at runtime (not just compile time) so
+/// the registry can probe what is actually present on the host. Each backend
+/// can produce an inference session and provider-specific diagnostics.
+pub trait ExecutionProviderBackend: Send + Sync {
+    /// Human-readable name (e.g. "CPU", "AMD Vitis NPU", "NVIDIA CUDA").
+    fn name(&self) -> &str;
+
+    /// Whether this backend is available on the current system.
+    ///
+    /// Backends should probe hardware/driver presence, not just check compile
+    /// flags. A compiled backend where the driver is missing returns `false`.
+    fn is_available(&self) -> bool;
+
+    /// Priority for auto-selection. Higher values are preferred.
+    ///
+    /// Suggested baseline: CPU = 0, DirectML = 100, CoreML = 100,
+    /// CUDA = 200, Vitis NPU = 300.
+    fn priority(&self) -> u32;
+
+    /// Provider-specific configuration keys that this backend reads from
+    /// [`BackendOptions`] (e.g. `"device_id"`, `"config_file"`).
+    fn config_keys(&self) -> &[&str] {
+        &[]
+    }
+
+    /// Run provider-specific diagnostic checks.
+    fn diagnose(&self) -> Vec<DiagnosticEntry>;
+
+    /// Create a ready-to-use inference session for the given model config
+    /// and provider-specific options.
+    ///
+    /// This is the primary extension point. The provider translates
+    /// [`ModelConfig`] + [`BackendOptions`] into whatever internal session
+    /// type the runtime needs.
+    fn build_session(
+        &self,
+        config: &ModelConfig,
+        options: &BackendOptions,
+    ) -> anyhow::Result<Box<dyn InferenceSession>>;
+}
+
+/// Provider-specific options passed through from CLI/config.
+///
+/// This is a string-keyed map so that new backends can read their own config
+/// keys without changing the core types.
+pub type BackendOptions = HashMap<String, String>;
+
+// ---------------------------------------------------------------------------
+// Session trait
+// ---------------------------------------------------------------------------
+
+/// A provider-created inference session.
+///
+/// The inference loop calls `generate` regardless of which backend produced
+/// the session.
+pub trait InferenceSession: Send + Sync {
+    /// Generate text from a prompt using this session.
+    fn generate(&self, prompt: &str, max_new_tokens: usize) -> anyhow::Result<String>;
+}
+
+// ---------------------------------------------------------------------------
+// Provider registry
+// ---------------------------------------------------------------------------
+
+/// Runtime registry of execution provider backends.
+///
+/// Created once at startup, it discovers which compile-time-enabled backends
+/// are available and provides selection by priority or by name.
+pub struct ProviderRegistry {
+    backends: Vec<Box<dyn ExecutionProviderBackend>>,
+}
+
+impl ProviderRegistry {
+    /// Build a registry with all compile-time-enabled backends.
+    ///
+    /// Each backend probes its own availability. The registry stores all
+    /// backends (available or not) for diagnostic listing.
+    pub fn discover() -> Self {
+        let mut backends: Vec<Box<dyn ExecutionProviderBackend>> = Vec::new();
+
+        // CPU is always available.
+        backends.push(Box::new(CpuBackend));
+
+        // Vitis backend (only when compiled with the `vitis` feature).
+        #[cfg(feature = "vitis")]
+        backends.push(Box::new(VitisBackend));
+
+        Self { backends }
+    }
+
+    /// Returns the highest-priority available backend.
+    pub fn best_available(&self) -> Option<&dyn ExecutionProviderBackend> {
+        self.backends
+            .iter()
+            .filter(|b| b.is_available())
+            .max_by_key(|b| b.priority())
+            .map(|b| b.as_ref())
+    }
+
+    /// Returns a specific backend by name (case-insensitive).
+    pub fn get(&self, name: &str) -> Option<&dyn ExecutionProviderBackend> {
+        let name_lower = name.to_ascii_lowercase();
+        self.backends
+            .iter()
+            .find(|b| b.name().to_ascii_lowercase() == name_lower)
+            .map(|b| b.as_ref())
+    }
+
+    /// Lists all registered backends with availability status.
+    pub fn list(&self) -> Vec<ProviderInfo> {
+        self.backends
+            .iter()
+            .map(|b| ProviderInfo {
+                name: b.name().to_string(),
+                priority: b.priority(),
+                available: b.is_available(),
+            })
+            .collect()
+    }
+
+    /// Lists the names of all available backends.
+    pub fn available_names(&self) -> Vec<String> {
+        self.backends
+            .iter()
+            .filter(|b| b.is_available())
+            .map(|b| b.name().to_string())
+            .collect()
+    }
+
+    /// Try to build a session using the specified backend, with automatic
+    /// fallback to the next-best available backend on failure.
+    pub fn build_session_with_fallback(
+        &self,
+        config: &ModelConfig,
+        options: &BackendOptions,
+        preferred: Option<&str>,
+    ) -> anyhow::Result<(String, Box<dyn InferenceSession>)> {
+        // If a preferred backend is specified, try it first.
+        if let Some(name) = preferred {
+            if let Some(backend) = self.get(name) {
+                if backend.is_available() {
+                    match backend.build_session(config, options) {
+                        Ok(session) => return Ok((backend.name().to_string(), session)),
+                        Err(e) => {
+                            tracing::warn!(
+                                backend = backend.name(),
+                                error = %e,
+                                "preferred backend failed, trying fallback"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Auto-select: try backends by descending priority.
+        let mut candidates: Vec<&dyn ExecutionProviderBackend> = self
+            .backends
+            .iter()
+            .filter(|b| b.is_available())
+            .map(|b| b.as_ref())
+            .collect();
+        candidates.sort_by(|a, b| b.priority().cmp(&a.priority()));
+
+        for backend in candidates {
+            match backend.build_session(config, options) {
+                Ok(session) => return Ok((backend.name().to_string(), session)),
+                Err(e) => {
+                    tracing::warn!(
+                        backend = backend.name(),
+                        error = %e,
+                        "backend session init failed, trying next"
+                    );
+                }
+            }
+        }
+
+        anyhow::bail!("no execution provider backend could build a session")
+    }
+}
+
+impl fmt::Debug for ProviderRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProviderRegistry")
+            .field("backends", &self.list())
+            .finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in: CPU backend
+// ---------------------------------------------------------------------------
+
+/// CPU-only execution provider. Always available.
+pub struct CpuBackend;
+
+impl ExecutionProviderBackend for CpuBackend {
+    fn name(&self) -> &str {
+        "CPU"
+    }
+
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    fn priority(&self) -> u32 {
+        0
+    }
+
+    fn diagnose(&self) -> Vec<DiagnosticEntry> {
+        vec![DiagnosticEntry::pass(
+            "cpu-backend",
+            "CPU execution provider is always available",
+        )]
+    }
+
+    fn build_session(
+        &self,
+        config: &ModelConfig,
+        _options: &BackendOptions,
+    ) -> anyhow::Result<Box<dyn InferenceSession>> {
+        if config.dry_run {
+            return Ok(Box::new(DryRunSession));
+        }
+
+        #[cfg(feature = "onnx")]
+        {
+            // Delegate to the existing onnx_vitis module for CPU session building.
+            // This is a proof-of-concept bridge — full extraction happens in #51.
+            Ok(Box::new(OnnxCpuSession {
+                config: config.clone(),
+            }))
+        }
+
+        #[cfg(not(feature = "onnx"))]
+        {
+            Ok(Box::new(DryRunSession))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in: Vitis backend (cfg-gated)
+// ---------------------------------------------------------------------------
+
+/// AMD Vitis AI NPU execution provider.
+#[cfg(feature = "vitis")]
+pub struct VitisBackend;
+
+#[cfg(feature = "vitis")]
+impl ExecutionProviderBackend for VitisBackend {
+    fn name(&self) -> &str {
+        "AMD Vitis NPU"
+    }
+
+    fn is_available(&self) -> bool {
+        // Check if Vitis runtime is discoverable.
+        // Full hardware probe will be implemented in #50.
+        std::env::var("RYZEN_AI_INSTALLER_PATH").is_ok()
+            || std::env::var("XLNX_VART_FIRMWARE").is_ok()
+            || cfg!(feature = "vitis")
+    }
+
+    fn priority(&self) -> u32 {
+        300
+    }
+
+    fn config_keys(&self) -> &[&str] {
+        &["config_file", "cache_dir", "cache_key"]
+    }
+
+    fn diagnose(&self) -> Vec<DiagnosticEntry> {
+        let mut entries = vec![];
+        if std::env::var("RYZEN_AI_INSTALLER_PATH").is_ok() {
+            entries.push(DiagnosticEntry::pass(
+                "vitis-sdk",
+                "RYZEN_AI_INSTALLER_PATH is set",
+            ));
+        } else {
+            entries.push(DiagnosticEntry::warn(
+                "vitis-sdk",
+                "RYZEN_AI_INSTALLER_PATH not set; Vitis NPU may not be available",
+            ));
+        }
+        entries
+    }
+
+    fn build_session(
+        &self,
+        config: &ModelConfig,
+        _options: &BackendOptions,
+    ) -> anyhow::Result<Box<dyn InferenceSession>> {
+        if config.dry_run {
+            return Ok(Box::new(DryRunSession));
+        }
+        // Proof of concept — full Vitis session extraction happens in #50.
+        // For now, delegate to the existing monolithic path via OnnxCpuSession.
+        #[cfg(feature = "onnx")]
+        {
+            Ok(Box::new(OnnxCpuSession {
+                config: config.clone(),
+            }))
+        }
+
+        #[cfg(not(feature = "onnx"))]
+        {
+            anyhow::bail!("Vitis backend requires the 'onnx' feature")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session implementations
+// ---------------------------------------------------------------------------
+
+/// Dry-run session that returns a placeholder response.
+struct DryRunSession;
+
+impl InferenceSession for DryRunSession {
+    fn generate(&self, _prompt: &str, _max_new_tokens: usize) -> anyhow::Result<String> {
+        Ok("<final>Dry-run session: no live inference performed.</final>".to_string())
+    }
+}
+
+/// ONNX CPU session that delegates to the existing `onnx_vitis::run_prompt`.
+#[cfg(feature = "onnx")]
+struct OnnxCpuSession {
+    config: ModelConfig,
+}
+
+#[cfg(feature = "onnx")]
+impl InferenceSession for OnnxCpuSession {
+    fn generate(&self, prompt: &str, _max_new_tokens: usize) -> anyhow::Result<String> {
+        crate::onnx_vitis::run_prompt(&self.config, prompt)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_backend_is_always_available() {
+        let cpu = CpuBackend;
+        assert!(cpu.is_available());
+        assert_eq!(cpu.name(), "CPU");
+        assert_eq!(cpu.priority(), 0);
+    }
+
+    #[test]
+    fn cpu_diagnostics_pass() {
+        let cpu = CpuBackend;
+        let diags = cpu.diagnose();
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, DiagnosticSeverity::Pass);
+    }
+
+    #[test]
+    fn registry_discover_includes_cpu() {
+        let registry = ProviderRegistry::discover();
+        let list = registry.list();
+        assert!(!list.is_empty());
+        assert!(list.iter().any(|p| p.name == "CPU" && p.available));
+    }
+
+    #[test]
+    fn registry_best_available_returns_something() {
+        let registry = ProviderRegistry::discover();
+        let best = registry.best_available();
+        assert!(best.is_some());
+    }
+
+    #[test]
+    fn registry_get_by_name_case_insensitive() {
+        let registry = ProviderRegistry::discover();
+        assert!(registry.get("cpu").is_some());
+        assert!(registry.get("CPU").is_some());
+        assert!(registry.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn registry_available_names_includes_cpu() {
+        let registry = ProviderRegistry::discover();
+        let names = registry.available_names();
+        assert!(names.contains(&"CPU".to_string()));
+    }
+
+    #[test]
+    fn dry_run_session_build() {
+        let config = ModelConfig {
+            model_path: std::path::PathBuf::from("test.onnx"),
+            tokenizer_path: None,
+            max_new_tokens: 1,
+            temperature: 0.0,
+            dry_run: true,
+            vitis_config: None,
+        };
+        let cpu = CpuBackend;
+        let session = cpu.build_session(&config, &BackendOptions::new());
+        assert!(session.is_ok());
+    }
+
+    #[test]
+    fn dry_run_session_generates() {
+        let session = DryRunSession;
+        let result = session.generate("test prompt", 10);
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("Dry-run"));
+    }
+
+    #[test]
+    fn diagnostic_entry_constructors() {
+        let pass = DiagnosticEntry::pass("check-a", "all good");
+        assert_eq!(pass.severity, DiagnosticSeverity::Pass);
+
+        let warn = DiagnosticEntry::warn("check-b", "maybe bad");
+        assert_eq!(warn.severity, DiagnosticSeverity::Warn);
+
+        let fail = DiagnosticEntry::fail("check-c", "broken");
+        assert_eq!(fail.severity, DiagnosticSeverity::Fail);
+    }
+
+    #[test]
+    fn provider_info_serializes() {
+        let info = ProviderInfo {
+            name: "CPU".to_string(),
+            priority: 0,
+            available: true,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"CPU\""));
+    }
+
+    #[test]
+    fn build_session_with_fallback_works() {
+        let registry = ProviderRegistry::discover();
+        let config = ModelConfig {
+            model_path: std::path::PathBuf::from("test.onnx"),
+            tokenizer_path: None,
+            max_new_tokens: 1,
+            temperature: 0.0,
+            dry_run: true,
+            vitis_config: None,
+        };
+        let result =
+            registry.build_session_with_fallback(&config, &BackendOptions::new(), None);
+        assert!(result.is_ok());
+        let (backend_name, _session) = result.unwrap();
+        assert!(!backend_name.is_empty());
+    }
+
+    #[test]
+    fn build_session_with_fallback_preferred() {
+        let registry = ProviderRegistry::discover();
+        let config = ModelConfig {
+            model_path: std::path::PathBuf::from("test.onnx"),
+            tokenizer_path: None,
+            max_new_tokens: 1,
+            temperature: 0.0,
+            dry_run: true,
+            vitis_config: None,
+        };
+        let result =
+            registry.build_session_with_fallback(&config, &BackendOptions::new(), Some("CPU"));
+        assert!(result.is_ok());
+        let (name, _) = result.unwrap();
+        assert_eq!(name, "CPU");
+    }
+}

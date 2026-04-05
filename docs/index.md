@@ -11,6 +11,7 @@ Use this documentation to install, run, and operate WraithRun in your own enviro
 - [CLI Reference](cli-reference.md): all command-line options.
 - [Tool Reference](tool-reference.md): built-in tool behavior and expected outputs.
 - [Security and Sandbox](security-sandbox.md): policy controls and environment variables.
+- [CI/CD Integration](ci-integration.md): run WraithRun in GitHub Actions, GitLab CI, Jenkins.
 - [Troubleshooting](troubleshooting.md): common errors and fixes.
 
 ## Investigation Playbooks

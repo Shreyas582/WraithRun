@@ -39,6 +39,7 @@ nav:
   - Live-Mode Operations: live-mode-operations.md
   - Tool Reference: tool-reference.md
   - Plugin API: plugin-api.md
+  - CI/CD Integration: ci-integration.md
   - Security and Sandbox: security-sandbox.md
   - Troubleshooting: troubleshooting.md
   - Release and Operations:

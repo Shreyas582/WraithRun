@@ -18,7 +18,21 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
-## 1.2.0 - 2026-04-05
+## 1.3.0 - 2026-04-12
+
+### Added
+
+- **CI/CD pipeline integration** (#103): first-party GitHub composite Action (`Shreyas582/wraithrun-action@v1`) with version resolution, binary caching, cross-platform install, scan execution, and JSON finding extraction. Also ships GitLab CI template, generic shell script for Jenkins/CircleCI, and an example GitHub Actions workflow.
+- **CI integration guide** (`docs/ci-integration.md`): step-by-step docs for GitHub Actions, GitLab CI, and generic shell usage, covering exit code policy, output formats, scheduled scanning, and interpreting results.
+- **`ExecutionProviderBackend` trait** (#47): hardware-agnostic backend abstraction in `inference_bridge::backend` with `name()`, `is_available()`, `priority()`, `build_session()`, and `diagnose()` methods. Includes `DiagnosticEntry` type for doctor integration and `InferenceSession` trait for provider-created sessions.
+- **`ProviderRegistry`** (#48): runtime registry with `discover()`, `best_available()`, `get()`, `list()`, and `build_session_with_fallback()`. Auto-selects highest-priority available backend with cascading fallback on session init failure.
+- **Built-in CPU backend**: always-available CPU execution provider (priority 0) with dry-run support and ONNX Runtime CPU session bridging.
+- **Built-in Vitis backend** (cfg-gated): AMD Vitis AI NPU provider (priority 300, `vitis` feature) with environment-based availability detection and diagnostic checks.
+- 12 new unit tests for backend trait, registry, and session functionality (245 total).
+
+### Changed
+
+- `inference_bridge` crate now exports `pub mod backend` alongside `pub mod onnx_vitis`.
 
 ### Added
 

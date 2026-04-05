@@ -1,0 +1,48 @@
+name: WraithRun Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Nightly host triage at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Security Investigation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run WraithRun scan
+        id: scan
+        uses: Shreyas582/wraithrun-action@v1
+        with:
+          task: 'Triage this host for persistence mechanisms and suspicious accounts'
+          format: json
+          max-steps: 10
+          fail-on-severity: high
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wraithrun-report
+          path: ${{ steps.scan.outputs.report-path }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## WraithRun Scan Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Findings:** ${{ steps.scan.outputs.finding-count }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Max Severity:** ${{ steps.scan.outputs.max-severity }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Exit Code:** ${{ steps.scan.outputs.exit-code }}" >> "$GITHUB_STEP_SUMMARY"

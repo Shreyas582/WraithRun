@@ -1,5 +1,65 @@
 # Upgrade Notes
 
+## v1.3.0
+
+### Breaking/visible changes
+
+- `inference_bridge` now exports a new `backend` module. This is additive and fully backward-compatible — the existing `InferenceEngine` trait and `OnnxVitisEngine` are unchanged.
+- The `backend::InferenceSession` trait introduces a synchronous `generate()` method that parallels the existing async `InferenceEngine::generate()`. Downstream callers can adopt it incrementally.
+
+### New infrastructure
+
+- **GitHub composite Action** (`action.yml`): use `Shreyas582/wraithrun-action@v1` in your CI workflows to run WraithRun scans with binary caching and cross-platform support.
+- **CI templates**: GitLab CI (`ci-templates/gitlab-ci.yml`) and generic shell (`ci-templates/wraithrun-scan.sh`) for Jenkins, CircleCI, and other platforms.
+- **CI integration guide** (`docs/ci-integration.md`): comprehensive setup docs for all supported CI systems.
+
+### New types in `inference_bridge::backend`
+
+| Type | Purpose |
+|------|---------|
+| `ExecutionProviderBackend` trait | Hardware-agnostic backend abstraction |
+| `InferenceSession` trait | Provider-created inference session |
+| `ProviderRegistry` | Runtime discovery and selection |
+| `DiagnosticEntry` / `DiagnosticSeverity` | Backend self-check diagnostics |
+| `ProviderInfo` | Backend metadata for listing |
+| `BackendOptions` | Provider-specific config passthrough |
+| `CpuBackend` | Built-in CPU provider (always available) |
+| `VitisBackend` | Built-in Vitis NPU provider (cfg-gated) |
+
+### Migration examples
+
+To use the new backend registry:
+
+```rust
+use inference_bridge::backend::{ProviderRegistry, BackendOptions};
+use inference_bridge::ModelConfig;
+
+let registry = ProviderRegistry::discover();
+
+// List available backends
+for info in registry.list() {
+    println!("{}: available={}, priority={}", info.name, info.available, info.priority);
+}
+
+// Auto-select best backend and build a session
+let config = ModelConfig { /* ... */ };
+let (backend_name, session) = registry
+    .build_session_with_fallback(&config, &BackendOptions::new(), None)
+    .expect("no backend available");
+println!("Using backend: {backend_name}");
+
+let output = session.generate("Analyze this host", 512)?;
+```
+
+To integrate WraithRun into GitHub Actions CI:
+
+```yaml
+- uses: Shreyas582/wraithrun-action@v1
+  with:
+    task: "Quick triage of ${{ github.sha }}"
+    fail-on-severity: high
+```
+
 ## v1.2.0
 
 ### Breaking/visible changes

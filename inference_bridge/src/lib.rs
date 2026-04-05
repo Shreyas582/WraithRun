@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod onnx_vitis;
 
 use std::path::PathBuf;
