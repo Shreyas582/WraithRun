@@ -18,6 +18,38 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 1.7.1 - 2026-04-05
+
+### Changed
+
+- Bumped `toml` from 0.8 to 1.1.
+- Bumped `thiserror` from 1.0 to 2.0.
+- Bumped `sha2` from 0.10 to 0.11 and updated digest hex formatting to use the new API.
+- Bumped CI actions: `actions/checkout` v6, `actions/upload-artifact` v7, `actions/download-artifact` v8, `actions/setup-python` v6, `release-drafter/release-drafter` v7.
+
+## 1.7.0 - 2026-04-05
+
+### Added
+
+- Per-tool `elapsed_ms` timing in investigation output (#129).
+- LLM chain-of-thought reasoning captured in `llm_reasoning` field for Moderate/Strong tiers (#119).
+- Small model warning when the loaded model has fewer than 100M parameters (#120).
+- Evidence-derived confidence scoring with corroboration bonus across tools (#121).
+- Task-specific `basic_tier_summary_for_task()` synthesis for Basic tier investigations (#122).
+- Placeholder checksum detection: model packs with all-zero or repeated-byte SHA-256 hashes are rejected (#123).
+- Model preset auto-discovery: searches `models/` subdirectories for matching ONNX files when the default path is not found (#124).
+- Expanded privilege-escalation checks: AlwaysInstallElevated, unquoted service paths, and 9 additional markers (#125).
+- Expanded persistence detection: RunOnce, Winlogon, IFEO, AppInit_DLLs, user systemd services, and crontab entries (#126).
+- Tokenizer grandparent directory search for `tokenizer.json` alongside model files (#128).
+
+### Fixed
+
+- KV-cache off-by-one error that could skip the first generated token (#114).
+- Model parameter estimation now uses tensor shape products instead of raw dimension sums (#115).
+- CLI feature forwarding passes `--temperature`, `--backend`, and `--model-download` through to the engine (#116).
+- Dry-run template matching works correctly for all registered tool names (#117).
+- Dry-run multi-tool iteration no longer stops after the first tool (#118).
+
 ## 1.6.0 - 2026-04-05
 
 ### Added
