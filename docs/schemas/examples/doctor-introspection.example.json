@@ -1,7 +1,7 @@
 {
   "contract_version": "1.0.0",
   "summary": {
-    "pass": 5,
+    "pass": 7,
     "warn": 1,
     "fail": 0
   },
@@ -37,6 +37,30 @@
       "detail": "Vitis config is set but file was not found: ./models/vitis_ep.json",
       "reason_code": "vitis_config_missing",
       "remediation": "Install the RyzenAI SDK or set ORT_DYLIB_PATH to a Vitis-enabled ONNX Runtime build."
+    },
+    {
+      "status": "pass",
+      "name": "inference-backend",
+      "detail": "CPU (priority 0) — available"
+    },
+    {
+      "status": "pass",
+      "name": "inference-backend",
+      "detail": "  CPU — cpu-backend: CPU execution provider is always available"
+    }
+  ],
+  "backends": [
+    {
+      "name": "CPU",
+      "priority": 0,
+      "available": true,
+      "diagnostics": [
+        {
+          "status": "pass",
+          "check": "cpu-backend",
+          "detail": "CPU execution provider is always available"
+        }
+      ]
     }
   ]
 }

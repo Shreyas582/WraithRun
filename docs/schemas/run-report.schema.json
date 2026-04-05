@@ -25,6 +25,10 @@
       "type": ["string", "null"],
       "enum": ["info", "low", "medium", "high", "critical", null]
     },
+    "backend": {
+      "type": ["string", "null"],
+      "description": "Name of the inference backend used for this run (e.g. CPU, AMD Vitis NPU)."
+    },
     "model_capability": {
       "type": ["object", "null"],
       "required": ["tier", "estimated_params_b", "execution_provider", "smoke_latency_ms", "vocab_size"],

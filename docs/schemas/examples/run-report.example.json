@@ -3,6 +3,7 @@
   "task": "Investigate unauthorized SSH keys",
   "case_id": "CASE-2026-IR-1001",
   "max_severity": "medium",
+  "backend": "CPU",
   "model_capability": {
     "tier": "basic",
     "estimated_params_b": 1.2,

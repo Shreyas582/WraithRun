@@ -24,6 +24,12 @@ log = "normal"
 # evidence_bundle_archive = "./evidence/CASE-2026-0001.tar"
 # baseline_bundle = "./evidence/CASE-2026-0001"
 
+# Inference backend selection.
+# "auto" (default) picks the highest-priority available backend.
+# Explicit values: "cpu", "vitis", etc.
+[inference]
+backend = "auto"
+
 [profiles.local-lab]
 max_steps = 6
 max_new_tokens = 192

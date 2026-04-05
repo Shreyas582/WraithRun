@@ -54,6 +54,46 @@
         },
         "additionalProperties": false
       }
+    },
+    "backends": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "priority", "available", "diagnostics"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["status", "check", "detail"],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": ["pass", "warn", "fail"]
+                },
+                "check": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false
