@@ -18,6 +18,27 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 1.8.0 - 2026-04-05
+
+### Added
+
+- New `syslog-analysis` investigation template matching keywords: log, syslog, journal, event, audit. Runs `read_syslog` → `audit_account_changes` → `inspect_persistence_locations` (#141).
+- New `enumerate_ssh_keys` tool: cross-platform SSH key enumeration scanning `.ssh` directories for authorized_keys, private keys, and public keys (#141).
+- New `--task-template syslog-summary` maps to the `syslog-analysis` investigation template (#141).
+
+### Changed
+
+- **Severity calibration**: raised listener thresholds (Info <50, Low 50–149, Medium 150–249, High ≥250), lowered account severity (1 account → Low, 3–4 → Medium, ≥5 → High), raised persistence thresholds (Low <3, Medium 3–7, High ≥8). Normal desktops no longer trigger spurious high-severity findings (#139).
+- **Findings detail**: finding titles now include specifics — account names, persistence entry text, and SSH directory info — instead of bare counts (#140).
+- **Parameter estimation**: quantization-aware divisor replaces the hardcoded 2.2. Q4 models use 0.55 bytes/param, Q8 uses 1.1, FP16 uses 2.2, FP32 uses 4.4. Detected from model filename conventions (#138).
+- **Template tool ordering**: `file-integrity-check` now leads with `hash_binary` (was `audit_account_changes`), `ssh-key-investigation` now leads with `enumerate_ssh_keys` (#141).
+
+### Fixed
+
+- **KV-cache attention mask**: prefill attention length now accounts for forced cache padding when the model lacks a `use_cache` toggle, preventing shape broadcast errors on models like Qwen2.5 and Llama 3.2 (#136).
+- **ReAct garbage output**: when the model produces a `<final>` tag at step 0 without calling any tools, the agent falls back to template-driven execution. Quality guard now detects hallucinated `<call>` tags and `[observation]` markers inside final answers and replaces them with a deterministic summary (#137).
+- **EP reporting**: `detect_execution_provider()` now recognises DirectML and CUDA backend overrides instead of always reporting CPU (#142).
+
 ## 1.7.1 - 2026-04-05
 
 ### Changed

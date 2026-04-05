@@ -91,31 +91,30 @@ Release should be blocked when:
    Define `ExecutionProviderBackend` trait, provider registry, provider-agnostic config, extract Vitis/CPU backends, provider-aware doctor, CLI `--backend` flag, and multi-backend test harness.
 - `v1.4.0` Concrete Hardware Backends (milestone #17, tracking: #55):
    DirectML (Windows GPU), CoreML (macOS/Apple Silicon), CUDA/TensorRT (NVIDIA), QNN (Qualcomm Hexagon), non-ONNX formats (GGUF/SafeTensors), and quantization-aware loading.
+- `v1.5.0` Concrete Hardware Backends (completed).
+- `v1.6.0` Agentic Investigation Engine (completed): ReAct agent loop, task-aware LLM synthesis, temperature-scaled sampling, EP-aware debug logs, session caching, KV-cache prefix reuse.
+- `v1.7.0` Live Evaluation Hardening (completed): per-tool timing, LLM reasoning capture, evidence-derived confidence, task-specific synthesis, expanded privilege/persistence checks, tokenizer discovery.
+- `v1.7.1` Dependency Bumps (completed): toml 1.1, thiserror 2.0, sha2 0.11, CI actions v6–v8.
+- `v1.8.0` Live Evaluation Fixes (completed): KV-cache attention mask fix, ReAct garbage fallback, quantization-aware param estimation, severity recalibration, findings detail, template/tool fixes, EP reporting, syslog-analysis template, enumerate_ssh_keys tool.
 
-## Immediate Next Steps for v1.0.0
+## Immediate Next Steps
 
 Use this runbook to execute the active next milestone end-to-end.
 
 1. Create a tracking issue from the Release Checklist template.
-2. Apply labels `release`, `milestone:v1.0.0`, and priority labels as needed.
-3. Run milestone bootstrap workflow:
-   - Workflow: `Milestone Bootstrap`
-   - Inputs:
-   - `seed_roadmap`: `true` (upserts canonical milestones for the active roadmap set)
-   - `title`: `v1.0.0`
-   - `description`: `Local API and Web UI MVP: local server endpoints, security baseline, durable local data model, and initial triage UI.`
-     - `due_date`: optional (`YYYY-MM-DD`)
-4. Verify quality gates locally:
+2. Apply labels `release` and the target milestone label.
+3. Verify quality gates locally:
    - `cargo check`
    - `cargo test --workspace`
+   - `cargo clippy --all-targets -- -D warnings`
    - `cargo check -p inference_bridge --features vitis`
-5. Verify GitHub Actions CI is green on latest `main`.
-6. Tag and publish:
-   - `git tag -a v1.0.0 -m "Release v1.0.0"`
-   - `git push origin v1.0.0`
-7. Confirm `Release` workflow completed and assets are attached.
-8. Close the milestone and open a follow-on milestone.
-9. Open planning issue for the next milestone scope.
+4. Verify GitHub Actions CI is green on latest `main`.
+5. Tag and publish:
+   - `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
+   - `git push origin vX.Y.Z`
+6. Confirm `Release` workflow completed and assets are attached.
+7. Close the milestone and open a follow-on milestone.
+8. Open planning issue for the next milestone scope.
 
 ## Labels and Milestones
 

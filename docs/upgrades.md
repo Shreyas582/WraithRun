@@ -1,5 +1,22 @@
 # Upgrade Notes
 
+## v1.8.0
+
+### Breaking/visible changes
+
+- **Severity thresholds recalibrated** (#139): listener, account, and persistence findings now use higher thresholds. A normal desktop with ~100 listeners and 1 non-default admin account will report Low instead of High. Automation that keys on specific severity values should be reviewed.
+- **Finding titles include specifics** (#140): finding `title` fields now embed account names, persistence entry text, and SSH directory details (e.g., `"Non-default privileged accounts observed (1): shrey"` instead of `"Non-default privileged accounts observed (1)"`). Parsers matching on exact title strings must be updated.
+- **Parameter estimation changed** (#138): quantization-aware sizing means `estimated_params_b` in `model_capability` output may change. Q4 models now report ~4× higher param counts than before. This may reclassify some models into a higher capability tier.
+- **New tool and template** (#141): `enumerate_ssh_keys` tool added to the registry; `syslog-analysis` investigation template added. Template tool ordering changed for `file-integrity-check` and `ssh-key-investigation`.
+- **ReAct fallback behavior** (#137): Moderate/Strong tier runs may now produce a deterministic summary instead of LLM-generated text when the model hallucinates. The `final_answer` field will contain a structured SUMMARY block in these cases.
+
+### Migration
+
+- No TOML config changes required.
+- If you parse `RunReport` JSON `findings[].title` strings, update matchers — titles now include entity names and entry details.
+- If automation relies on severity thresholds, review the new calibration: listener counts below 50 are now Info (was Low at 25), single non-default admin accounts are Low (was Medium).
+- The `enumerate_ssh_keys` tool is automatically included in `ssh-key-investigation` template runs. No opt-in needed.
+
 ## v1.7.1
 
 - Dependency-only release. No breaking API changes.

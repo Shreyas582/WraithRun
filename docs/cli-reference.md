@@ -143,7 +143,7 @@ Behavior:
 
 `--list-tools` output includes tool names, descriptions, and JSON argument schemas.
 
-Current built-in coverage includes log tailing, listener inventory, file hashing, privilege vectors, persistence inventory, account-role snapshots, process-network correlation, and baseline capture for drift workflows.
+Current built-in coverage includes log tailing, listener inventory, file hashing, privilege vectors, persistence inventory, account-role snapshots, process-network correlation, SSH key enumeration, and baseline capture for drift workflows.
 
 Coverage tool argument highlights:
 
@@ -465,11 +465,12 @@ When a free-text `--task` is provided, the agent resolves a declarative investig
 Built-in investigation templates:
 
 - **broad-host-triage**: default fallback. Runs all host-level tools.
-- **ssh-key-investigation**: SSH key and account audit focus.
+- **ssh-key-investigation**: SSH key enumeration and account audit focus.
 - **persistence-analysis**: autorun and persistence mechanism checks.
 - **network-exposure-audit**: listener and network binding analysis.
 - **privilege-escalation-check**: privilege escalation indicator checks.
 - **file-integrity-check**: hash verification and file integrity analysis.
+- **syslog-analysis**: log review, account audit, and persistence checks. Matches keywords: log, syslog, journal, event, audit.
 
 List investigation templates via `--list-task-templates`.
 
