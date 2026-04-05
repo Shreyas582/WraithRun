@@ -8,6 +8,20 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Added
 
+- (none yet)
+
+### Changed
+
+- (none yet)
+
+### Fixed
+
+- (none yet)
+
+## 1.2.0 - 2026-04-05
+
+### Added
+
 - **Dashboard UX overhaul** (#99): 5-tab layout (Runs, Findings, Cases, Compare, Health) with SVG donut severity charts, clickable evidence chains, run comparison diff view, JSON/CSV export, real-time progress spinners, and case management panel.
 - **Tool plugin API** (#102): extend WraithRun with external tool plugins via `tool.toml` manifests and subprocess JSON I/O.
   - `--tools-dir` and `--allowed-plugins` CLI flags.
