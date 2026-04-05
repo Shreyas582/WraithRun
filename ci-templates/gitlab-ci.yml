@@ -1,0 +1,42 @@
+# GitLab CI template for WraithRun security scanning.
+# Include this in your .gitlab-ci.yml:
+#   include:
+#     - remote: https://raw.githubusercontent.com/Shreyas582/WraithRun/main/ci-templates/gitlab-ci.yml
+
+wraithrun-scan:
+  stage: test
+  image: ubuntu:22.04
+  variables:
+    WRAITHRUN_VERSION: "latest"
+    WRAITHRUN_TASK: "Triage this host for persistence mechanisms and suspicious accounts"
+    WRAITHRUN_FORMAT: "json"
+    WRAITHRUN_MAX_STEPS: "10"
+    WRAITHRUN_FAIL_SEVERITY: "none"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq curl python3 > /dev/null
+    - |
+      if [ "$WRAITHRUN_VERSION" = "latest" ]; then
+        WRAITHRUN_VERSION=$(curl -sS https://api.github.com/repos/Shreyas582/WraithRun/releases/latest | grep '"tag_name"' | head -1 | sed 's/.*"v\(.*\)".*/\1/')
+      fi
+    - curl -sSL "https://github.com/Shreyas582/WraithRun/releases/download/v${WRAITHRUN_VERSION}/wraithrun-${WRAITHRUN_VERSION}-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/wraithrun.tar.gz
+    - tar -xzf /tmp/wraithrun.tar.gz -C /usr/local/bin
+  script:
+    - |
+      ARGS="--task \"${WRAITHRUN_TASK}\" --format ${WRAITHRUN_FORMAT} --max-steps ${WRAITHRUN_MAX_STEPS}"
+      if [ "$WRAITHRUN_FAIL_SEVERITY" != "none" ]; then
+        ARGS="${ARGS} --exit-policy severity-threshold --exit-threshold ${WRAITHRUN_FAIL_SEVERITY}"
+      fi
+      eval wraithrun ${ARGS} > wraithrun-report.json 2>&1 || EXIT_CODE=$?
+      echo "Exit code: ${EXIT_CODE:-0}"
+      if [ "${EXIT_CODE:-0}" -ne 0 ] && [ "$WRAITHRUN_FAIL_SEVERITY" != "none" ]; then
+        exit ${EXIT_CODE}
+      fi
+  artifacts:
+    when: always
+    paths:
+      - wraithrun-report.json
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule"

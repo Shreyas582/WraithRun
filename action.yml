@@ -1,0 +1,174 @@
+name: 'WraithRun Security Scan'
+description: 'Run a WraithRun automated security investigation in your CI pipeline'
+author: 'Shreyas582'
+
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  version:
+    description: 'WraithRun version to install (e.g. "1.2.0" or "latest")'
+    required: false
+    default: 'latest'
+  task:
+    description: 'Investigation task description'
+    required: true
+  profile:
+    description: 'Named configuration profile'
+    required: false
+    default: ''
+  max-steps:
+    description: 'Maximum agent investigation steps'
+    required: false
+    default: '10'
+  format:
+    description: 'Output format: json, summary, markdown, narrative'
+    required: false
+    default: 'json'
+  fail-on-severity:
+    description: 'Fail the step if any finding meets or exceeds this severity (none, info, low, medium, high, critical)'
+    required: false
+    default: 'none'
+  extra-args:
+    description: 'Additional CLI arguments passed to wraithrun'
+    required: false
+    default: ''
+
+outputs:
+  report-path:
+    description: 'Path to the generated report file'
+    value: ${{ steps.run.outputs.report_path }}
+  finding-count:
+    description: 'Total number of findings'
+    value: ${{ steps.run.outputs.finding_count }}
+  max-severity:
+    description: 'Highest severity finding (or "none")'
+    value: ${{ steps.run.outputs.max_severity }}
+  exit-code:
+    description: 'Exit code from the WraithRun scan'
+    value: ${{ steps.run.outputs.exit_code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine version
+      id: version
+      shell: bash
+      run: |
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          VERSION=$(curl -sS https://api.github.com/repos/Shreyas582/WraithRun/releases/latest | grep '"tag_name"' | head -1 | sed 's/.*"v\(.*\)".*/\1/')
+          echo "resolved=${VERSION}" >> "$GITHUB_OUTPUT"
+        else
+          echo "resolved=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Cache WraithRun binary
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.wraithrun-bin
+        key: wraithrun-${{ runner.os }}-${{ steps.version.outputs.resolved }}
+
+    - name: Install WraithRun
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="${{ steps.version.outputs.resolved }}"
+        mkdir -p ~/.wraithrun-bin
+
+        case "${{ runner.os }}" in
+          Linux)
+            ASSET="wraithrun-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+            curl -sSL "https://github.com/Shreyas582/WraithRun/releases/download/v${VERSION}/${ASSET}" -o /tmp/wraithrun.tar.gz
+            tar -xzf /tmp/wraithrun.tar.gz -C ~/.wraithrun-bin
+            ;;
+          macOS)
+            ASSET="wraithrun-${VERSION}-x86_64-apple-darwin.tar.gz"
+            curl -sSL "https://github.com/Shreyas582/WraithRun/releases/download/v${VERSION}/${ASSET}" -o /tmp/wraithrun.tar.gz
+            tar -xzf /tmp/wraithrun.tar.gz -C ~/.wraithrun-bin
+            ;;
+          Windows)
+            ASSET="wraithrun-${VERSION}-x86_64-pc-windows-msvc.zip"
+            curl -sSL "https://github.com/Shreyas582/WraithRun/releases/download/v${VERSION}/${ASSET}" -o "$TEMP/wraithrun.zip"
+            unzip -o "$TEMP/wraithrun.zip" -d ~/.wraithrun-bin
+            ;;
+        esac
+
+    - name: Add to PATH
+      shell: bash
+      run: echo "$HOME/.wraithrun-bin" >> "$GITHUB_PATH"
+
+    - name: Run WraithRun scan
+      id: run
+      shell: bash
+      run: |
+        set -uo pipefail
+        REPORT_PATH="${{ runner.temp }}/wraithrun-report.json"
+
+        # Build CLI arguments
+        ARGS=(--task "${{ inputs.task }}" --format "${{ inputs.format }}" --max-steps "${{ inputs.max-steps }}")
+
+        if [ -n "${{ inputs.profile }}" ]; then
+          ARGS+=(--profile "${{ inputs.profile }}")
+        fi
+
+        # Exit policy
+        if [ "${{ inputs.fail-on-severity }}" != "none" ]; then
+          ARGS+=(--exit-policy severity-threshold --exit-threshold "${{ inputs.fail-on-severity }}")
+        fi
+
+        # Extra user args
+        if [ -n "${{ inputs.extra-args }}" ]; then
+          # shellcheck disable=SC2206
+          ARGS+=(${{ inputs.extra-args }})
+        fi
+
+        # Run and capture exit code
+        EXIT_CODE=0
+        wraithrun "${ARGS[@]}" > "$REPORT_PATH" 2>&1 || EXIT_CODE=$?
+
+        # Extract finding count and max severity from JSON report
+        FINDING_COUNT=0
+        MAX_SEVERITY="none"
+        if [ -f "$REPORT_PATH" ] && command -v python3 &>/dev/null; then
+          FINDING_COUNT=$(python3 -c "
+        import json, sys
+        try:
+            data = json.load(open('$REPORT_PATH'))
+            findings = data.get('findings', []) + data.get('supplementary_findings', [])
+            print(len(findings))
+        except Exception:
+            print(0)
+        " 2>/dev/null || echo 0)
+
+          MAX_SEVERITY=$(python3 -c "
+        import json, sys
+        try:
+            data = json.load(open('$REPORT_PATH'))
+            findings = data.get('findings', []) + data.get('supplementary_findings', [])
+            order = {'critical':5,'high':4,'medium':3,'low':2,'info':1}
+            best = 0
+            best_name = 'none'
+            for f in findings:
+                sev = f.get('severity','info').lower()
+                if order.get(sev,0) > best:
+                    best = order[sev]
+                    best_name = sev
+            print(best_name)
+        except Exception:
+            print('none')
+        " 2>/dev/null || echo "none")
+        fi
+
+        echo "report_path=${REPORT_PATH}" >> "$GITHUB_OUTPUT"
+        echo "finding_count=${FINDING_COUNT}" >> "$GITHUB_OUTPUT"
+        echo "max_severity=${MAX_SEVERITY}" >> "$GITHUB_OUTPUT"
+        echo "exit_code=${EXIT_CODE}" >> "$GITHUB_OUTPUT"
+
+        # Fail the step if exit code is non-zero and severity policy is active
+        if [ "$EXIT_CODE" -ne 0 ] && [ "${{ inputs.fail-on-severity }}" != "none" ]; then
+          echo "::error::WraithRun found findings at or above '${{ inputs.fail-on-severity }}' severity (exit code ${EXIT_CODE})"
+          exit "$EXIT_CODE"
+        fi
