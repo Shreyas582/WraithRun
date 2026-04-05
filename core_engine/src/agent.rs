@@ -117,6 +117,7 @@ impl<B: InferenceEngine> Agent<B> {
                 task: task.to_string(),
                 case_id: None,
                 max_severity: Some(FindingSeverity::Info),
+                backend: None,
                 model_capability: self.model_capability_report.clone(),
                 live_fallback_decision: None,
                 run_timing: Some(build_run_timing_metrics(run_started_at, None)),
@@ -212,6 +213,7 @@ impl<B: InferenceEngine> Agent<B> {
             task: task.to_string(),
             case_id: None,
             max_severity: report_max_severity,
+            backend: None,
             model_capability: self.model_capability_report.clone(),
             live_fallback_decision: None,
             run_timing: Some(build_run_timing_metrics(

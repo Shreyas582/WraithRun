@@ -81,6 +81,13 @@ pub struct ProviderInfo {
     pub available: bool,
 }
 
+/// Full diagnostic output for a single backend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackendDiagnostics {
+    pub info: ProviderInfo,
+    pub diagnostics: Vec<DiagnosticEntry>,
+}
+
 /// Abstraction over a hardware execution provider.
 ///
 /// Backends report their availability at runtime (not just compile time) so
@@ -199,6 +206,28 @@ impl ProviderRegistry {
                 available: b.is_available(),
             })
             .collect()
+    }
+
+    /// Run diagnostics on every registered backend and return results.
+    ///
+    /// Each entry pairs the backend's [`ProviderInfo`] with its diagnostic
+    /// entries, sorted by descending priority so the most-preferred backend
+    /// appears first.
+    pub fn diagnose_all(&self) -> Vec<BackendDiagnostics> {
+        let mut results: Vec<BackendDiagnostics> = self
+            .backends
+            .iter()
+            .map(|b| BackendDiagnostics {
+                info: ProviderInfo {
+                    name: b.name().to_string(),
+                    priority: b.priority(),
+                    available: b.is_available(),
+                },
+                diagnostics: b.diagnose(),
+            })
+            .collect();
+        results.sort_by_key(|b| std::cmp::Reverse(b.info.priority));
+        results
     }
 
     /// Lists the names of all available backends.

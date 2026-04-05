@@ -361,6 +361,8 @@ pub struct RunReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_severity: Option<FindingSeverity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_capability: Option<ModelCapabilityReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_fallback_decision: Option<LiveFallbackDecision>,
