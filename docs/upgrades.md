@@ -1,5 +1,58 @@
 # Upgrade Notes
 
+## Unreleased
+
+### Breaking/visible changes
+
+- **`ModelConfig` struct changed** (#49): the `vitis_config: Option<VitisEpConfig>` field is replaced by two new fields:
+  - `backend_override: Option<String>` — optional backend name hint (e.g. `"vitis"`)
+  - `backend_config: HashMap<String, String>` — generic key-value config map
+
+  Both fields default to empty via `#[serde(default)]`, so TOML/JSON deserialization is backward-compatible if you don't set them.
+
+- **`VitisEpConfig` is still available** as a helper. Use `into_backend_config()` to convert to the new map and `from_backend_config()` to reconstruct from one.
+
+### Migration
+
+Before:
+```rust
+let config = ModelConfig {
+    // ...
+    vitis_config: Some(VitisEpConfig {
+        config_file: Some("/path/to/vitis.json".into()),
+        cache_dir: None,
+        cache_key: None,
+    }),
+};
+```
+
+After:
+```rust
+use std::collections::HashMap;
+
+let config = ModelConfig {
+    // ...
+    backend_override: Some("vitis".to_string()),
+    backend_config: HashMap::from([
+        ("config_file".to_string(), "/path/to/vitis.json".to_string()),
+    ]),
+};
+```
+
+Or using the helper:
+```rust
+let vitis = VitisEpConfig {
+    config_file: Some("/path/to/vitis.json".into()),
+    cache_dir: None,
+    cache_key: None,
+};
+let config = ModelConfig {
+    // ...
+    backend_override: Some("vitis".to_string()),
+    backend_config: vitis.into_backend_config(),
+};
+```
+
 ## v1.3.0
 
 ### Breaking/visible changes

@@ -66,7 +66,9 @@ fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
 
 /// Detect which execution provider would be used for this config.
 fn detect_execution_provider(config: &ModelConfig) -> String {
-    if config.vitis_config.is_some() {
+    if config.backend_override.as_deref() == Some("vitis")
+        || config.backend_config.contains_key("config_file")
+    {
         "VitisAIExecutionProvider".to_string()
     } else if cfg!(feature = "onnx") {
         // Without Vitis config, ONNX Runtime defaults to CPU.
@@ -129,6 +131,32 @@ pub struct VitisEpConfig {
     pub cache_key: Option<String>,
 }
 
+impl VitisEpConfig {
+    /// Convert to a generic backend config map.
+    pub fn into_backend_config(self) -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
+        if let Some(v) = self.config_file {
+            map.insert("config_file".to_string(), v);
+        }
+        if let Some(v) = self.cache_dir {
+            map.insert("cache_dir".to_string(), v);
+        }
+        if let Some(v) = self.cache_key {
+            map.insert("cache_key".to_string(), v);
+        }
+        map
+    }
+
+    /// Reconstruct from a generic backend config map.
+    pub fn from_backend_config(map: &std::collections::HashMap<String, String>) -> Self {
+        Self {
+            config_file: map.get("config_file").cloned(),
+            cache_dir: map.get("cache_dir").cloned(),
+            cache_key: map.get("cache_key").cloned(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub model_path: PathBuf,
@@ -136,7 +164,12 @@ pub struct ModelConfig {
     pub max_new_tokens: usize,
     pub temperature: f32,
     pub dry_run: bool,
-    pub vitis_config: Option<VitisEpConfig>,
+    /// Explicit backend override (e.g., "cpu", "vitis", "cuda").
+    #[serde(default)]
+    pub backend_override: Option<String>,
+    /// Provider-specific key-value configuration.
+    #[serde(default)]
+    pub backend_config: std::collections::HashMap<String, String>,
 }
 
 #[async_trait]
@@ -356,7 +389,8 @@ mod tests {
             max_new_tokens: 16,
             temperature: 0.2,
             dry_run: true,
-            vitis_config: None,
+            backend_override: None,
+            backend_config: Default::default(),
         })
     }
 

@@ -12,7 +12,9 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 ### Changed
 
-- (none yet)
+- **Provider-agnostic `ModelConfig`** (#49): replaced `vitis_config: Option<VitisEpConfig>` with generic `backend_override: Option<String>` and `backend_config: HashMap<String, String>`. `VitisEpConfig` is retained as a CLI-level helper with `into_backend_config()` / `from_backend_config()` conversion methods.
+- **Vitis EP reads via `backend_config` map** (#50): `onnx_vitis` functions (`discover_ort_dylib_path`, `build_base_session_builder_with_provider`, `build_session_with_vitis_cascade`) now read config values from the generic `backend_config` map instead of the Vitis-specific struct.
+- **CPU EP unblocked by config refactor** (#51): `CpuBackend` and all non-Vitis callers now use `backend_override: None, backend_config: Default::default()`, removing any coupling to Vitis types.
 
 ### Fixed
 
