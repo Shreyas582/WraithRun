@@ -268,6 +268,7 @@ impl ToolRegistry {
         registry.register(Arc::new(AuditAccountChangesTool));
         registry.register(Arc::new(CorrelateProcessNetworkTool));
         registry.register(Arc::new(CaptureCoverageBaselineTool));
+        registry.register(Arc::new(EnumerateSshKeysTool));
         registry
     }
 
@@ -352,6 +353,9 @@ impl ToolRegistry {
 
                 #[cfg(not(target_os = "windows"))]
                 self.policy.ensure_command_allowed("ss")?;
+            }
+            "enumerate_ssh_keys" => {
+                // Read-only filesystem enumeration, no external commands needed.
             }
             _ => {}
         }
@@ -705,11 +709,7 @@ impl Tool for CheckPrivilegeEscalationVectorsTool {
                     .collect();
 
                 for svc in service_names {
-                    if let Ok(qc_out) = Command::new("sc")
-                        .args(["qc", svc])
-                        .output()
-                        .await
-                    {
+                    if let Ok(qc_out) = Command::new("sc").args(["qc", svc]).output().await {
                         let qc_stdout = String::from_utf8_lossy(&qc_out.stdout);
                         for line in qc_stdout.lines() {
                             let trimmed = line.trim();
@@ -1191,6 +1191,193 @@ impl Tool for CaptureCoverageBaselineTool {
                 "baseline_exposed_bindings": baseline_exposed_bindings,
                 "expected_processes": expected_processes,
             },
+        }))
+    }
+}
+
+pub struct EnumerateSshKeysTool;
+
+#[async_trait]
+impl Tool for EnumerateSshKeysTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "enumerate_ssh_keys".to_string(),
+            description:
+                "Enumerates SSH keys and authorized_keys files for all user accounts on the host."
+                    .to_string(),
+            args_schema: json!({
+                "type": "object",
+                "properties": {
+                    "max_users": {"type": "integer", "minimum": 1, "maximum": 200}
+                }
+            }),
+        }
+    }
+
+    async fn run(&self, args: Value) -> Result<Value, ToolError> {
+        let max_users = parse_bounded_count(&args, "max_users", 50, 200);
+        let mut results: Vec<Value> = Vec::new();
+        let mut total_authorized_keys = 0u64;
+        let mut total_private_keys = 0u64;
+
+        #[cfg(target_os = "windows")]
+        {
+            // On Windows, check common SSH key locations:
+            // %USERPROFILE%\.ssh\ and ProgramData\ssh\
+            let user_profile = std::env::var("USERPROFILE").unwrap_or_default();
+            let mut dirs_to_check = Vec::new();
+
+            if !user_profile.is_empty() {
+                dirs_to_check.push(PathBuf::from(&user_profile).join(".ssh"));
+            }
+
+            // Check ProgramData SSH admin keys
+            if let Ok(program_data) = std::env::var("ProgramData") {
+                dirs_to_check.push(PathBuf::from(program_data).join("ssh"));
+            }
+
+            // Also scan other user profiles if accessible
+            if let Some(users_dir) = PathBuf::from(&user_profile).parent() {
+                if let Ok(entries) = std::fs::read_dir(users_dir) {
+                    for entry in entries.take(max_users).flatten() {
+                        let ssh_dir = entry.path().join(".ssh");
+                        if ssh_dir.is_dir() && !dirs_to_check.contains(&ssh_dir) {
+                            dirs_to_check.push(ssh_dir);
+                        }
+                    }
+                }
+            }
+
+            for ssh_dir in &dirs_to_check {
+                if !ssh_dir.is_dir() {
+                    continue;
+                }
+                let mut key_files = Vec::new();
+                let mut has_authorized_keys = false;
+
+                if let Ok(entries) = std::fs::read_dir(ssh_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let fname = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+
+                        if fname == "authorized_keys" || fname == "authorized_keys2" {
+                            has_authorized_keys = true;
+                            total_authorized_keys += 1;
+                            // Count lines (keys) in authorized_keys
+                            let key_count = std::fs::read_to_string(&path)
+                                .unwrap_or_default()
+                                .lines()
+                                .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+                                .count();
+                            key_files.push(json!({
+                                "file": path.display().to_string(),
+                                "type": "authorized_keys",
+                                "key_count": key_count,
+                            }));
+                        } else if fname.starts_with("id_") && !fname.ends_with(".pub") {
+                            total_private_keys += 1;
+                            key_files.push(json!({
+                                "file": path.display().to_string(),
+                                "type": "private_key",
+                            }));
+                        } else if fname.ends_with(".pub") {
+                            key_files.push(json!({
+                                "file": path.display().to_string(),
+                                "type": "public_key",
+                            }));
+                        }
+                    }
+                }
+
+                if !key_files.is_empty() {
+                    results.push(json!({
+                        "ssh_dir": ssh_dir.display().to_string(),
+                        "has_authorized_keys": has_authorized_keys,
+                        "files": key_files,
+                    }));
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            // On Linux/macOS, scan /home/*/.ssh/ and /root/.ssh/
+            let mut dirs_to_check: Vec<PathBuf> = Vec::new();
+
+            dirs_to_check.push(PathBuf::from("/root/.ssh"));
+
+            if let Ok(entries) = std::fs::read_dir("/home") {
+                for entry in entries.take(max_users).flatten() {
+                    let ssh_dir = entry.path().join(".ssh");
+                    if ssh_dir.is_dir() {
+                        dirs_to_check.push(ssh_dir);
+                    }
+                }
+            }
+
+            for ssh_dir in &dirs_to_check {
+                if !ssh_dir.is_dir() {
+                    continue;
+                }
+                let mut key_files = Vec::new();
+                let mut has_authorized_keys = false;
+
+                if let Ok(entries) = std::fs::read_dir(ssh_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let fname = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+
+                        if fname == "authorized_keys" || fname == "authorized_keys2" {
+                            has_authorized_keys = true;
+                            total_authorized_keys += 1;
+                            let key_count = std::fs::read_to_string(&path)
+                                .unwrap_or_default()
+                                .lines()
+                                .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+                                .count();
+                            key_files.push(json!({
+                                "file": path.display().to_string(),
+                                "type": "authorized_keys",
+                                "key_count": key_count,
+                            }));
+                        } else if fname.starts_with("id_") && !fname.ends_with(".pub") {
+                            total_private_keys += 1;
+                            key_files.push(json!({
+                                "file": path.display().to_string(),
+                                "type": "private_key",
+                            }));
+                        } else if fname.ends_with(".pub") {
+                            key_files.push(json!({
+                                "file": path.display().to_string(),
+                                "type": "public_key",
+                            }));
+                        }
+                    }
+                }
+
+                if !key_files.is_empty() {
+                    results.push(json!({
+                        "ssh_dir": ssh_dir.display().to_string(),
+                        "has_authorized_keys": has_authorized_keys,
+                        "files": key_files,
+                    }));
+                }
+            }
+        }
+
+        Ok(json!({
+            "ssh_directories_scanned": results.len(),
+            "total_authorized_keys_files": total_authorized_keys,
+            "total_private_keys": total_private_keys,
+            "directories": results,
         }))
     }
 }

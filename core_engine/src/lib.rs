@@ -23,7 +23,7 @@ pub fn builtin_investigation_templates() -> &'static [InvestigationTemplate] {
     &BUILTIN_TEMPLATES
 }
 
-static BUILTIN_TEMPLATES: [InvestigationTemplate; 6] = [
+static BUILTIN_TEMPLATES: [InvestigationTemplate; 7] = [
     InvestigationTemplate {
         name: "broad-host-triage",
         description: "General-purpose host investigation covering persistence, accounts, network, and privilege vectors",
@@ -41,10 +41,10 @@ static BUILTIN_TEMPLATES: [InvestigationTemplate; 6] = [
         description: "Investigate unauthorized SSH keys and related access",
         match_keywords: &["ssh", "authorized_keys", "key"],
         tools: &[
+            "enumerate_ssh_keys",
             "audit_account_changes",
             "inspect_persistence_locations",
             "check_privilege_escalation_vectors",
-            "scan_network",
         ],
     },
     InvestigationTemplate {
@@ -82,6 +82,16 @@ static BUILTIN_TEMPLATES: [InvestigationTemplate; 6] = [
         description: "Verify file hashes and detect tampering of critical binaries",
         match_keywords: &["hash", "integrity", "checksum", "binary", "tamper"],
         tools: &[
+            "hash_binary",
+            "inspect_persistence_locations",
+        ],
+    },
+    InvestigationTemplate {
+        name: "syslog-analysis",
+        description: "Analyze system logs for security-relevant events including failed logins and service anomalies",
+        match_keywords: &["log", "syslog", "journal", "event", "audit"],
+        tools: &[
+            "read_syslog",
             "audit_account_changes",
             "inspect_persistence_locations",
         ],
@@ -411,10 +421,15 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
 
         if let Some(indicator_count) = observation.get("indicator_count").and_then(Value::as_u64) {
             if indicator_count > 0 {
-                let severity = if indicator_count >= 4 {
+                // Most Windows desktops report a few privilege escalation
+                // indicators from normal admin usage (UAC settings, service
+                // permissions).  Reserve High for genuinely elevated counts.
+                let severity = if indicator_count >= 8 {
                     FindingSeverity::High
-                } else {
+                } else if indicator_count >= 4 {
                     FindingSeverity::Medium
+                } else {
+                    FindingSeverity::Low
                 };
 
                 findings.push(Finding::new(
@@ -422,7 +437,7 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                         "Privilege escalation indicators detected ({indicator_count})"
                     ),
                     severity,
-                    confidence_from_count(0.68, indicator_count, 0.06, 0.96),
+                    confidence_from_count(0.55, indicator_count, 0.05, 0.92),
                     EvidencePointer {
                         turn: Some(idx + 1),
                         tool: tool_name.clone(),
@@ -435,18 +450,23 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
 
         if let Some(listener_count) = observation.get("listener_count").and_then(Value::as_u64) {
             if listener_count > 0 {
-                let severity = if listener_count >= 25 {
+                // A typical Windows desktop has 80-150+ listening sockets from
+                // standard services (svchost, lsass, etc.).  Only flag when the
+                // count is well above normal baselines.
+                let severity = if listener_count >= 250 {
                     FindingSeverity::High
-                } else if listener_count >= 8 {
+                } else if listener_count >= 150 {
                     FindingSeverity::Medium
-                } else {
+                } else if listener_count >= 50 {
                     FindingSeverity::Low
+                } else {
+                    FindingSeverity::Info
                 };
 
                 findings.push(Finding::new(
                     format!("Active listening sockets observed ({listener_count})"),
                     severity,
-                    confidence_from_count(0.62, listener_count, 0.02, 0.92),
+                    confidence_from_count(0.50, listener_count, 0.001, 0.80),
                     EvidencePointer {
                         turn: Some(idx + 1),
                         tool: tool_name.clone(),
@@ -506,22 +526,41 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
         };
 
         if let Some(persistence_count) = persistence_count {
-            let severity = if persistence_count >= 5 {
+            // A few suspicious persistence entries are common on consumer
+            // systems (Discord, Steam, etc.).  Only flag as High when many
+            // entries are present, suggesting deliberate persistence planting.
+            let severity = if persistence_count >= 8 {
                 FindingSeverity::High
-            } else {
+            } else if persistence_count >= 3 {
                 FindingSeverity::Medium
+            } else {
+                FindingSeverity::Low
             };
+
+            // Extract top entries for detail.
+            let detail_field = if actionable_persistence_count > 0 {
+                "actionable_suspicious_entries"
+            } else {
+                "suspicious_entries"
+            };
+            let detail = extract_persistence_summary(observation, detail_field, 3);
 
             let (title, evidence_field) = if actionable_persistence_count > 0 {
                 (
-                    format!(
-                        "Actionable suspicious persistence entries detected ({persistence_count})"
-                    ),
+                    if detail.is_empty() {
+                        format!("Actionable suspicious persistence entries detected ({persistence_count})")
+                    } else {
+                        format!("Actionable suspicious persistence entries detected ({persistence_count}): {detail}")
+                    },
                     "observation.actionable_suspicious_count",
                 )
             } else {
                 (
-                    format!("Suspicious persistence entries detected ({persistence_count})"),
+                    if detail.is_empty() {
+                        format!("Suspicious persistence entries detected ({persistence_count})")
+                    } else {
+                        format!("Suspicious persistence entries detected ({persistence_count}): {detail}")
+                    },
                     "observation.suspicious_entry_count",
                 )
             };
@@ -571,16 +610,32 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             .and_then(Value::as_u64)
         {
             if non_default_privileged_account_count > 0 {
+                // A single non-default admin account on a personal workstation
+                // is common and expected — only escalate for multiple accounts
+                // or when combined with other indicators.
+                let severity = if non_default_privileged_account_count >= 5 {
+                    FindingSeverity::High
+                } else if non_default_privileged_account_count >= 3 {
+                    FindingSeverity::Medium
+                } else {
+                    FindingSeverity::Low
+                };
+                // Extract account names for detail.
+                let detail =
+                    extract_string_list_summary(observation, "non_default_privileged_accounts", 3);
+                let title = if detail.is_empty() {
+                    format!("Non-default privileged accounts observed ({non_default_privileged_account_count})")
+                } else {
+                    format!("Non-default privileged accounts observed ({non_default_privileged_account_count}): {detail}")
+                };
                 findings.push(Finding::new(
-                    format!(
-                        "Non-default privileged accounts observed ({non_default_privileged_account_count})"
-                    ),
-                    FindingSeverity::High,
+                    title,
+                    severity,
                     confidence_from_count(
-                        0.74,
+                        0.55,
                         non_default_privileged_account_count,
-                        0.04,
-                        0.96,
+                        0.06,
+                        0.92,
                     ),
                     EvidencePointer {
                         turn: Some(idx + 1),
@@ -770,6 +825,82 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             ));
         }
 
+        // SSH key enumeration findings.
+        if let Some(total_authorized) = observation
+            .get("total_authorized_keys_files")
+            .and_then(Value::as_u64)
+        {
+            let total_private = observation
+                .get("total_private_keys")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let dirs_scanned = observation
+                .get("ssh_directories_scanned")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+
+            if total_authorized > 0 || total_private > 0 {
+                let severity = if total_authorized >= 3 {
+                    FindingSeverity::High
+                } else if total_authorized >= 1 {
+                    FindingSeverity::Medium
+                } else {
+                    FindingSeverity::Low
+                };
+
+                // Build detail string from directories.
+                let detail =
+                    if let Some(dirs) = observation.get("directories").and_then(Value::as_array) {
+                        let summaries: Vec<String> = dirs
+                            .iter()
+                            .take(3)
+                            .map(|d| {
+                                let dir = d.get("ssh_dir").and_then(Value::as_str).unwrap_or("?");
+                                let has_ak = d
+                                    .get("has_authorized_keys")
+                                    .and_then(Value::as_bool)
+                                    .unwrap_or(false);
+                                format!("{dir} (authorized_keys: {has_ak})")
+                            })
+                            .collect();
+                        if dirs.len() > 3 {
+                            format!("{} and {} more", summaries.join(", "), dirs.len() - 3)
+                        } else {
+                            summaries.join(", ")
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                findings.push(Finding::new(
+                    format!(
+                        "SSH keys found: {total_authorized} authorized_keys file(s), {total_private} private key(s) across {dirs_scanned} directory(ies){maybe_detail}",
+                        maybe_detail = if detail.is_empty() { String::new() } else { format!(" — {detail}") }
+                    ),
+                    severity,
+                    confidence_from_count(0.72, total_authorized + total_private, 0.04, 0.94),
+                    EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.total_authorized_keys_files".to_string(),
+                    },
+                    "Audit each authorized_keys file for unknown public keys; verify private key ownership and consider rotation for unattended keys.".to_string(),
+                ));
+            } else {
+                findings.push(Finding::new(
+                    format!("No SSH keys found across {dirs_scanned} directory(ies) scanned"),
+                    FindingSeverity::Info,
+                    0.85,
+                    EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.ssh_directories_scanned".to_string(),
+                    },
+                    "SSH key access is not configured on this host.".to_string(),
+                ));
+            }
+        }
+
         if let Some(lines) = observation.get("lines").and_then(Value::as_array) {
             let suspicious_hits = lines
                 .iter()
@@ -940,6 +1071,52 @@ fn is_low_quality(text: &str) -> bool {
         return true;
     }
 
+    let lower = trimmed.to_lowercase();
+
+    // Detect hallucinated tool calls inside the final answer — the model is
+    // role-playing the entire conversation instead of summarising (#137).
+    if lower.contains("<call>") || lower.contains("[observation") {
+        return true;
+    }
+
+    // Detect role-play / menu responses where the model echoes the tool list
+    // instead of producing analytical output (#137).
+    let menu_indicators = [
+        "what would you like",
+        "would you like me to",
+        "choose one of the following",
+        "select an option",
+        "here are the available",
+        "which tool would you",
+        "i can help you with",
+        "let me know which",
+        "please select",
+        "1)",
+    ];
+    let menu_hits = menu_indicators
+        .iter()
+        .filter(|indicator| lower.contains(**indicator))
+        .count();
+    if menu_hits >= 2 {
+        return true;
+    }
+
+    // Check for numbered menu pattern: "1) item\n2) item\n3) item"
+    let numbered_lines = trimmed
+        .lines()
+        .filter(|line| {
+            let l = line.trim();
+            l.starts_with("1)")
+                || l.starts_with("2)")
+                || l.starts_with("3)")
+                || l.starts_with("4)")
+                || l.starts_with("5)")
+        })
+        .count();
+    if numbered_lines >= 3 && menu_hits >= 1 {
+        return true;
+    }
+
     // Repetition detection: if any sentence appears 3+ times, flag.
     let sentences: Vec<&str> = trimmed
         .split(['.', '!', '?', '\n'])
@@ -994,7 +1171,9 @@ pub fn basic_tier_summary(findings: &[Finding]) -> String {
 pub fn basic_tier_summary_for_task(findings: &[Finding], task: Option<&str>) -> String {
     if findings.is_empty() {
         let prefix = match task {
-            Some(t) => format!("SUMMARY: Task \"{t}\" completed with 0 findings. Maximum severity: info."),
+            Some(t) => {
+                format!("SUMMARY: Task \"{t}\" completed with 0 findings. Maximum severity: info.")
+            }
             None => "SUMMARY: 0 findings detected. Maximum severity: info.".to_string(),
         };
         return format!("{prefix}\nFINDINGS:\n(none)\nRISK: info\nACTIONS:\n(none)");
@@ -1093,6 +1272,68 @@ impl ModelCapabilityReport {
 fn confidence_from_count(base: f32, count: u64, slope: f32, ceiling: f32) -> f32 {
     let raw = (base + (count as f32 * slope)).min(ceiling);
     (raw * 100.0).round() / 100.0
+}
+
+/// Extract top N items from a JSON string array field, returning a summary like
+/// "item1, item2, item3 and 5 more".
+fn extract_string_list_summary(observation: &Value, field: &str, max: usize) -> String {
+    let items: Vec<&str> = observation
+        .get(field)
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(Value::as_str).take(max + 1).collect())
+        .unwrap_or_default();
+
+    if items.is_empty() {
+        return String::new();
+    }
+
+    let total = observation
+        .get(field)
+        .and_then(Value::as_array)
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let shown: Vec<&str> = items.into_iter().take(max).collect();
+
+    if total > max {
+        format!("{} and {} more", shown.join(", "), total - max)
+    } else {
+        shown.join(", ")
+    }
+}
+
+/// Extract top N persistence entries, showing the entry string of each.
+fn extract_persistence_summary(observation: &Value, field: &str, max: usize) -> String {
+    let entries: Vec<&str> = observation
+        .get(field)
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| {
+                    v.get("entry")
+                        .and_then(Value::as_str)
+                        .or_else(|| v.as_str())
+                })
+                .take(max + 1)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if entries.is_empty() {
+        return String::new();
+    }
+
+    let total = observation
+        .get(field)
+        .and_then(Value::as_array)
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let shown: Vec<&str> = entries.into_iter().take(max).collect();
+
+    if total > max {
+        format!("{} and {} more", shown.join("; "), total - max)
+    } else {
+        shown.join("; ")
+    }
 }
 
 fn is_suspicious_log_line(line: &str) -> bool {

@@ -8,9 +8,8 @@ use inference_bridge::InferenceEngine;
 
 use crate::{
     basic_tier_summary_for_task, builtin_investigation_templates, deduplicate_findings,
-    derive_findings,
-    extract_tag, max_severity, quality_checked_final_answer, sort_findings, AgentTurn,
-    CoverageBaseline, EvidencePointer, Finding, FindingSeverity, InvestigationTemplate,
+    derive_findings, extract_tag, max_severity, quality_checked_final_answer, sort_findings,
+    AgentTurn, CoverageBaseline, EvidencePointer, Finding, FindingSeverity, InvestigationTemplate,
     ModelCapabilityReport, ModelCapabilityTier, RunReport, RunTimingMetrics, ToolCall,
 };
 
@@ -255,6 +254,18 @@ impl<B: InferenceEngine> Agent<B> {
 
             // Check for final answer first.
             if let Some(final_text) = extract_tag(&output, "final") {
+                // If the model produced <final> without calling any tools,
+                // the output is almost certainly garbage (role-play menu,
+                // echoed prompt, etc.).  Fall back to template-driven tool
+                // execution so we at least get real host data (#137).
+                if turns.is_empty() {
+                    info!(step = step + 1, "ReAct produced <final> with no tool calls — falling back to template execution");
+                    let (template_turns, _) = self.run_template_phase(task).await;
+                    let raw_findings = derive_findings(&template_turns, "");
+                    let findings = deduplicate_findings(raw_findings);
+                    let answer = quality_checked_final_answer(&final_text, &findings);
+                    return Ok((template_turns, answer, first_token_latency_ms));
+                }
                 let raw_findings = derive_findings(&turns, "");
                 let findings = deduplicate_findings(raw_findings);
                 let answer = quality_checked_final_answer(&final_text, &findings);
@@ -287,8 +298,8 @@ impl<B: InferenceEngine> Agent<B> {
                         transcript.push_str(&format!("\n{output}\nObservation: {obs_truncated}\n"));
 
                         // Extract LLM chain-of-thought: text before <call> tag (#119).
-                        let thought = extract_pre_tag_thought(&output, "call")
-                            .unwrap_or_else(|| {
+                        let thought =
+                            extract_pre_tag_thought(&output, "call").unwrap_or_else(|| {
                                 format!("ReAct step {}: invoking {}", step + 1, call.tool)
                             });
 
@@ -562,13 +573,31 @@ fn format_synthesis_prompt(task: &str, evidence: &str) -> String {
 /// Build the initial ReAct system prompt for LLM-guided tool selection (#92).
 fn format_react_system_prompt(task: &str, tool_manifest: &str) -> String {
     format!(
-        "You are an autonomous security investigation agent using a ReAct loop.\n\
+        "You are an autonomous security investigation agent.\n\
+         You MUST use the tools below to investigate the host. Do NOT ask the user questions.\n\n\
          Available tools:\n{tool_manifest}\n\n\
+         PROTOCOL — follow this exactly:\n\
+         1. To call a tool, output ONLY: <call>{{\"tool\":\"TOOL_NAME\",\"args\":{{}}}}</call>\n\
+         2. You will receive the tool's output as an observation.\n\
+         3. Call at least 2 different tools before writing your report.\n\
+         4. When done, write your report inside <final>...</final> tags.\n\n\
+         EXAMPLE (follow this format exactly):\n\
+         <call>{{\"tool\":\"inspect_persistence_locations\",\"args\":{{}}}}</call>\n\
+         [observation returned]\n\
+         <call>{{\"tool\":\"audit_account_changes\",\"args\":{{}}}}</call>\n\
+         [observation returned]\n\
+         <final>\n\
+         SUMMARY: Host shows 2 suspicious persistence entries and 1 non-default admin account.\n\
+         FINDINGS:\n\
+         1. Unknown autorun entry in HKCU\\Run pointing to C:\\Temp\\svc.exe\n\
+         2. Non-default admin account 'backdoor_user' in Administrators group\n\
+         RISK: high — unauthorized persistence and privilege indicators present.\n\
+         ACTIONS:\n\
+         1. Remove the suspicious autorun entry and quarantine svc.exe\n\
+         2. Disable backdoor_user account and audit recent logon activity\n\
+         </final>\n\n\
          Task: {task}\n\n\
-         At each step, decide your next action.\n\
-         To call a tool, respond with: <call>{{\"tool\":\"tool_name\",\"args\":{{...}}}}</call>\n\
-         When you have enough evidence, write your final report: <final>SUMMARY: ...\nFINDINGS: ...\nRISK: ...\nACTIONS: ...</final>\n\n\
-         Begin your investigation.\n"
+         Begin. Output ONLY a <call> tag now — no commentary.\n"
     )
 }
 

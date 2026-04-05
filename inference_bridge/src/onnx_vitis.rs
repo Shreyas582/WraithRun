@@ -2585,8 +2585,6 @@ pub fn run_prompt_cached(
     config: &ModelConfig,
     prompt: &str,
 ) -> Result<String> {
-    use std::any::Any;
-
     let run_started = Instant::now();
     let ep = ep_label(config);
 
@@ -2781,11 +2779,27 @@ fn run_prompt_on_session(
                 "prefix cache miss, running full prefill"
             );
             let prefill_started = Instant::now();
-            let attention_len = context_ids.len();
+
+            // Same fix as run_prompt: account for forced cache padding when
+            // cache tensors will be included during prefill (#136).
+            let initial_cache_len: usize =
+                if cache.layout.use_cache.is_none() && !cache_state.is_empty() {
+                    cache_state
+                        .values()
+                        .next()
+                        .and_then(|v| {
+                            let spec = cache.layout.cache_specs.first()?;
+                            v.shape().get(spec.past_axis).copied().map(|d| d as usize)
+                        })
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+            let attention_len = context_ids.len() + initial_cache_len;
 
             debug!(
                 prompt_tokens = context_ids.len(),
-                attention_len, "running batch prefill forward pass (cached)"
+                initial_cache_len, attention_len, "running batch prefill forward pass (cached)"
             );
 
             let model_inputs = build_model_inputs(
@@ -3036,11 +3050,32 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
     if cache_enabled {
         // Batch prefill: ingest the entire prompt in a single forward pass.
         let prefill_started = Instant::now();
-        let attention_len = context_ids.len();
+
+        // When the model lacks a `use_cache` branch toggle, cache tensors are
+        // always included — even during prefill with a zero-history cache that
+        // was padded to length 1 (see `materialize_cache_shape`).  The model's
+        // attention will concatenate past (length 1) + current (length N),
+        // producing a key sequence of N+1.  The attention mask must match that
+        // total, otherwise we get a broadcast shape error (#136).
+        let initial_cache_len: usize = if layout.use_cache.is_none() && !cache_state.is_empty() {
+            // Cache IS included during prefill — get its actual past-axis size.
+            cache_state
+                .values()
+                .next()
+                .and_then(|v| {
+                    let spec = layout.cache_specs.first()?;
+                    v.shape().get(spec.past_axis).copied().map(|d| d as usize)
+                })
+                .unwrap_or(0)
+        } else {
+            // Cache is excluded during prefill (model has use_cache toggle).
+            0
+        };
+        let attention_len = context_ids.len() + initial_cache_len;
 
         debug!(
             prompt_tokens = context_ids.len(),
-            attention_len, "running batch prefill forward pass"
+            initial_cache_len, attention_len, "running batch prefill forward pass"
         );
 
         let model_inputs =
