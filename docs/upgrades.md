@@ -1,5 +1,45 @@
 # Upgrade Notes
 
+## v1.6.0
+
+### Breaking/visible changes
+
+- **Agent dispatch changed by tier**: `Agent::run()` now dispatches Moderate and Strong tiers through a ReAct loop instead of the template-driven Phase 1 pipeline. Basic tier behavior is unchanged.
+- **`run_prompt` temperature parameter**: `run_prompt()` and `run_prompt_shared_buffer()` now take a `temperature: f32` parameter. Pass `0.0` for greedy (previous behavior).
+- **`generate()` caches sessions**: `OnnxVitisEngine::generate()` now caches the ONNX session internally via `Arc<Mutex<...>>`. No API change, but the engine is no longer stateless between calls.
+- **New CLI flag `--model-download`**: added `--model-download <NAME|list>` for downloading recommended model packs. Mutually exclusive with `--task`/`--live`/`--doctor`.
+
+### Migration
+
+- If you call `run_prompt()` directly, add a `temperature` argument (use `0.0` for identical behavior to v1.5.0).
+- No TOML config changes required.
+
+## v1.5.0
+
+### Breaking/visible changes
+
+- **New backend feature flags**: `directml`, `coreml`, `cuda`, `tensorrt`, `qnn` feature flags added. Default build (no flags) still uses CPU/Vitis only.
+- **`ModelFormat` and `QuantFormat` enums**: model config now exposes format and quantization metadata. These are informational and auto-detected; no config changes needed.
+- **Backend `supported_formats()` / `supported_quant_formats()`**: new trait methods on `ExecutionProviderBackend`. Existing custom backends must implement these (default returns `[Onnx]` and `[Fp32, Fp16]`).
+
+### Migration
+
+- No TOML or CLI changes required. New backends activate only when their feature flag is enabled at compile time.
+- If you implement a custom `ExecutionProviderBackend`, add `supported_formats()` and `supported_quant_formats()` methods.
+
+## v1.4.0
+
+### Breaking/visible changes
+
+- **Doctor output includes backends**: `wraithrun doctor --json` now includes a `backends` array with per-backend diagnostic data. Consumers parsing the JSON should handle the new field.
+- **`RunReport.backend` field**: run reports now include an optional `backend` string recording which inference backend was used.
+- **`--backend` CLI flag**: new flag `--backend <NAME>` (or `WRAITHRUN_BACKEND` env var / `[inference] backend` TOML key) lets users force a specific backend. Default is `"auto"`.
+
+### Migration
+
+- No breaking API changes. The new `backend` field in `RunReport` is optional and defaults to `None` for backward compatibility.
+- To pin a backend, set `--backend vitis` or add `backend = "vitis"` under `[inference]` in TOML.
+
 ## v1.3.1
 
 ### Breaking/visible changes

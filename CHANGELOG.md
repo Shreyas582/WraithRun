@@ -18,6 +18,19 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 1.6.0 - 2026-04-05
+
+### Added
+
+- **ReAct agent loop** (#92): Moderate/Strong investigation tiers now use an LLM-guided ReAct (Reason + Act) loop with dynamic tool dispatch. The agent reasons about which tool to call next based on observations so far. Basic tier retains fast template-driven execution.
+- **Task-aware LLM synthesis** (#93): synthesis prompts include verbatim task context and structured output sections (Summary, Key Findings, Risk Assessment, Recommendations). Evidence budget increased from 1,500 to 3,000 chars per observation.
+- **Temperature-scaled sampling** (#66): configurable temperature parameter for LLM token generation. Softmax probability sampling when temperature > 0; greedy decoding when temperature ≤ 0.
+- **EP-aware debug logs** (#67): all inference debug messages now include the active execution provider (DirectML, CoreML, CUDA, TensorRT, QNN, CPU).
+- **ONNX session caching** (#64): `SessionCache` struct lazily initializes and reuses the ONNX session and tokenizer across investigation steps, eliminating per-step session rebuild overhead.
+- **KV-cache prefix reuse** (#65): prefix detection framework compares current prompt tokens against previous invocation with hit/miss metrics. Scaffolded for full KV-state reuse pending upstream `DynValue` clonability.
+- **Model pack download** (#94): `--model-download <NAME>` CLI command with curated model manifest, SHA-256 checksum verification, and skip-if-exists logic.
+- 7 new tests covering ReAct parsing, tier dispatch, unknown tool handling, and prompt formatting (281 total, up from 274).
+
 ## 1.5.0 - 2026-04-05
 
 ### Added
