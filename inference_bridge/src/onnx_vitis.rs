@@ -2786,19 +2786,18 @@ fn run_prompt_on_session(
 
             // Same fix as run_prompt: account for forced cache padding when
             // cache tensors will be included during prefill (#136).
-            initial_cache_len =
-                if cache.layout.use_cache.is_none() && !cache_state.is_empty() {
-                    cache_state
-                        .values()
-                        .next()
-                        .and_then(|v| {
-                            let spec = cache.layout.cache_specs.first()?;
-                            v.shape().get(spec.past_axis).copied().map(|d| d as usize)
-                        })
-                        .unwrap_or(0)
-                } else {
-                    0
-                };
+            initial_cache_len = if cache.layout.use_cache.is_none() && !cache_state.is_empty() {
+                cache_state
+                    .values()
+                    .next()
+                    .and_then(|v| {
+                        let spec = cache.layout.cache_specs.first()?;
+                        v.shape().get(spec.past_axis).copied().map(|d| d as usize)
+                    })
+                    .unwrap_or(0)
+            } else {
+                0
+            };
             let attention_len = context_ids.len() + initial_cache_len;
 
             debug!(

@@ -1184,9 +1184,11 @@ pub fn basic_tier_summary_for_task(findings: &[Finding], task: Option<&str>) -> 
     // Sort findings: highest severity first, then by confidence descending (#155).
     let mut sorted: Vec<&Finding> = findings.iter().collect();
     sorted.sort_by(|a, b| {
-        b.severity
-            .cmp(&a.severity)
-            .then_with(|| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal))
+        b.severity.cmp(&a.severity).then_with(|| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     });
 
     let max_sev = sorted
@@ -1275,7 +1277,10 @@ pub fn basic_tier_summary_for_task(findings: &[Finding], task: Option<&str>) -> 
     }
 
     // -- Risk assessment --
-    out.push_str(&format!("OVERALL RISK: {}\n\n", max_sev.token().to_uppercase()));
+    out.push_str(&format!(
+        "OVERALL RISK: {}\n\n",
+        max_sev.token().to_uppercase()
+    ));
 
     // -- Prioritized actions (deduplicated, urgent first) --
     out.push_str("RECOMMENDED ACTIONS (priority order):\n");
