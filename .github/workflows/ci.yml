@@ -221,10 +221,8 @@ jobs:
         shell: powershell
         run: |
           $cargobin = "$env:USERPROFILE\.cargo\bin"
-          if (-not ($env:Path -split ';' | Where-Object { $_ -eq $cargobin })) {
-            $env:Path = "$cargobin;$env:Path"
-            echo "$cargobin" >> $env:GITHUB_PATH
-          }
+          $env:Path = "$cargobin;$env:Path"
+          Add-Content -Path $env:GITHUB_PATH -Value $cargobin -Encoding UTF8
           if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
             Write-Host "rustup not found, installing..."
             Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
