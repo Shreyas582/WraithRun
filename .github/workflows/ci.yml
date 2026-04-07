@@ -230,12 +230,14 @@ jobs:
           }
           rustup toolchain install 1.92.0 --profile minimal
           rustup default 1.92.0
-          # Resolve actual cargo binary directory and share with later steps
-          $resolved = Split-Path (Get-Command cargo).Source
-          Write-Host "Resolved cargo bin: $resolved"
+          # Resolve the real toolchain bin directory (cargo proxy may be absent)
+          $realBin = Split-Path (& rustup which cargo)
+          Write-Host "Toolchain bin: $realBin"
+          $env:Path = "$realBin;$env:Path"
+          cargo --version
           $utf8 = New-Object System.Text.UTF8Encoding($false)
-          [IO.File]::AppendAllText($env:GITHUB_ENV, "CARGO_BIN=$resolved`n", $utf8)
-          [IO.File]::AppendAllText($env:GITHUB_PATH, "$resolved`n", $utf8)
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "CARGO_BIN=$realBin`n", $utf8)
+          [IO.File]::AppendAllText($env:GITHUB_PATH, "$realBin`n", $utf8)
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
