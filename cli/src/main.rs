@@ -294,6 +294,13 @@ fn validate_live_runtime_preflight(runtime: &RuntimeConfig) -> Result<()> {
         return Ok(());
     }
 
+    // Fail fast when the binary was compiled without inference support (#149).
+    #[cfg(not(feature = "onnx"))]
+    bail!(
+        "Live inference requested but this binary was built without inference support. \
+         Rebuild with `--features onnx` (or `--features vitis`/`--features directml`)."
+    );
+
     if !runtime.model.is_file() {
         bail!(
             "Live mode model file not found: {}. Run '--doctor --live --introspection-format json' (or '--doctor --live --fix') and provide a readable --model path.",

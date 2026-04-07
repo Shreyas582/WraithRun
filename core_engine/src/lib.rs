@@ -1,6 +1,6 @@
 pub mod agent;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use inference_bridge::ModelCapabilityProbe;
 use serde::{Deserialize, Serialize, Serializer};
@@ -101,7 +101,9 @@ static BUILTIN_TEMPLATES: [InvestigationTemplate; 7] = [
 // ── Capability tiering thresholds (const, easy to tune) ──
 
 /// Models below this parameter count (billions) are classified as Basic.
-const PARAM_BASIC_CEILING_B: f32 = 2.0;
+/// Lowered from 2.0 → 1.0 so common 1B+ models (Qwen2.5-0.5B overestimates
+/// to ~1.4B, Llama-3.2-1B at ~1.12B) reach Moderate tier and use inference (#157).
+const PARAM_BASIC_CEILING_B: f32 = 1.0;
 /// Models above this parameter count (billions) are classified as Strong.
 const PARAM_STRONG_FLOOR_B: f32 = 10.0;
 /// Latency above this (ms/tok) demotes to Basic.
@@ -1179,10 +1181,17 @@ pub fn basic_tier_summary_for_task(findings: &[Finding], task: Option<&str>) -> 
         return format!("{prefix}\nFINDINGS:\n(none)\nRISK: info\nACTIONS:\n(none)");
     }
 
-    let max_sev = findings
-        .iter()
+    // Sort findings: highest severity first, then by confidence descending (#155).
+    let mut sorted: Vec<&Finding> = findings.iter().collect();
+    sorted.sort_by(|a, b| {
+        b.severity
+            .cmp(&a.severity)
+            .then_with(|| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    let max_sev = sorted
+        .first()
         .map(|f| f.severity)
-        .max()
         .unwrap_or(FindingSeverity::Info);
 
     let distinct_tools: HashSet<&str> = findings
@@ -1190,34 +1199,94 @@ pub fn basic_tier_summary_for_task(findings: &[Finding], task: Option<&str>) -> 
         .filter_map(|f| f.evidence_pointer.tool.as_deref())
         .collect();
 
+    // -- Header --
     let mut out = match task {
         Some(t) => format!(
-            "SUMMARY: Task \"{t}\" produced {} findings across {} tool(s). Maximum severity: {}.\nFINDINGS:\n",
-            findings.len(),
-            distinct_tools.len(),
-            max_sev.token()
+            "INVESTIGATION SUMMARY — \"{t}\"\n\
+             {total} findings across {tools} tool(s). Maximum severity: {sev}.\n\n",
+            total = findings.len(),
+            tools = distinct_tools.len(),
+            sev = max_sev.token().to_uppercase()
         ),
         None => format!(
-            "SUMMARY: {} findings detected. Maximum severity: {}.\nFINDINGS:\n",
-            findings.len(),
-            max_sev.token()
+            "INVESTIGATION SUMMARY\n\
+             {total} findings detected. Maximum severity: {sev}.\n\n",
+            total = findings.len(),
+            sev = max_sev.token().to_uppercase()
         ),
     };
 
-    for (i, f) in findings.iter().enumerate() {
-        out.push_str(&format!(
-            "{}. {} [{}] — {}\n",
-            i + 1,
-            f.title,
-            f.severity.token(),
-            f.recommended_action
-        ));
+    // -- Group by severity (highest first) --
+    let severity_order = [
+        FindingSeverity::Critical,
+        FindingSeverity::High,
+        FindingSeverity::Medium,
+        FindingSeverity::Low,
+        FindingSeverity::Info,
+    ];
+
+    for &sev in &severity_order {
+        let group: Vec<&&Finding> = sorted.iter().filter(|f| f.severity == sev).collect();
+        if group.is_empty() {
+            continue;
+        }
+        let header = match sev {
+            FindingSeverity::Critical => "🔴 CRITICAL",
+            FindingSeverity::High => "🟠 HIGH",
+            FindingSeverity::Medium => "🟡 MEDIUM",
+            FindingSeverity::Low => "🔵 LOW",
+            FindingSeverity::Info => "ℹ️  INFO",
+        };
+        out.push_str(&format!("── {} ({}) ──\n", header, group.len()));
+        for f in &group {
+            let tool_tag = f
+                .evidence_pointer
+                .tool
+                .as_deref()
+                .map(|t| format!(" [{}]", t))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "  • {}{} — {}\n",
+                f.title, tool_tag, f.recommended_action
+            ));
+        }
+        out.push('\n');
     }
 
-    out.push_str(&format!("RISK: {}\nACTIONS:\n", max_sev.token()));
+    // -- Cross-references: find tools whose findings overlap --
+    if distinct_tools.len() > 1 {
+        // Collect tool→titles mapping for cross-reference hints.
+        let mut tool_titles: HashMap<&str, Vec<&str>> = HashMap::new();
+        for f in &sorted {
+            if let Some(tool) = f.evidence_pointer.tool.as_deref() {
+                tool_titles.entry(tool).or_default().push(&f.title);
+            }
+        }
+        if tool_titles.len() > 1 {
+            out.push_str("CROSS-REFERENCES:\n");
+            let tools_vec: Vec<&&str> = tool_titles.keys().collect();
+            out.push_str(&format!(
+                "  Data was collected from {} sources ({}). ",
+                tools_vec.len(),
+                tools_vec.iter().map(|t| **t).collect::<Vec<_>>().join(", ")
+            ));
+            out.push_str("Correlate findings across tools for a complete picture.\n\n");
+        }
+    }
 
-    for (i, f) in findings.iter().enumerate() {
-        out.push_str(&format!("{}. {}\n", i + 1, f.recommended_action));
+    // -- Risk assessment --
+    out.push_str(&format!("OVERALL RISK: {}\n\n", max_sev.token().to_uppercase()));
+
+    // -- Prioritized actions (deduplicated, urgent first) --
+    out.push_str("RECOMMENDED ACTIONS (priority order):\n");
+    let mut seen_actions: HashSet<&str> = HashSet::new();
+    let mut action_idx = 0usize;
+    for f in &sorted {
+        let action = f.recommended_action.as_str();
+        if seen_actions.insert(action) {
+            action_idx += 1;
+            out.push_str(&format!("  {}. {}\n", action_idx, action));
+        }
     }
 
     // Remove trailing newline for clean output.
@@ -1733,13 +1802,26 @@ mod tests {
 
     #[test]
     fn classify_small_model_as_basic() {
+        // With PARAM_BASIC_CEILING_B = 1.0 (#157), a 0.5B model is Basic.
+        let probe = ModelCapabilityProbe {
+            estimated_param_billions: 0.5,
+            execution_provider: "CPUExecutionProvider".to_string(),
+            smoke_latency_ms: 80,
+            vocab_size: 32000,
+        };
+        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Basic);
+    }
+
+    #[test]
+    fn classify_1b_model_as_moderate() {
+        // With PARAM_BASIC_CEILING_B = 1.0 (#157), a 1.2B model reaches Moderate.
         let probe = ModelCapabilityProbe {
             estimated_param_billions: 1.2,
             execution_provider: "CPUExecutionProvider".to_string(),
             smoke_latency_ms: 80,
             vocab_size: 32000,
         };
-        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Basic);
+        assert_eq!(classify_capability(&probe), ModelCapabilityTier::Moderate);
     }
 
     #[test]
@@ -1859,12 +1941,15 @@ mod tests {
         ];
 
         let summary = basic_tier_summary(&findings);
-        assert!(summary.starts_with("SUMMARY: 2 findings detected. Maximum severity: high."));
-        assert!(summary.contains("FINDINGS:"));
-        assert!(summary.contains("1. Active listeners [high]"));
-        assert!(summary.contains("2. Suspicious persistence [medium]"));
-        assert!(summary.contains("RISK: high"));
-        assert!(summary.contains("ACTIONS:"));
+        // Updated format groups by severity and provides cross-references (#155).
+        assert!(summary.contains("INVESTIGATION SUMMARY"));
+        assert!(summary.contains("2 findings"));
+        assert!(summary.contains("HIGH"));
+        assert!(summary.contains("Active listeners"));
+        assert!(summary.contains("Suspicious persistence"));
+        assert!(summary.contains("OVERALL RISK: HIGH"));
+        assert!(summary.contains("RECOMMENDED ACTIONS"));
+        assert!(summary.contains("CROSS-REFERENCES"));
     }
 
     #[test]
@@ -1891,8 +1976,10 @@ mod tests {
             "observation.indicator_count",
         )];
         let summary = basic_tier_summary_for_task(&findings, Some("windows-triage"));
-        assert!(summary.contains("Task \"windows-triage\""));
+        // Updated format includes task name in header (#155).
+        assert!(summary.contains("windows-triage"));
         assert!(summary.contains("1 tool(s)"));
+        assert!(summary.contains("RECOMMENDED ACTIONS"));
     }
 
     // ── Discrete confidence label tests (#85) ──

@@ -2712,6 +2712,10 @@ fn run_prompt_on_session(
         bail!("prompt encoding produced no token IDs");
     }
 
+    // Track initial KV-cache padding length so the decode loop can account
+    // for it in the attention mask (#147).
+    let mut initial_cache_len: usize = 0;
+
     if cache_enabled {
         // --- Prefix cache reuse (#65) ---
         // Find how many leading tokens match the previous prompt.
@@ -2782,7 +2786,7 @@ fn run_prompt_on_session(
 
             // Same fix as run_prompt: account for forced cache padding when
             // cache tensors will be included during prefill (#136).
-            let initial_cache_len: usize =
+            initial_cache_len =
                 if cache.layout.use_cache.is_none() && !cache_state.is_empty() {
                     cache_state
                         .values()
@@ -2847,13 +2851,16 @@ fn run_prompt_on_session(
     for step in 0..config.max_new_tokens.max(1) {
         let step_started = Instant::now();
         let (decode_with_cache, step_input_ids, attention_len) = if cache_enabled {
-            // attention_len = past KV-cache entries + 1 current decode token (#114).
+            // attention_len = past KV-cache entries (context_ids tracks total
+            // processed tokens; initial_cache_len accounts for prior cache
+            // padding).  The model internally handles the current decode
+            // token, so we must NOT add +1 here (#147).
             (
                 true,
                 vec![*context_ids
                     .last()
                     .ok_or_else(|| anyhow!("empty context ids"))?],
-                (context_ids.len() + 1).max(1),
+                (context_ids.len() + initial_cache_len).max(1),
             )
         } else {
             let step_input_ids = context_ids.clone();
@@ -3047,6 +3054,10 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
         bail!("prompt encoding produced no token IDs");
     }
 
+    // Track initial KV-cache padding length so the decode loop can account
+    // for it in the attention mask (#147).
+    let mut initial_cache_len: usize = 0;
+
     if cache_enabled {
         // Batch prefill: ingest the entire prompt in a single forward pass.
         let prefill_started = Instant::now();
@@ -3057,7 +3068,7 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
         // attention will concatenate past (length 1) + current (length N),
         // producing a key sequence of N+1.  The attention mask must match that
         // total, otherwise we get a broadcast shape error (#136).
-        let initial_cache_len: usize = if layout.use_cache.is_none() && !cache_state.is_empty() {
+        initial_cache_len = if layout.use_cache.is_none() && !cache_state.is_empty() {
             // Cache IS included during prefill — get its actual past-axis size.
             cache_state
                 .values()
@@ -3110,13 +3121,16 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
     for step in 0..config.max_new_tokens.max(1) {
         let step_started = Instant::now();
         let (decode_with_cache, step_input_ids, attention_len) = if cache_enabled {
-            // attention_len = past KV-cache entries + 1 current decode token (#114).
+            // attention_len = past KV-cache entries (context_ids tracks total
+            // processed tokens; initial_cache_len accounts for prior cache
+            // padding).  The model internally handles the current decode
+            // token, so we must NOT add +1 here (#147).
             (
                 true,
                 vec![*context_ids
                     .last()
                     .ok_or_else(|| anyhow!("empty context ids"))?],
-                (context_ids.len() + 1).max(1),
+                (context_ids.len() + initial_cache_len).max(1),
             )
         } else {
             let step_input_ids = context_ids.clone();

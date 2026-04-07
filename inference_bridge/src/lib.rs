@@ -495,8 +495,16 @@ impl OnnxVitisEngine {
                 format!(r#"<call>{{"tool":"hash_binary","args":{{"path":"{path}"}}}}</call>"#)
             }
             "read_syslog" => {
+                // Use a platform-appropriate default log path instead of a
+                // project file like README.md, which would produce bogus
+                // findings (#153).
+                let default_path = if cfg!(target_os = "windows") {
+                    "C:\\Windows\\System32\\winevt\\Logs\\System.evtx".to_string()
+                } else {
+                    "/var/log/syslog".to_string()
+                };
                 let path = Self::guess_path_from_task(task)
-                    .unwrap_or_else(|| "./README.md".to_string());
+                    .unwrap_or(default_path);
                 let path = Self::escape_json_string(&path);
                 let max_lines = Self::guess_line_count_from_task(task).unwrap_or(200);
                 format!(
