@@ -217,22 +217,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust toolchain (powershell)
-        shell: powershell
-        run: |
-          $cargobin = "$env:USERPROFILE\.cargo\bin"
-          $env:Path = "$cargobin;$env:Path"
-          [IO.File]::AppendAllText($env:GITHUB_PATH, "$cargobin`n")
-          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
-            Write-Host "rustup not found, installing..."
-            Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
-            .\rustup-init.exe -y --default-toolchain 1.92.0 --profile minimal
-            Remove-Item .\rustup-init.exe
-            $env:Path = "$cargobin;$env:Path"
-          }
-          rustup toolchain install 1.92.0 --profile minimal
-          rustup default 1.92.0
-          rustup show active-toolchain
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -248,10 +236,6 @@ jobs:
       - name: Run live success e2e test (no fallback)
         shell: powershell
         run: |
-          $cargobin = "$env:USERPROFILE\.cargo\bin"
-          if (-not ($env:Path -split ';' | Where-Object { $_ -eq $cargobin })) {
-            $env:Path = "$cargobin;$env:Path"
-          }
           cargo test -p wraithrun --features inference_bridge/onnx --test stdin_integration live_mode_e2e_success_without_fallback_when_fixture_is_configured -- --exact --nocapture
 
       - name: Upload live success e2e artifacts
