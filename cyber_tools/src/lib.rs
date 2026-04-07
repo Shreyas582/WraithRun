@@ -81,10 +81,12 @@ impl SandboxPolicy {
         }
 
         #[cfg(target_os = "windows")]
-        let command_allowlist: HashSet<String> = ["whoami", "netstat", "net", "tasklist", "reg"]
-            .into_iter()
-            .map(|c| c.to_string())
-            .collect();
+        let command_allowlist: HashSet<String> = [
+            "whoami", "netstat", "net", "tasklist", "reg", "sc", "wmic", "schtasks",
+        ]
+        .into_iter()
+        .map(|c| c.to_string())
+        .collect();
 
         #[cfg(not(target_os = "windows"))]
         let command_allowlist: HashSet<String> = ["id", "ss", "sudo"]

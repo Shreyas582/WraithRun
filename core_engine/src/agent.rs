@@ -351,9 +351,12 @@ impl<B: InferenceEngine> Agent<B> {
     fn check_tool_precondition(&self, tool_name: &str) -> bool {
         match tool_name {
             "read_syslog" => {
-                // Default path is ./agent.log — skip if it doesn't exist and
-                // the sandbox policy would deny access anyway.
-                let default_path = std::path::Path::new("./agent.log");
+                // Use a platform-appropriate default log path (#153).
+                let default_path = if cfg!(target_os = "windows") {
+                    std::path::Path::new("C:\\Windows\\System32\\winevt\\Logs\\System.evtx")
+                } else {
+                    std::path::Path::new("/var/log/syslog")
+                };
                 if !default_path.exists() {
                     return false;
                 }

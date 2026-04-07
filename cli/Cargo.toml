@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = []
+default = ["onnx"]
 onnx = ["inference_bridge/onnx"]
 vitis = ["inference_bridge/vitis"]
 directml = ["inference_bridge/directml"]

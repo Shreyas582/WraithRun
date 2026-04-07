@@ -14,6 +14,7 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::CString,
     fs,
+    io::Read,
     path::PathBuf,
     time::Instant,
 };
@@ -75,7 +76,7 @@ impl RuntimeCompatibilityReport {
             .any(|issue| issue.severity == RuntimeCompatibilitySeverity::Fail)
     }
 
-    #[cfg(any(not(feature = "onnx"), test))]
+    #[cfg(not(feature = "onnx"))]
     fn push_warn(&mut self, reason_code: &'static str, detail: impl Into<String>) {
         self.issues.push(RuntimeCompatibilityIssue {
             severity: RuntimeCompatibilitySeverity::Warn,
@@ -255,7 +256,12 @@ fn classify_session_init_reason_code(error_text: &str) -> &'static str {
         return "runtime_vitis_provider_missing";
     }
 
-    if normalized.contains("onnxruntime.dll") && normalized.contains("not found") {
+    if (normalized.contains("onnxruntime.dll")
+        || normalized.contains("libonnxruntime.so")
+        || normalized.contains("libonnxruntime.dylib")
+        || normalized.contains("onnx runtime library"))
+        && normalized.contains("not found")
+    {
         return "runtime_ort_dylib_missing";
     }
 
@@ -1371,8 +1377,85 @@ fn build_session_with_vitis_cascade(config: &ModelConfig) -> Result<Session> {
 }
 
 #[cfg(feature = "onnx")]
+fn ensure_ort_dylib_available() -> Result<()> {
+    if let Some(path) = std::env::var_os("ORT_DYLIB_PATH") {
+        let p = PathBuf::from(&path);
+        if p.is_file() {
+            return Ok(());
+        }
+        bail!(
+            "ORT_DYLIB_PATH is set to '{}' but the file does not exist; \
+             install ONNX Runtime or set ORT_DYLIB_PATH / WRAITHRUN_ORT_DYLIB_PATH \
+             to a valid onnxruntime library path",
+            p.display()
+        );
+    }
+
+    // No explicit path — probe system search locations.
+    let lib_names: &[&str] = if cfg!(windows) {
+        &["onnxruntime.dll"]
+    } else if cfg!(target_os = "macos") {
+        &["libonnxruntime.dylib"]
+    } else {
+        &["libonnxruntime.so"]
+    };
+
+    let search_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|val| std::env::split_paths(&val).collect())
+        .unwrap_or_default();
+
+    for dir in &search_dirs {
+        for name in lib_names {
+            if dir.join(name).is_file() {
+                return Ok(());
+            }
+        }
+    }
+
+    bail!(
+        "ONNX Runtime library ({}) not found on PATH or via ORT_DYLIB_PATH; \
+         install ONNX Runtime or set ORT_DYLIB_PATH / WRAITHRUN_ORT_DYLIB_PATH",
+        lib_names.join(" / ")
+    );
+}
+
+/// Fast pre-validation: confirms the model file starts with a plausible
+/// protobuf field tag (ONNX models are serialized `ModelProto` messages).
+/// This prevents feeding garbage bytes to `commit_from_file`, which can
+/// block indefinitely in the ONNX Runtime graph optimiser.
+#[cfg(feature = "onnx")]
+fn validate_model_preamble(path: &std::path::Path) -> Result<()> {
+    let mut file = fs::File::open(path)?;
+    let mut buf = [0u8; 4];
+    let n = file.read(&mut buf)?;
+    if n < 2 {
+        bail!(
+            "invalid model file '{}': too small ({n} bytes)",
+            path.display()
+        );
+    }
+    // Protobuf field tags: low 3 bits = wire type, remaining bits = field number.
+    // Valid wire types for ModelProto fields: 0 (Varint), 1 (64-bit),
+    // 2 (Length-delimited), 5 (32-bit). Wire types 3, 4 are deprecated;
+    // 6, 7 are invalid.
+    let wire_type = buf[0] & 0x07;
+    let field_number = buf[0] >> 3;
+    if field_number == 0 || wire_type == 3 || wire_type == 4 || wire_type > 5 {
+        bail!(
+            "invalid model file '{}': does not start with a valid ONNX protobuf header \
+             (first byte 0x{:02X} is not a valid protobuf field tag)",
+            path.display(),
+            buf[0]
+        );
+    }
+    Ok(())
+}
+
+#[cfg(feature = "onnx")]
 fn build_session(config: &ModelConfig) -> Result<Session> {
     configure_ort_dylib_path(config);
+    ensure_ort_dylib_available()?;
+    validate_model_preamble(&config.model_path)?;
 
     // When the vitis feature is available, delegate to the Vitis EP cascade
     // unless the user explicitly forces CPU-only mode.
@@ -2452,6 +2535,7 @@ pub fn inspect_runtime_compatibility(
 }
 
 #[cfg(feature = "onnx")]
+#[allow(clippy::too_many_arguments)]
 fn run_prompt_shared_buffer(
     session: &mut Session,
     layout: &SessionLayout,
@@ -2712,6 +2796,10 @@ fn run_prompt_on_session(
         bail!("prompt encoding produced no token IDs");
     }
 
+    // Track initial KV-cache padding length so the decode loop can account
+    // for it in the attention mask (#147).
+    let mut initial_cache_len: usize = 0;
+
     if cache_enabled {
         // --- Prefix cache reuse (#65) ---
         // Find how many leading tokens match the previous prompt.
@@ -2738,13 +2826,8 @@ fn run_prompt_on_session(
             if !suffix.is_empty() {
                 let prefill_started = Instant::now();
                 let attention_len = context_ids.len();
-                let model_inputs = build_model_inputs(
-                    &cache.layout,
-                    &suffix.to_vec(),
-                    attention_len,
-                    true,
-                    &cache_state,
-                )?;
+                let model_inputs =
+                    build_model_inputs(&cache.layout, suffix, attention_len, true, &cache_state)?;
                 let mut outputs = ort_result(cache.session.run(model_inputs))?;
                 debug!(
                     suffix_tokens = suffix.len(),
@@ -2782,19 +2865,18 @@ fn run_prompt_on_session(
 
             // Same fix as run_prompt: account for forced cache padding when
             // cache tensors will be included during prefill (#136).
-            let initial_cache_len: usize =
-                if cache.layout.use_cache.is_none() && !cache_state.is_empty() {
-                    cache_state
-                        .values()
-                        .next()
-                        .and_then(|v| {
-                            let spec = cache.layout.cache_specs.first()?;
-                            v.shape().get(spec.past_axis).copied().map(|d| d as usize)
-                        })
-                        .unwrap_or(0)
-                } else {
-                    0
-                };
+            initial_cache_len = if cache.layout.use_cache.is_none() && !cache_state.is_empty() {
+                cache_state
+                    .values()
+                    .next()
+                    .and_then(|v| {
+                        let spec = cache.layout.cache_specs.first()?;
+                        v.shape().get(spec.past_axis).copied().map(|d| d as usize)
+                    })
+                    .unwrap_or(0)
+            } else {
+                0
+            };
             let attention_len = context_ids.len() + initial_cache_len;
 
             debug!(
@@ -2847,13 +2929,16 @@ fn run_prompt_on_session(
     for step in 0..config.max_new_tokens.max(1) {
         let step_started = Instant::now();
         let (decode_with_cache, step_input_ids, attention_len) = if cache_enabled {
-            // attention_len = past KV-cache entries + 1 current decode token (#114).
+            // attention_len = past KV-cache entries (context_ids tracks total
+            // processed tokens; initial_cache_len accounts for prior cache
+            // padding).  The model internally handles the current decode
+            // token, so we must NOT add +1 here (#147).
             (
                 true,
                 vec![*context_ids
                     .last()
                     .ok_or_else(|| anyhow!("empty context ids"))?],
-                (context_ids.len() + 1).max(1),
+                (context_ids.len() + initial_cache_len).max(1),
             )
         } else {
             let step_input_ids = context_ids.clone();
@@ -3047,6 +3132,10 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
         bail!("prompt encoding produced no token IDs");
     }
 
+    // Track initial KV-cache padding length so the decode loop can account
+    // for it in the attention mask (#147).
+    let mut initial_cache_len: usize = 0;
+
     if cache_enabled {
         // Batch prefill: ingest the entire prompt in a single forward pass.
         let prefill_started = Instant::now();
@@ -3057,7 +3146,7 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
         // attention will concatenate past (length 1) + current (length N),
         // producing a key sequence of N+1.  The attention mask must match that
         // total, otherwise we get a broadcast shape error (#136).
-        let initial_cache_len: usize = if layout.use_cache.is_none() && !cache_state.is_empty() {
+        initial_cache_len = if layout.use_cache.is_none() && !cache_state.is_empty() {
             // Cache IS included during prefill — get its actual past-axis size.
             cache_state
                 .values()
@@ -3110,13 +3199,16 @@ pub fn run_prompt(config: &ModelConfig, prompt: &str) -> Result<String> {
     for step in 0..config.max_new_tokens.max(1) {
         let step_started = Instant::now();
         let (decode_with_cache, step_input_ids, attention_len) = if cache_enabled {
-            // attention_len = past KV-cache entries + 1 current decode token (#114).
+            // attention_len = past KV-cache entries (context_ids tracks total
+            // processed tokens; initial_cache_len accounts for prior cache
+            // padding).  The model internally handles the current decode
+            // token, so we must NOT add +1 here (#147).
             (
                 true,
                 vec![*context_ids
                     .last()
                     .ok_or_else(|| anyhow!("empty context ids"))?],
-                (context_ids.len() + 1).max(1),
+                (context_ids.len() + initial_cache_len).max(1),
             )
         } else {
             let step_input_ids = context_ids.clone();
