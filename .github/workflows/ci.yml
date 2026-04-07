@@ -52,7 +52,7 @@ jobs:
   stdin-integration:
     name: CLI stdin integration (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +69,9 @@ jobs:
           rustup toolchain install 1.92.0 --profile minimal
           rustup default 1.92.0
           rustup show active-toolchain
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
 
       - name: Run stdin integration tests
         run: cargo test -p wraithrun --test stdin_integration
