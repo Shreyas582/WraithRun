@@ -285,6 +285,10 @@ async fn collect_windows_scheduled_tasks(
         .await
         .map_err(|e| ToolError::Execution(format!("schtasks query failed: {e}")))?;
 
+    // schtasks returns one row per next-run-time; a task with N triggers gets N rows.
+    // Deduplicate by task name so each task appears exactly once.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
         if tasks.len() >= limit {
@@ -292,10 +296,13 @@ async fn collect_windows_scheduled_tasks(
         }
         // CSV columns: "TaskName","Next Run Time","Status"
         let cols: Vec<&str> = line.splitn(3, ',').map(|s| s.trim_matches('"')).collect();
-        if cols.len() < 1 || cols[0].is_empty() {
+        if cols.is_empty() || cols[0].is_empty() {
             continue;
         }
         let name = cols[0].trim().to_string();
+        if !seen.insert(name.clone()) {
+            continue; // duplicate trigger row for an already-processed task
+        }
         let schedule = cols.get(1).unwrap_or(&"").trim().to_string();
         // Fetch the task action via a second query on the task name.
         let command = match Command::new("schtasks")

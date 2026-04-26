@@ -118,18 +118,16 @@ impl<B: InferenceEngine> Agent<B> {
     async fn generate_step(&self, prompt: &str) -> Result<String> {
         if self.stream {
             let (full_output, mut rx) = self.brain.generate_streaming(prompt).await?;
-            // Print fragments as they arrive; the channel may already be fully
-            // buffered by the time we get here (synchronous backend), but this
-            // drains in order regardless.
+            // Stream tokens to stderr so stdout stays clean for the JSON report.
             tokio::spawn(async move {
                 use std::io::Write;
-                let stdout = std::io::stdout();
+                let stderr = std::io::stderr();
                 while let Some(fragment) = rx.recv().await {
-                    let mut out = stdout.lock();
+                    let mut out = stderr.lock();
                     let _ = out.write_all(fragment.as_bytes());
                     let _ = out.flush();
                 }
-                println!(); // newline after the streamed output
+                let _ = writeln!(std::io::stderr());
             });
             Ok(full_output)
         } else {

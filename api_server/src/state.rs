@@ -105,6 +105,8 @@ pub struct AppState {
     pub active_run_count: Arc<Mutex<usize>>,
     pub config: ServerConfig,
     pub started_at: String,
+    /// Unix epoch seconds at server start — used to compute uptime_secs in /health.
+    pub started_at_secs: u64,
     pub db: Option<DataStore>,
     pub audit: AuditLog,
 }
@@ -120,11 +122,16 @@ impl AppState {
             max_buffer: None,
         })
         .expect("failed to open audit log");
+        let started_at_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         Self {
             runs: Arc::new(RwLock::new(HashMap::new())),
             active_run_count: Arc::new(Mutex::new(0)),
             config,
-            started_at: chrono_now(),
+            started_at: secs_to_iso8601(started_at_secs),
+            started_at_secs,
             db,
             audit,
         }

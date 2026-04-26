@@ -144,7 +144,6 @@ struct HealthResponse {
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
-    let started: u64 = state.started_at.parse().unwrap_or(0);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -152,7 +151,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
-        uptime_secs: now.saturating_sub(started),
+        uptime_secs: now.saturating_sub(state.started_at_secs),
     })
 }
 

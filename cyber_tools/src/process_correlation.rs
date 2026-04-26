@@ -196,20 +196,24 @@ async fn collect_windows_process_tree(
     entries: &mut Vec<ProcessTreeEntry>,
     limit: usize,
 ) -> Result<(), ToolError> {
-    // wmic process get columns output: Node,CommandLine,Name,ParentProcessId,ProcessId
-    let output = Command::new("wmic")
-        .args(["process", "get", "ProcessId,ParentProcessId,Name,CommandLine", "/format:csv"])
+    // wmic.exe was removed in Windows 11 23H2+. Use PowerShell Get-CimInstance instead.
+    // Output format: one line per process as "PID,PPID,Name,CommandLine" with a sentinel
+    // delimiter between fields so embedded commas in CommandLine don't split columns.
+    let ps_script = r#"
+$sep = [char]0x1F
+Get-CimInstance Win32_Process | ForEach-Object {
+    $cmd = if ($_.CommandLine) { $_.CommandLine } else { "" }
+    "$($_.ProcessId)$sep$($_.ParentProcessId)$sep$($_.Name)$sep$cmd"
+}
+"#;
+
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
         .output()
         .await
-        .map_err(|e| ToolError::Execution(format!("wmic process query failed: {e}")))?;
+        .map_err(|e| ToolError::Execution(format!("Get-CimInstance Win32_Process failed: {e}")))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut header_found = false;
-    let mut col_cmdline = 1usize;
-    let mut col_name = 2usize;
-    let mut col_ppid = 3usize;
-    let mut col_pid = 4usize;
-
     for line in stdout.lines() {
         if entries.len() >= limit {
             break;
@@ -219,32 +223,19 @@ async fn collect_windows_process_tree(
             continue;
         }
 
-        let cols: Vec<&str> = trimmed.split(',').collect();
-
-        if !header_found {
-            // First non-empty line is the header: Node,CommandLine,Name,ParentProcessId,ProcessId
-            for (i, col) in cols.iter().enumerate() {
-                match col.trim().to_ascii_lowercase().as_str() {
-                    "commandline" => col_cmdline = i,
-                    "name" => col_name = i,
-                    "parentprocessid" => col_ppid = i,
-                    "processid" => col_pid = i,
-                    _ => {}
-                }
-            }
-            header_found = true;
+        // Split on the unit-separator (0x1F) to avoid comma ambiguity in CommandLine.
+        let cols: Vec<&str> = trimmed.splitn(4, '\x1F').collect();
+        if cols.len() < 3 {
             continue;
         }
 
-        let get = |idx: usize| cols.get(idx).map(|s| s.trim().to_string()).unwrap_or_default();
-
-        let pid: u32 = match get(col_pid).parse() {
+        let pid: u32 = match cols[0].trim().parse() {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let ppid: u32 = get(col_ppid).parse().unwrap_or(0);
-        let name = get(col_name);
-        let command_line = get(col_cmdline);
+        let ppid: u32 = cols[1].trim().parse().unwrap_or(0);
+        let name = cols[2].trim().to_string();
+        let command_line = cols.get(3).unwrap_or(&"").trim().to_string();
         let suspicious = is_suspicious_process(&name, &command_line);
 
         entries.push(ProcessTreeEntry {
