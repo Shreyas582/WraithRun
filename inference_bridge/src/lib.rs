@@ -107,6 +107,7 @@ fn detect_quant_bytes_per_param(model_path: &Path) -> f64 {
     } else if path_lower.contains("q8")
         || path_lower.contains("int8")
         || path_lower.contains("8bit")
+        || path_lower.contains("quantized")
     {
         1.1
     } else if path_lower.contains("fp32") || path_lower.contains("float32") {
@@ -364,11 +365,30 @@ pub struct ModelConfig {
     /// Provider-specific key-value configuration.
     #[serde(default)]
     pub backend_config: std::collections::HashMap<String, String>,
+    /// When set, each decoded token is sent here as it is sampled.
+    /// Not serialized — set programmatically for streaming display.
+    #[serde(skip)]
+    pub token_stream_tx: Option<Arc<tokio::sync::mpsc::UnboundedSender<String>>>,
 }
 
 #[async_trait]
 pub trait InferenceEngine: Send + Sync {
     async fn generate(&self, prompt: &str) -> Result<String>;
+
+    /// Stream decoded tokens one-by-one as they are sampled.
+    ///
+    /// Returns the accumulated full response alongside a receiver that yields
+    /// each token fragment in decode order. The default implementation buffers
+    /// the full response and sends it as a single item.
+    async fn generate_streaming(
+        &self,
+        prompt: &str,
+    ) -> Result<(String, tokio::sync::mpsc::UnboundedReceiver<String>)> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let result = self.generate(prompt).await?;
+        let _ = tx.send(result.clone());
+        Ok((result, rx))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -549,6 +569,38 @@ impl InferenceEngine for OnnxVitisEngine {
             .lock()
             .map_err(|e| anyhow::anyhow!("session cache lock poisoned: {e}"))?;
         onnx_vitis::run_prompt_cached(&mut guard, &self.config, prompt)
+    }
+
+    async fn generate_streaming(
+        &self,
+        prompt: &str,
+    ) -> Result<(String, tokio::sync::mpsc::UnboundedReceiver<String>)> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        if self.config.dry_run {
+            let result = self.dry_run_response(prompt);
+            let _ = tx.send(result.clone());
+            return Ok((result, rx));
+        }
+
+        let mut streaming_config = self.config.clone();
+        streaming_config.token_stream_tx = Some(Arc::new(tx));
+
+        let session_cache = Arc::clone(&self.session_cache);
+        let prompt = prompt.to_string();
+
+        // Run the synchronous ONNX decode loop off the async executor so tokens
+        // can flow through the channel while the caller drains the receiver.
+        let result = tokio::task::spawn_blocking(move || -> Result<String> {
+            let mut guard = session_cache
+                .lock()
+                .map_err(|e| anyhow::anyhow!("session cache lock poisoned: {e}"))?;
+            onnx_vitis::run_prompt_cached(&mut guard, &streaming_config, &prompt)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("streaming inference task panicked: {e}"))??;
+
+        Ok((result, rx))
     }
 }
 

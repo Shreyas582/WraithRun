@@ -745,6 +745,10 @@ struct Cli {
     #[arg(long, conflicts_with = "live")]
     dry_run: bool,
 
+    /// Print tokens to stdout as they are decoded (live inference only).
+    #[arg(long)]
+    stream: bool,
+
     #[arg(long, value_enum)]
     live_fallback_policy: Option<LiveFallbackPolicy>,
 
@@ -876,6 +880,7 @@ struct RuntimeConfig {
     capability_override: Option<CapabilityOverride>,
     tools_dir: Option<PathBuf>,
     allowed_plugins: Vec<String>,
+    stream: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1200,6 +1205,7 @@ impl RuntimeConfig {
             capability_override: None,
             tools_dir: None,
             allowed_plugins: Vec::new(),
+            stream: false,
         }
     }
 
@@ -2649,6 +2655,9 @@ fn apply_cli_overrides(runtime: &mut RuntimeConfig, cli: &Cli) {
     if !cli.allowed_plugins.is_empty() {
         runtime.allowed_plugins = cli.allowed_plugins.clone();
     }
+    if cli.stream {
+        runtime.stream = true;
+    }
 }
 
 fn apply_fragment_with_source(
@@ -3698,6 +3707,7 @@ fn collect_model_pack_candidates(cli: &Cli) -> Result<Vec<ModelPackCandidate>> {
                     capability_override: None,
                     tools_dir: None,
                     allowed_plugins: Vec::new(),
+                    stream: false,
                 };
                 packs.push(ModelPackCandidate {
                     name: format!("discovered:{stem}"),
@@ -4821,6 +4831,7 @@ fn run_model_pack_doctor_checks(runtime: &RuntimeConfig, report: &mut DoctorRepo
             dry_run: false,
             backend_override: bo,
             backend_config: bc,
+            token_stream_tx: None,
         },
         true,
     );
@@ -6175,6 +6186,7 @@ async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunRep
         dry_run,
         backend_override,
         backend_config,
+        token_stream_tx: None,
     };
 
     tracing::info!(backend = %resolved_backend_name, "Selected inference backend");
@@ -6216,7 +6228,8 @@ async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunRep
     }
     let mut agent = Agent::new(brain, tools)
         .with_max_steps(runtime.max_steps)
-        .with_capability_tier(tier);
+        .with_capability_tier(tier)
+        .with_stream(runtime.stream);
 
     if let Some(report) = capability_report {
         agent = agent.with_model_capability_report(report);
@@ -6232,14 +6245,29 @@ async fn run_agent_once(runtime: &RuntimeConfig, dry_run: bool) -> Result<RunRep
     Ok(report)
 }
 
+/// Map common user-supplied backend aliases to the canonical lowercase names used
+/// by the registry (e.g. "dml" → "directml", "vitis" → "amd vitis npu").
+fn normalize_backend_name(name: &str) -> String {
+    match name.to_ascii_lowercase().trim() {
+        "dml" | "dx12" | "d3d12" => "directml".to_string(),
+        "vitis" | "vitis-ai" | "vitisai" | "vitis_ai" | "vitis_npu" | "npu" | "amd" => {
+            "amd vitis npu".to_string()
+        }
+        "core-ml" | "core_ml" | "apple" => "coreml".to_string(),
+        "trt" | "nvidia" | "tensor-rt" | "tensor_rt" => "tensorrt".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// Resolve which backend to use based on `--backend` flag or auto-select.
 fn resolve_backend(registry: &ProviderRegistry, runtime: &RuntimeConfig) -> Result<String> {
     if let Some(requested) = &runtime.backend {
         if requested.eq_ignore_ascii_case("auto") {
             // Explicit "auto" — fall through to auto-select.
         } else {
+            let normalized = normalize_backend_name(requested);
             // User asked for a specific backend.
-            match registry.get(requested) {
+            match registry.get(&normalized) {
                 Some(backend) => {
                     if backend.is_available() {
                         return Ok(backend.name().to_string());
@@ -6258,7 +6286,7 @@ fn resolve_backend(registry: &ProviderRegistry, runtime: &RuntimeConfig) -> Resu
                         .join(", ");
                     bail!(
                         "\"{}\" backend not found; available backends: {}",
-                        requested,
+                        normalized,
                         available
                     );
                 }
@@ -6384,7 +6412,7 @@ fn init_tracing(log_mode: LogMode) {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .with_target(false)
-        .with_writer(std::io::stderr)
+        .with_writer(std::io::stdout)
         .try_init();
 }
 

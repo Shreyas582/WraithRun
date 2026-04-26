@@ -353,6 +353,7 @@ async fn run_investigation(task: &str, max_steps: usize) -> anyhow::Result<core_
         dry_run: true,
         backend_override: None,
         backend_config: Default::default(),
+        token_stream_tx: None,
     };
     let engine = OnnxVitisEngine::new(model_config);
     let tools = ToolRegistry::with_default_tools();

@@ -131,14 +131,77 @@ impl AppState {
     }
 }
 
-/// Simple ISO-8601 timestamp without pulling in chrono.
+/// Returns the current UTC time as an ISO-8601 string (e.g. `"2026-04-24T15:30:00Z"`).
 pub fn chrono_now() -> String {
-    // Use std SystemTime for a dependency-free timestamp.
-    let now = std::time::SystemTime::now();
-    let duration = now
+    let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = duration.as_secs();
-    // Basic UTC timestamp: seconds since epoch formatted.
-    format!("{secs}")
+        .unwrap_or_default()
+        .as_secs();
+    secs_to_iso8601(secs)
+}
+
+fn is_leap_year(y: u64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+pub(crate) fn secs_to_iso8601(secs: u64) -> String {
+    let s = secs % 60;
+    let m = (secs / 60) % 60;
+    let h = (secs / 3600) % 24;
+    let mut days = secs / 86400;
+
+    let mut year = 1970u64;
+    loop {
+        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+
+    const MONTH_DAYS_COMMON: [u64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 1u64;
+    for (i, &md) in MONTH_DAYS_COMMON.iter().enumerate() {
+        let days_this_month = if i == 1 && is_leap_year(year) { 29 } else { md };
+        if days < days_this_month {
+            break;
+        }
+        days -= days_this_month;
+        month += 1;
+    }
+    let day = days + 1;
+
+    format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::secs_to_iso8601;
+
+    #[test]
+    fn iso8601_unix_epoch() {
+        assert_eq!(secs_to_iso8601(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn iso8601_known_timestamp() {
+        // 2026-04-24T00:00:00Z = 1745452800
+        assert_eq!(secs_to_iso8601(1_745_452_800), "2026-04-24T00:00:00Z");
+    }
+
+    #[test]
+    fn iso8601_leap_day() {
+        // 2024-02-29T00:00:00Z = 1709164800
+        assert_eq!(secs_to_iso8601(1_709_164_800), "2024-02-29T00:00:00Z");
+    }
+
+    #[test]
+    fn iso8601_format_matches_pattern() {
+        let ts = secs_to_iso8601(1_700_000_000);
+        assert!(
+            ts.len() == 20 && ts.ends_with('Z') && ts.contains('T'),
+            "unexpected format: {ts}"
+        );
+    }
 }
