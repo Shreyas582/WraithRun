@@ -18,6 +18,17 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 1.9.1 - 2026-04-26
+
+### Fixed
+
+- `analyze_process_tree` now uses `Get-CimInstance Win32_Process` via PowerShell instead of `wmic`, which was removed in Windows 11 23H2+ (#186).
+- `/api/v1/health` `uptime_secs` field was returning the current Unix epoch; fixed by storing a raw `u64` start timestamp in `AppState` alongside the ISO-8601 string (#187).
+- Streaming tokens and tracing log output were written to stdout, interleaving with JSON report output; both are now routed to stderr (#188).
+- `enumerate_scheduled_tasks` returned N duplicate rows per task (one per trigger); now deduplicated by task name (#191).
+- Param-count estimator fell back to near-zero for NPU models using `fusion.onnx` entry-point files; now resolves to the largest `.onnx` in the parent directory when the target is < 50 MB (#189).
+- `enumerate_scheduled_tasks` and `analyze_process_tree` were not referenced by any investigation template; both are now wired into `broad-host-triage`, `persistence-analysis`, and two new templates: `process-tree-analysis` and `malware-triage` (#190).
+
 ## 1.8.0 - 2026-04-05
 
 ### Added
