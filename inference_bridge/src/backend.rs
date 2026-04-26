@@ -143,7 +143,7 @@ impl QuantFormat {
 
         if stem.contains("int4") || stem.contains("q4") {
             Self::Int4
-        } else if stem.contains("int8") || stem.contains("q8") {
+        } else if stem.contains("int8") || stem.contains("q8") || stem.contains("quantized") {
             Self::Int8
         } else if stem.contains("fp16") || stem.contains("f16") {
             Self::Fp16
@@ -1161,6 +1161,20 @@ mod tests {
     fn quant_format_detect_int8() {
         assert_eq!(
             QuantFormat::detect_from_path(Path::new("model-int8.onnx")),
+            QuantFormat::Int8
+        );
+    }
+
+    #[test]
+    fn quant_format_detect_quantized_suffix() {
+        // model_quantized.onnx is the default output of ONNX Runtime's quantization
+        // tooling, which defaults to INT8 — must not fall through to Unknown.
+        assert_eq!(
+            QuantFormat::detect_from_path(Path::new("model_quantized.onnx")),
+            QuantFormat::Int8
+        );
+        assert_eq!(
+            QuantFormat::detect_from_path(Path::new("model-quantized.onnx")),
             QuantFormat::Int8
         );
     }

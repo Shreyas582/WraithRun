@@ -8,10 +8,10 @@ license.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 cyber_tools = { path = "../cyber_tools" }
 inference_bridge = { path = "../inference_bridge" }
 
 [dev-dependencies]
 async-trait.workspace = true
-tokio.workspace = true

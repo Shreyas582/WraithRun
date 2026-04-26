@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write   # Required for SLSA provenance attestation
 
 env:
   CARGO_TERM_COLOR: always
@@ -179,6 +180,13 @@ jobs:
             --chdir dist/stage/usr/local/bin \
             wraithrun
 
+      - name: Generate SHA-256 checksums for Linux artifacts
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum wraithrun-linux-x86_64.tar.gz wraithrun-linux-x86_64.deb wraithrun-linux-x86_64.rpm \
+            > wraithrun-linux-x86_64.sha256sums
+
       - name: Smoke check Linux tar.gz install
         run: |
           set -euo pipefail
@@ -206,6 +214,7 @@ jobs:
             dist/wraithrun-linux-x86_64.tar.gz
             dist/wraithrun-linux-x86_64.deb
             dist/wraithrun-linux-x86_64.rpm
+            dist/wraithrun-linux-x86_64.sha256sums
           if-no-files-found: error
 
   package-macos:
@@ -213,6 +222,9 @@ jobs:
     needs: verify
     runs-on: macos-latest
     timeout-minutes: 30
+    env:
+      HAS_MACOS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      HAS_MACOS_NOTARIZATION: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -244,6 +256,44 @@ jobs:
             --install-location / \
             dist/wraithrun-macos-x86_64.pkg
 
+      - name: Code-sign macOS binary
+        if: env.HAS_MACOS_CERT == 'true'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p "" build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-keychain-settings -t 3600 -u build.keychain
+          security list-keychains -d user -s build.keychain "$(security list-keychains -d user | head -1 | tr -d '"')"
+          security unlock-keychain -p "" build.keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          codesign --force --sign "$MACOS_SIGNING_IDENTITY" \
+            --options runtime --timestamp \
+            dist/stage/usr/local/bin/wraithrun
+          codesign --verify --deep --strict dist/stage/usr/local/bin/wraithrun
+          rm -f /tmp/cert.p12
+
+      - name: Notarize macOS binary
+        if: env.HAS_MACOS_NOTARIZATION == 'true'
+        env:
+          MACOS_NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
+          MACOS_NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+          MACOS_NOTARIZATION_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Wrap binary in a zip for notarization submission
+          ditto -c -k --keepParent dist/stage/usr/local/bin/wraithrun /tmp/wraithrun-notarize.zip
+          xcrun notarytool submit /tmp/wraithrun-notarize.zip \
+            --apple-id "$MACOS_NOTARIZATION_APPLE_ID" \
+            --team-id "$MACOS_NOTARIZATION_TEAM_ID" \
+            --password "$MACOS_NOTARIZATION_PASSWORD" \
+            --wait
+          rm -f /tmp/wraithrun-notarize.zip
+
       - name: Smoke check macOS tar.gz install
         run: |
           set -euo pipefail
@@ -271,6 +321,8 @@ jobs:
     needs: verify
     runs-on: windows-latest
     timeout-minutes: 35
+    env:
+      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE_PFX != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -303,6 +355,31 @@ jobs:
           candle.exe -nologo "-dProductVersion=$productVersion" "-dSourceExe=$sourceExe" packaging/windows/wraithrun.wxs -out dist/wraithrun.wixobj
           light.exe -nologo dist/wraithrun.wixobj -out dist/wraithrun-windows-x86_64.msi
 
+      - name: Code-sign Windows binary
+        if: env.HAS_WINDOWS_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:TEMP "wraithrun-sign.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX))
+          & "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe" sign `
+            /f $pfxPath `
+            /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+            /tr http://timestamp.digicert.com `
+            /td sha256 /fd sha256 `
+            dist\wraithrun.exe `
+            dist\wraithrun-windows-x86_64.msi
+          Remove-Item $pfxPath -Force
+
+      - name: Generate SHA-256 checksums for Windows artifacts
+        shell: pwsh
+        run: |
+          Get-FileHash dist\wraithrun-windows-x86_64.zip, dist\wraithrun-windows-x86_64.msi -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } |
+            Out-File -Encoding utf8 dist\wraithrun-windows-x86_64.sha256sums
+
       - name: Smoke check Windows zip install
         shell: pwsh
         run: |
@@ -331,7 +408,34 @@ jobs:
           path: |
             dist/wraithrun-windows-x86_64.zip
             dist/wraithrun-windows-x86_64.msi
+            dist/wraithrun-windows-x86_64.sha256sums
           if-no-files-found: error
+
+  attest-linux:
+    name: SLSA provenance attestation (Linux)
+    needs:
+      - verify
+      - package-linux
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-linux-assets
+          path: dist
+
+      - name: Generate SLSA provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/wraithrun-linux-x86_64.tar.gz
+            dist/wraithrun-linux-x86_64.deb
+            dist/wraithrun-linux-x86_64.rpm
 
   publish:
     name: Publish GitHub Release
@@ -340,6 +444,7 @@ jobs:
       - package-linux
       - package-macos
       - package-windows
+      - attest-linux
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

@@ -196,6 +196,32 @@ jobs:
           )
           PY
 
+  community-e2e:
+    name: Community E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run community E2E tests
+        run: cargo test -p wraithrun --test community_e2e
+
   live-success-e2e:
     name: Live success e2e (self-hosted windows)
     if: ${{ vars.WRAITHRUN_LIVE_SUCCESS_E2E_ENABLED == 'true' }}
