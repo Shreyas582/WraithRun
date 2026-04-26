@@ -64,6 +64,10 @@ impl SandboxPolicy {
         #[cfg(target_os = "windows")]
         {
             allowed_read_roots.push(PathBuf::from(r"C:\ProgramData"));
+            // Allow hash_binary and other read tools to access System32 binaries.
+            // Sensitive subdirectories (config, drivers\etc) are blocked via denied_read_roots.
+            allowed_read_roots.push(PathBuf::from(r"C:\Windows\System32"));
+            allowed_read_roots.push(PathBuf::from(r"C:\Windows\SysWOW64"));
             allowed_read_roots.push(PathBuf::from(r"C:\Windows\System32\winevt\Logs"));
 
             denied_read_roots.push(PathBuf::from(r"C:\Windows\System32\config"));
@@ -82,7 +86,7 @@ impl SandboxPolicy {
 
         #[cfg(target_os = "windows")]
         let command_allowlist: HashSet<String> = [
-            "whoami", "netstat", "net", "tasklist", "reg", "sc", "wmic", "schtasks",
+            "whoami", "netstat", "net", "tasklist", "reg", "sc", "wmic", "schtasks", "wevtutil",
         ]
         .into_iter()
         .map(|c| c.to_string())
@@ -271,6 +275,8 @@ impl ToolRegistry {
         registry.register(Arc::new(CorrelateProcessNetworkTool));
         registry.register(Arc::new(CaptureCoverageBaselineTool));
         registry.register(Arc::new(EnumerateSshKeysTool));
+        registry.register(Arc::new(EnumerateScheduledTasksTool));
+        registry.register(Arc::new(AnalyzeProcessTreeTool));
         registry
     }
 
@@ -298,7 +304,15 @@ impl ToolRegistry {
                     .get("path")
                     .and_then(Value::as_str)
                     .unwrap_or("./agent.log");
-                self.policy.ensure_path_allowed(Path::new(path))?;
+                // Windows Event Log channel names (e.g. "Security") are not file paths —
+                // skip the path check and let wevtutil handle access control.
+                if !log_parser::is_windows_event_channel(path) {
+                    self.policy.ensure_path_allowed(Path::new(path))?;
+                }
+                #[cfg(target_os = "windows")]
+                if log_parser::is_windows_event_channel(path) {
+                    self.policy.ensure_command_allowed("wevtutil")?;
+                }
             }
             "hash_binary" => {
                 if let Some(path) = args.get("path").and_then(Value::as_str) {
@@ -358,6 +372,14 @@ impl ToolRegistry {
             }
             "enumerate_ssh_keys" => {
                 // Read-only filesystem enumeration, no external commands needed.
+            }
+            "enumerate_scheduled_tasks" => {
+                #[cfg(target_os = "windows")]
+                self.policy.ensure_command_allowed("schtasks")?;
+            }
+            "analyze_process_tree" => {
+                #[cfg(target_os = "windows")]
+                self.policy.ensure_command_allowed("wmic")?;
             }
             _ => {}
         }
@@ -545,12 +567,17 @@ impl Tool for ReadSyslogTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "read_syslog".to_string(),
-            description: "Reads local log file tail lines in a bounded, parse-friendly format."
+            description: "Reads log file tail lines or Windows Event Log channel entries in a \
+                bounded, parse-friendly format. Pass a file path (Unix/Windows) or a Windows \
+                Event Log channel name such as \"Security\", \"System\", or \"Application\"."
                 .to_string(),
             args_schema: json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string"},
+                    "path": {
+                        "type": "string",
+                        "description": "File path or Windows Event Log channel name (e.g. \"Security\")"
+                    },
                     "max_lines": {"type": "integer", "minimum": 1, "maximum": 1000}
                 },
                 "required": ["path"]
@@ -564,6 +591,16 @@ impl Tool for ReadSyslogTool {
             .and_then(Value::as_str)
             .unwrap_or("./agent.log");
         let max_lines = parse_max_lines(&args, 200);
+
+        #[cfg(target_os = "windows")]
+        if log_parser::is_windows_event_channel(path) {
+            let lines = log_parser::read_windows_event_log(path, max_lines)?;
+            return Ok(json!({
+                "channel": path,
+                "line_count": lines.len(),
+                "lines": lines
+            }));
+        }
 
         let lines = log_parser::read_log_tail(Path::new(path), max_lines)?;
         Ok(json!({
@@ -1380,6 +1417,74 @@ impl Tool for EnumerateSshKeysTool {
             "total_authorized_keys_files": total_authorized_keys,
             "total_private_keys": total_private_keys,
             "directories": results,
+        }))
+    }
+}
+
+pub struct AnalyzeProcessTreeTool;
+
+#[async_trait]
+impl Tool for AnalyzeProcessTreeTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "analyze_process_tree".to_string(),
+            description:
+                "Builds a parent-child process tree for the host (MITRE T1057/T1059). Returns \
+                 each process with its PID, PPID, name, command line, child PIDs, and a \
+                 suspicious-command flag. Useful for spotting anomalous spawn chains."
+                    .to_string(),
+            args_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 512}
+                }
+            }),
+        }
+    }
+
+    async fn run(&self, args: Value) -> Result<Value, ToolError> {
+        let limit = parse_bounded_count(&args, "limit", 256, 512);
+        let tree = process_correlation::collect_process_tree(limit).await?;
+        let suspicious_count = tree.iter().filter(|e| e.suspicious).count();
+
+        Ok(json!({
+            "process_count": tree.len(),
+            "suspicious_count": suspicious_count,
+            "processes": tree,
+        }))
+    }
+}
+
+pub struct EnumerateScheduledTasksTool;
+
+#[async_trait]
+impl Tool for EnumerateScheduledTasksTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "enumerate_scheduled_tasks".to_string(),
+            description:
+                "Enumerates scheduled tasks and cron jobs (MITRE T1053). Returns task names, \
+                 commands, schedules, and suspicious-command flags for Windows schtasks, \
+                 system/user crontabs, cron.d files, and systemd timer units."
+                    .to_string(),
+            args_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 512}
+                }
+            }),
+        }
+    }
+
+    async fn run(&self, args: Value) -> Result<Value, ToolError> {
+        let limit = parse_bounded_count(&args, "limit", 128, 512);
+        let tasks = persistence_checker::enumerate_scheduled_tasks(limit).await?;
+        let suspicious_count = tasks.iter().filter(|t| t.suspicious).count();
+
+        Ok(json!({
+            "task_count": tasks.len(),
+            "suspicious_count": suspicious_count,
+            "tasks": tasks,
         }))
     }
 }
