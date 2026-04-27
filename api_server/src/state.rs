@@ -193,8 +193,8 @@ mod tests {
 
     #[test]
     fn iso8601_known_timestamp() {
-        // 2026-04-24T00:00:00Z = 1745452800
-        assert_eq!(secs_to_iso8601(1_745_452_800), "2026-04-24T00:00:00Z");
+        // 1745452800 = 2025-04-24T00:00:00Z (the comment previously had the year wrong)
+        assert_eq!(secs_to_iso8601(1_745_452_800), "2025-04-24T00:00:00Z");
     }
 
     #[test]
