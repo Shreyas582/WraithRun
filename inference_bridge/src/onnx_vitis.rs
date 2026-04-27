@@ -3352,6 +3352,7 @@ mod tests {
             dry_run: false,
             backend_override: None,
             backend_config: Default::default(),
+            token_stream_tx: None,
         };
 
         let report = inspect_runtime_compatibility(&config, true);

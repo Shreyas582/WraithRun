@@ -6509,6 +6509,7 @@ mod tests {
             capability_override: None,
             tools_dir: None,
             allowed_plugins: vec![],
+            stream: false,
         }
     }
 

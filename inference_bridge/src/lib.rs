@@ -685,6 +685,7 @@ mod tests {
             dry_run: true,
             backend_override: None,
             backend_config: Default::default(),
+            token_stream_tx: None,
         })
     }
 

@@ -1042,6 +1042,7 @@ mod tests {
             dry_run: true,
             backend_override: None,
             backend_config: Default::default(),
+            token_stream_tx: None,
         };
         let cpu = CpuBackend;
         let session = cpu.build_session(&config, &BackendOptions::new());
@@ -1090,6 +1091,7 @@ mod tests {
             dry_run: true,
             backend_override: None,
             backend_config: Default::default(),
+            token_stream_tx: None,
         };
         let result = registry.build_session_with_fallback(&config, &BackendOptions::new(), None);
         assert!(result.is_ok());
@@ -1108,6 +1110,7 @@ mod tests {
             dry_run: true,
             backend_override: None,
             backend_config: Default::default(),
+            token_stream_tx: None,
         };
         let result =
             registry.build_session_with_fallback(&config, &BackendOptions::new(), Some("CPU"));

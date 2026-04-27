@@ -19,6 +19,7 @@ fn test_model_config(dry_run: bool) -> ModelConfig {
         dry_run,
         backend_override: None,
         backend_config: Default::default(),
+        token_stream_tx: None,
     }
 }
 
