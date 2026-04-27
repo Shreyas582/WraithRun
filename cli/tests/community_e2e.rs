@@ -197,7 +197,7 @@ fn dry_run_summary_format_contains_task_line() {
 }
 
 #[test]
-fn dry_run_json_has_timing_metadata() {
+fn dry_run_json_has_contract_version() {
     let output = run_capture(&[
         "--task",
         "Investigate unauthorized SSH keys",
@@ -206,10 +206,10 @@ fn dry_run_json_has_timing_metadata() {
     ]);
     assert_exit_ok(&output);
     let json = parse_json(&output);
-    // live_run_metrics or dry_run_note must be present
-    assert!(
-        json.get("live_run_metrics").is_some() || json.get("dry_run_note").is_some(),
-        "report must include live_run_metrics or dry_run_note"
+    assert_eq!(
+        json.get("contract_version").and_then(Value::as_str),
+        Some("1.0.0"),
+        "report must include contract_version 1.0.0"
     );
 }
 
@@ -275,12 +275,22 @@ fn case_id_is_reflected_in_report() {
 
 #[test]
 fn backend_alias_dml_gives_backend_not_found_error_not_parse_error() {
-    // On systems without DirectML the error should say "not available" or
-    // "not found", never a parse/unknown error.
+    // On systems without DirectML the alias "dml" must be normalized to
+    // "directml" and produce a "not found" error, never a parse error.
+    // Use a dummy model file + dry-run-on-error so the process always exits 0
+    // and produces valid JSON regardless of whether DirectML is available.
+    let tmp = unique_temp_dir("wraithrun-e2e-dml");
+    fs::create_dir_all(&tmp).expect("tmp dir");
+    let model = tmp.join("dummy.onnx");
+    fs::write(&model, b"not-real-onnx").expect("dummy model");
+    let model_str = model.to_string_lossy().to_string();
+
     let output = run_capture(&[
         "--task",
         "Check hosts",
         "--live",
+        "--model",
+        &model_str,
         "--backend",
         "dml",
         "--live-fallback-policy",
@@ -288,6 +298,9 @@ fn backend_alias_dml_gives_backend_not_found_error_not_parse_error() {
         "--format",
         "json",
     ]);
+
+    let _ = fs::remove_dir_all(&tmp);
+
     // With dry-run-on-error the process succeeds even if live fails.
     // The important thing: no panic, valid JSON.
     let _json = parse_json(&output);
@@ -325,8 +338,8 @@ fn api_server_run_endpoint_returns_json_report() {
     // Give it a moment to bind.
     thread::sleep(Duration::from_millis(800));
 
-    // POST /run with a dry-run task.
-    let url = format!("http://127.0.0.1:{port}/run");
+    // POST /api/v1/runs with a dry-run task.
+    let url = format!("http://127.0.0.1:{port}/api/v1/runs");
     let body = r#"{"task":"Investigate unauthorized SSH keys"}"#;
 
     let curl_output = Command::new("curl")
