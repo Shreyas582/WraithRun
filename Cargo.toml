@@ -29,4 +29,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 rusqlite = { version = "0.35", features = ["bundled", "backup"] }
 tar = "0.4"
-uuid = { version = "1.11", features = ["v4", "serde"] }
+uuid = { version = "1.23", features = ["v4", "serde"] }
