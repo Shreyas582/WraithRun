@@ -242,7 +242,10 @@ mod tests {
         // Timestamp must be ISO-8601 (contains 'T' and ends with 'Z'), not a raw epoch integer.
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         let ts = parsed["timestamp"].as_str().unwrap();
-        assert!(ts.contains('T') && ts.ends_with('Z'), "timestamp should be ISO-8601: {ts}");
+        assert!(
+            ts.contains('T') && ts.ends_with('Z'),
+            "timestamp should be ISO-8601: {ts}"
+        );
     }
 
     #[tokio::test]

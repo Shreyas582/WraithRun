@@ -33,7 +33,10 @@ pub fn is_windows_event_channel(path_str: &str) -> bool {
 /// Accepts either a channel name (e.g. "Security") or an absolute `.evtx` file path.
 /// Returns the most recent `max_lines` output lines from `wevtutil`, newest-first.
 #[cfg(target_os = "windows")]
-pub fn read_windows_event_log(channel_or_path: &str, max_events: usize) -> Result<Vec<String>, ToolError> {
+pub fn read_windows_event_log(
+    channel_or_path: &str,
+    max_events: usize,
+) -> Result<Vec<String>, ToolError> {
     use std::process::Command;
 
     let capped = max_events.clamp(1, 500);
@@ -49,9 +52,9 @@ pub fn read_windows_event_log(channel_or_path: &str, max_events: usize) -> Resul
         cmd.arg("/lf:true");
     }
 
-    let output = cmd.output().map_err(|e| {
-        ToolError::Execution(format!("wevtutil failed to launch: {e}"))
-    })?;
+    let output = cmd
+        .output()
+        .map_err(|e| ToolError::Execution(format!("wevtutil failed to launch: {e}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -68,7 +71,10 @@ pub fn read_windows_event_log(channel_or_path: &str, max_events: usize) -> Resul
 
 /// Stub for non-Windows builds so callers can compile everywhere.
 #[cfg(not(target_os = "windows"))]
-pub fn read_windows_event_log(_channel_or_path: &str, _max_events: usize) -> Result<Vec<String>, ToolError> {
+pub fn read_windows_event_log(
+    _channel_or_path: &str,
+    _max_events: usize,
+) -> Result<Vec<String>, ToolError> {
     Err(ToolError::Execution(
         "Windows Event Log is only available on Windows".to_string(),
     ))

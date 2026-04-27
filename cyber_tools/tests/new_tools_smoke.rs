@@ -2,8 +2,7 @@
 //! and analyze_process_tree (#169). These exercise the live host code paths.
 
 use cyber_tools::{
-    persistence_checker::enumerate_scheduled_tasks,
-    process_correlation::collect_process_tree,
+    persistence_checker::enumerate_scheduled_tasks, process_correlation::collect_process_tree,
     AnalyzeProcessTreeTool, EnumerateScheduledTasksTool, Tool,
 };
 use serde_json::json;
@@ -40,11 +39,17 @@ async fn analyze_process_tree_returns_pid_relationships() {
     println!("  {} processes have at least one child", with_children);
 
     // System hosts should have at least one parent-child relationship visible.
-    assert!(with_children > 0, "expected at least one parent-child relationship");
+    assert!(
+        with_children > 0,
+        "expected at least one parent-child relationship"
+    );
 
     // Check fields are populated
     let sample = &tree[0];
-    println!("  sample: pid={} ppid={} name={:?}", sample.pid, sample.ppid, sample.name);
+    println!(
+        "  sample: pid={} ppid={} name={:?}",
+        sample.pid, sample.ppid, sample.name
+    );
     assert!(sample.pid > 0);
     assert!(!sample.name.is_empty());
 }
@@ -52,8 +57,14 @@ async fn analyze_process_tree_returns_pid_relationships() {
 #[tokio::test]
 async fn enumerate_scheduled_tasks_tool_wrapper() {
     let tool = EnumerateScheduledTasksTool;
-    let result = tool.run(json!({"limit": 32})).await.expect("tool run failed");
-    println!("tool result: {}", serde_json::to_string_pretty(&result).unwrap());
+    let result = tool
+        .run(json!({"limit": 32}))
+        .await
+        .expect("tool run failed");
+    println!(
+        "tool result: {}",
+        serde_json::to_string_pretty(&result).unwrap()
+    );
 
     let task_count = result["task_count"].as_u64().expect("task_count missing");
     let suspicious_count = result["suspicious_count"]
@@ -66,9 +77,14 @@ async fn enumerate_scheduled_tasks_tool_wrapper() {
 #[tokio::test]
 async fn analyze_process_tree_tool_wrapper() {
     let tool = AnalyzeProcessTreeTool;
-    let result = tool.run(json!({"limit": 64})).await.expect("tool run failed");
+    let result = tool
+        .run(json!({"limit": 64}))
+        .await
+        .expect("tool run failed");
 
-    let process_count = result["process_count"].as_u64().expect("process_count missing");
+    let process_count = result["process_count"]
+        .as_u64()
+        .expect("process_count missing");
     let suspicious_count = result["suspicious_count"]
         .as_u64()
         .expect("suspicious_count missing");

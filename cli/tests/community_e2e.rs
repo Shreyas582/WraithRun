@@ -379,8 +379,8 @@ fn api_server_run_endpoint_returns_json_report() {
         return; // Treat as soft skip on flaky port acquisition
     }
 
-    let json: Value = serde_json::from_slice(&curl_output.stdout)
-        .expect("API /run response must be valid JSON");
+    let json: Value =
+        serde_json::from_slice(&curl_output.stdout).expect("API /run response must be valid JSON");
     // POST /api/v1/runs returns a run-entry object (id + status), not the full
     // report. Poll /api/v1/runs/{id} for findings; here just verify the shape.
     assert!(

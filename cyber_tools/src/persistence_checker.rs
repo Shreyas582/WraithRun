@@ -341,10 +341,18 @@ fn collect_unix_cron_tasks(tasks: &mut Vec<ScheduledTaskEntry>, limit: usize) {
     }
 
     // cron.d and periodic directories
-    for dir in &["/etc/cron.d", "/etc/cron.daily", "/etc/cron.hourly", "/etc/cron.weekly", "/etc/cron.monthly"] {
+    for dir in &[
+        "/etc/cron.d",
+        "/etc/cron.daily",
+        "/etc/cron.hourly",
+        "/etc/cron.weekly",
+        "/etc/cron.monthly",
+    ] {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
-                if tasks.len() >= limit { return; }
+                if tasks.len() >= limit {
+                    return;
+                }
                 let path = entry.path();
                 if let Ok(content) = fs::read_to_string(&path) {
                     parse_crontab_lines(&path.to_string_lossy(), "cron.d", &content, tasks, limit);
@@ -357,10 +365,18 @@ fn collect_unix_cron_tasks(tasks: &mut Vec<ScheduledTaskEntry>, limit: usize) {
     for spool_dir in &["/var/spool/cron/crontabs", "/var/spool/cron"] {
         if let Ok(entries) = fs::read_dir(spool_dir) {
             for entry in entries.flatten() {
-                if tasks.len() >= limit { return; }
+                if tasks.len() >= limit {
+                    return;
+                }
                 let path = entry.path();
                 if let Ok(content) = fs::read_to_string(&path) {
-                    parse_crontab_lines(&path.to_string_lossy(), "user_crontab", &content, tasks, limit);
+                    parse_crontab_lines(
+                        &path.to_string_lossy(),
+                        "user_crontab",
+                        &content,
+                        tasks,
+                        limit,
+                    );
                 }
             }
         }
@@ -370,10 +386,16 @@ fn collect_unix_cron_tasks(tasks: &mut Vec<ScheduledTaskEntry>, limit: usize) {
     for unit_dir in &["/etc/systemd/system", "/usr/lib/systemd/system"] {
         if let Ok(entries) = fs::read_dir(unit_dir) {
             for entry in entries.flatten() {
-                if tasks.len() >= limit { return; }
+                if tasks.len() >= limit {
+                    return;
+                }
                 let path = entry.path();
                 if path.to_string_lossy().ends_with(".timer") {
-                    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
                     tasks.push(ScheduledTaskEntry {
                         source: "systemd_timer".to_string(),
                         suspicious: false,
@@ -388,9 +410,17 @@ fn collect_unix_cron_tasks(tasks: &mut Vec<ScheduledTaskEntry>, limit: usize) {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn parse_crontab_lines(source: &str, kind: &str, content: &str, tasks: &mut Vec<ScheduledTaskEntry>, limit: usize) {
+fn parse_crontab_lines(
+    source: &str,
+    kind: &str,
+    content: &str,
+    tasks: &mut Vec<ScheduledTaskEntry>,
+    limit: usize,
+) {
     for line in content.lines() {
-        if tasks.len() >= limit { return; }
+        if tasks.len() >= limit {
+            return;
+        }
         let trimmed = line.trim();
         // Skip comments and empty lines
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -406,7 +436,10 @@ fn parse_crontab_lines(source: &str, kind: &str, content: &str, tasks: &mut Vec<
         // @reboot/@daily/etc. shorthand
         let (schedule, command) = if trimmed.starts_with('@') {
             let mut parts = trimmed.splitn(2, ' ');
-            (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string())
+            (
+                parts.next().unwrap_or("").to_string(),
+                parts.next().unwrap_or("").to_string(),
+            )
         } else {
             // Standard 5-field crontab: m h dom mon dow command
             let fields: Vec<&str> = trimmed.splitn(6, ' ').collect();

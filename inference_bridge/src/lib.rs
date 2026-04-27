@@ -229,7 +229,15 @@ static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
     },
     // persistence-analysis (MITRE T1053)
     DryRunTemplate {
-        keywords: &["persistence", "autorun", "startup", "cron", "scheduled", "task", "t1053"],
+        keywords: &[
+            "persistence",
+            "autorun",
+            "startup",
+            "cron",
+            "scheduled",
+            "task",
+            "t1053",
+        ],
         tools: &[
             "inspect_persistence_locations",
             "enumerate_scheduled_tasks",
@@ -239,7 +247,15 @@ static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
     },
     // process-tree-analysis (MITRE T1057)
     DryRunTemplate {
-        keywords: &["process", "tree", "parent", "child", "spawn", "t1057", "injection"],
+        keywords: &[
+            "process",
+            "tree",
+            "parent",
+            "child",
+            "spawn",
+            "t1057",
+            "injection",
+        ],
         tools: &[
             "analyze_process_tree",
             "correlate_process_network",
@@ -248,7 +264,16 @@ static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
     },
     // malware-triage
     DryRunTemplate {
-        keywords: &["malware", "infection", "ransomware", "trojan", "backdoor", "c2", "beacon", "implant"],
+        keywords: &[
+            "malware",
+            "infection",
+            "ransomware",
+            "trojan",
+            "backdoor",
+            "c2",
+            "beacon",
+            "implant",
+        ],
         tools: &[
             "analyze_process_tree",
             "enumerate_scheduled_tasks",
