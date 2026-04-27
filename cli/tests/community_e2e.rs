@@ -274,11 +274,10 @@ fn case_id_is_reflected_in_report() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn backend_alias_dml_gives_backend_not_found_error_not_parse_error() {
-    // On systems without DirectML the alias "dml" must be normalized to
-    // "directml" and produce a "not found" error, never a parse error.
-    // Use a dummy model file + dry-run-on-error so the process always exits 0
-    // and produces valid JSON regardless of whether DirectML is available.
+fn backend_alias_dml_normalizes_to_directml() {
+    // "dml" must be normalized to "directml" before backend lookup.
+    // Use --doctor --live which produces JSON diagnostics without needing a
+    // valid tokenizer, and check that stderr/diagnostics mention "directml".
     let tmp = unique_temp_dir("wraithrun-e2e-dml");
     fs::create_dir_all(&tmp).expect("tmp dir");
     let model = tmp.join("dummy.onnx");
@@ -286,24 +285,29 @@ fn backend_alias_dml_gives_backend_not_found_error_not_parse_error() {
     let model_str = model.to_string_lossy().to_string();
 
     let output = run_capture(&[
-        "--task",
-        "Check hosts",
+        "--doctor",
         "--live",
         "--model",
         &model_str,
         "--backend",
         "dml",
-        "--live-fallback-policy",
-        "dry-run-on-error",
-        "--format",
+        "--introspection-format",
         "json",
     ]);
 
     let _ = fs::remove_dir_all(&tmp);
 
-    // With dry-run-on-error the process succeeds even if live fails.
-    // The important thing: no panic, valid JSON.
-    let _json = parse_json(&output);
+    // Doctor always produces JSON. Check the alias was resolved: the word
+    // "directml" must appear in output (not "dml" as an unrecognized string).
+    let all_output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        all_output.to_ascii_lowercase().contains("directml"),
+        "expected 'directml' in output — alias may not have been normalized\noutput: {all_output}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -384,8 +388,10 @@ fn api_server_run_endpoint_returns_json_report() {
 
     let json: Value = serde_json::from_slice(&curl_output.stdout)
         .expect("API /run response must be valid JSON");
+    // POST /api/v1/runs returns a run-entry object (id + status), not the full
+    // report. Poll /api/v1/runs/{id} for findings; here just verify the shape.
     assert!(
-        json.get("findings").is_some() || json.get("error").is_some(),
-        "response must have findings or error field"
+        json.get("id").is_some() || json.get("error").is_some(),
+        "response must have id (queued run) or error field; got: {json}"
     );
 }
