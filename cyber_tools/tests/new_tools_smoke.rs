@@ -24,7 +24,7 @@ async fn enumerate_scheduled_tasks_returns_real_entries() {
     // On any modern Windows host, there should be at least a few scheduled tasks.
     // On Unix-without-cron, this might be zero — we tolerate either, but the call
     // must succeed and return a Vec.
-    assert!(tasks.len() < 64, "limit should be respected");
+    assert!(tasks.len() <= 64, "limit should be respected");
 }
 
 #[tokio::test]
