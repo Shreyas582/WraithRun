@@ -315,7 +315,7 @@ async fn collect_windows_scheduled_tasks(
                 cmd_text
                     .lines()
                     .find(|l| l.trim_start().starts_with("Task To Run:"))
-                    .and_then(|l| l.splitn(2, ':').nth(1))
+                    .and_then(|l| l.split_once(':').map(|(_, v)| v))
                     .map(|s| s.trim().to_string())
                     .unwrap_or_default()
             }

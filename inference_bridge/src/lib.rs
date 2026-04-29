@@ -57,9 +57,9 @@ pub fn probe_model_capability(config: &ModelConfig) -> ModelCapabilityProbe {
 /// and adjusts the bytes-per-parameter divisor accordingly.
 /// Sums external data files (`*.onnx_data`, `*.onnx.data`) that ONNX models
 /// commonly use for weights that exceed the 2 GB protobuf limit (#115).
-fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
+fn estimate_params_from_file_size(model_path: &std::path::Path) -> f32 {
     // If the path is a directory, resolve to the largest .onnx file inside it.
-    let resolved_path: std::borrow::Cow<PathBuf> = if model_path.is_dir() {
+    let resolved_path: std::borrow::Cow<std::path::Path> = if model_path.is_dir() {
         match largest_onnx_in_dir(model_path) {
             Some(p) => std::borrow::Cow::Owned(p),
             None => return 0.0,
@@ -67,7 +67,7 @@ fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
     } else {
         std::borrow::Cow::Borrowed(model_path)
     };
-    let model_path = resolved_path.as_ref();
+    let model_path: &std::path::Path = resolved_path.as_ref();
 
     let main_size = match std::fs::metadata(model_path) {
         Ok(meta) => meta.len(),
