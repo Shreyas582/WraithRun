@@ -34,7 +34,7 @@ pub enum AuditEventKind {
 /// A structured audit event.
 #[derive(Debug, Clone, Serialize)]
 pub struct AuditEvent {
-    /// ISO-8601-ish epoch timestamp (seconds since UNIX epoch).
+    /// UTC timestamp in ISO-8601 format (e.g. `"2026-04-24T15:30:00Z"`).
     pub timestamp: String,
     /// The type of event.
     pub event: AuditEventKind,
@@ -239,6 +239,13 @@ mod tests {
         assert!(json.contains("\"actor\":\"api-token:default\""));
         assert!(json.contains("\"resource\":\"run/abc-123\""));
         assert!(json.contains("\"task\":\"Check SSH keys\""));
+        // Timestamp must be ISO-8601 (contains 'T' and ends with 'Z'), not a raw epoch integer.
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let ts = parsed["timestamp"].as_str().unwrap();
+        assert!(
+            ts.contains('T') && ts.ends_with('Z'),
+            "timestamp should be ISO-8601: {ts}"
+        );
     }
 
     #[tokio::test]

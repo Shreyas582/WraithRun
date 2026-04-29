@@ -83,7 +83,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "api_server"
-version = "1.8.0"
+version = "1.10.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -314,7 +314,7 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "core_engine"
-version = "1.8.0"
+version = "1.10.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -322,8 +322,10 @@ dependencies = [
  "inference_bridge",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -377,7 +379,7 @@ dependencies = [
 
 [[package]]
 name = "cyber_tools"
-version = "1.8.0"
+version = "1.10.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -807,7 +809,7 @@ dependencies = [
 
 [[package]]
 name = "inference_bridge"
-version = "1.8.0"
+version = "1.10.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -817,6 +819,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokenizers",
+ "tokio",
  "tracing",
 ]
 
@@ -2139,7 +2142,7 @@ dependencies = [
 
 [[package]]
 name = "wraithrun"
-version = "1.8.0"
+version = "1.10.0"
 dependencies = [
  "anyhow",
  "api_server",

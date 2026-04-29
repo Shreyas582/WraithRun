@@ -1,5 +1,35 @@
 # Upgrade Notes
 
+## v1.10.0
+
+### Breaking/visible changes
+
+- **`Finding.confidence_factors` field added** (#195). Each finding now carries an array showing how its `confidence` score was derived (`base_rate`, `count_signal`, `ceiling_clip`, `corroboration`, or `rule_prior`). The field is empty by default for deserialized reports written by older versions; it is always populated by the synthesizer in v1.10.0+.
+- **Confidence float precision tail fixed** (#195). Values like `0.6100000143051147` are now serialized as `0.61`. Numeric matchers that depended on the trailing precision must be updated to compare to two-decimal values.
+- **`RunReport.timeline` field added** (#196). Whenever a tool observation contains a recognised timestamp (`created_at`, `creation_time`, `mtime`, `next_run_time`, `last_login`, `password_last_set`, etc.), an ordered `TimelineEvent` is emitted. Default `--format summary` output renders the Timeline section before Findings.
+- **New `--format` values: `ocsf`, `stix2`** (#198). `ocsf` emits an array of OCSF v1.1.0 Detection Finding records; `stix2` emits a STIX 2.1 bundle (also accepts `stix` as an alias). Existing `json`/`summary`/`markdown`/`narrative` outputs are unchanged.
+
+### Migration
+
+- No config file changes required.
+- If you deserialize `Finding` from JSON: the new `confidence_factors` field is `#[serde(default)]` and `skip_serializing_if = "Vec::is_empty"`, so payloads from v1.9.x continue to deserialize cleanly and old consumers that ignore unknown fields are unaffected.
+- If you compare `Finding.confidence` numerically: ensure your code rounds to two decimals or compares with a tolerance. The full-precision tail is no longer present in JSON output.
+- Pipeline integrations should consider switching from custom JSON parsing to `--format ocsf` (Splunk/Elastic/Sentinel) or `--format stix2` (OpenCTI/MISP). The native `--format json` shape is unchanged.
+- Sigma rule export is intentionally not implemented in v1.10.0 — it will land alongside the cross-tool correlation rules in #193.
+
+## v1.9.1
+
+### Breaking/visible changes
+
+- **New investigation templates** (#190): `process-tree-analysis` and `malware-triage` templates added. `broad-host-triage` now includes `enumerate_scheduled_tasks` and `analyze_process_tree` steps. Template-driven runs will execute more tools than in v1.8.0; adjust `--max-steps` if needed.
+- **Stream/verbose output moved to stderr** (#188): `--stream` token output and `--verbose` log lines now go to stderr instead of stdout. Scripts that captured combined stdout+stderr output must be updated.
+
+### Migration
+
+- No config file changes required.
+- If you pipe `wraithrun` JSON output and also pass `--verbose` or `--stream`, remove any `2>&1` redirects — log output is now cleanly separated on stderr.
+- The `uptime_secs` field in `/api/v1/health` now returns correct elapsed seconds (was incorrectly returning the Unix epoch since v1.8.0).
+
 ## v1.8.0
 
 ### Breaking/visible changes
