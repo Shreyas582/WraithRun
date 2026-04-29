@@ -20,6 +20,7 @@ pub struct Agent<B: InferenceEngine> {
     coverage_baseline: Option<CoverageBaseline>,
     capability_tier: ModelCapabilityTier,
     model_capability_report: Option<ModelCapabilityReport>,
+    stream: bool,
 }
 
 impl<B: InferenceEngine> Agent<B> {
@@ -31,7 +32,13 @@ impl<B: InferenceEngine> Agent<B> {
             coverage_baseline: None,
             capability_tier: ModelCapabilityTier::Strong,
             model_capability_report: None,
+            stream: false,
         }
+    }
+
+    pub fn with_stream(mut self, stream: bool) -> Self {
+        self.stream = stream;
+        self
     }
 
     pub fn with_max_steps(mut self, max_steps: usize) -> Self {
@@ -104,6 +111,27 @@ impl<B: InferenceEngine> Agent<B> {
                 );
             }
             _ => {}
+        }
+    }
+
+    /// Run a single inference step, streaming tokens to stdout if `self.stream` is set.
+    async fn generate_step(&self, prompt: &str) -> Result<String> {
+        if self.stream {
+            let (full_output, mut rx) = self.brain.generate_streaming(prompt).await?;
+            // Stream tokens to stderr so stdout stays clean for the JSON report.
+            tokio::spawn(async move {
+                use std::io::Write;
+                let stderr = std::io::stderr();
+                while let Some(fragment) = rx.recv().await {
+                    let mut out = stderr.lock();
+                    let _ = out.write_all(fragment.as_bytes());
+                    let _ = out.flush();
+                }
+                let _ = writeln!(std::io::stderr());
+            });
+            Ok(full_output)
+        } else {
+            self.brain.generate(prompt).await
         }
     }
 
@@ -245,7 +273,7 @@ impl<B: InferenceEngine> Agent<B> {
         transcript.push_str(&system_prompt);
 
         for step in 0..self.max_steps {
-            let output = self.brain.generate(&transcript).await?;
+            let output = self.generate_step(&transcript).await?;
             if first_token_latency_ms.is_none() {
                 first_token_latency_ms = Some(elapsed_ms_since(*run_started_at));
             }
@@ -337,7 +365,7 @@ impl<B: InferenceEngine> Agent<B> {
         }
         let evidence_summary = build_evidence_summary(&turns);
         let synthesis_prompt = format_synthesis_prompt(task, &evidence_summary);
-        let output = self.brain.generate(&synthesis_prompt).await?;
+        let output = self.generate_step(&synthesis_prompt).await?;
         let raw = extract_tag(&output, "final").unwrap_or(output);
         let raw_findings = derive_findings(&turns, "");
         let findings = deduplicate_findings(raw_findings);

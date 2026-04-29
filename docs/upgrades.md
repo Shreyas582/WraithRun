@@ -1,5 +1,18 @@
 # Upgrade Notes
 
+## v1.9.1
+
+### Breaking/visible changes
+
+- **New investigation templates** (#190): `process-tree-analysis` and `malware-triage` templates added. `broad-host-triage` now includes `enumerate_scheduled_tasks` and `analyze_process_tree` steps. Template-driven runs will execute more tools than in v1.8.0; adjust `--max-steps` if needed.
+- **Stream/verbose output moved to stderr** (#188): `--stream` token output and `--verbose` log lines now go to stderr instead of stdout. Scripts that captured combined stdout+stderr output must be updated.
+
+### Migration
+
+- No config file changes required.
+- If you pipe `wraithrun` JSON output and also pass `--verbose` or `--stream`, remove any `2>&1` redirects — log output is now cleanly separated on stderr.
+- The `uptime_secs` field in `/api/v1/health` now returns correct elapsed seconds (was incorrectly returning the Unix epoch since v1.8.0).
+
 ## v1.8.0
 
 ### Breaking/visible changes

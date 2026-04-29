@@ -2992,6 +2992,16 @@ fn run_prompt_on_session(
         context_ids.push(next_token);
         generated_ids.push(next_token);
 
+        // Emit token to streaming channel if one is attached.
+        if let Some(tx) = config.token_stream_tx.as_ref() {
+            if let Ok(fragment) = decode_generated(&cache.tokenizer, &[next_token]) {
+                if !fragment.is_empty() {
+                    let _: std::result::Result<(), tokio::sync::mpsc::error::SendError<String>> =
+                        tx.send(fragment);
+                }
+            }
+        }
+
         if stop_ids.contains(&next_token) {
             break;
         }
@@ -3342,6 +3352,7 @@ mod tests {
             dry_run: false,
             backend_override: None,
             backend_config: Default::default(),
+            token_stream_tx: None,
         };
 
         let report = inspect_runtime_compatibility(&config, true);

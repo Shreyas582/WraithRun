@@ -57,7 +57,18 @@ pub fn probe_model_capability(config: &ModelConfig) -> ModelCapabilityProbe {
 /// and adjusts the bytes-per-parameter divisor accordingly.
 /// Sums external data files (`*.onnx_data`, `*.onnx.data`) that ONNX models
 /// commonly use for weights that exceed the 2 GB protobuf limit (#115).
-fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
+fn estimate_params_from_file_size(model_path: &std::path::Path) -> f32 {
+    // If the path is a directory, resolve to the largest .onnx file inside it.
+    let resolved_path: std::borrow::Cow<std::path::Path> = if model_path.is_dir() {
+        match largest_onnx_in_dir(model_path) {
+            Some(p) => std::borrow::Cow::Owned(p),
+            None => return 0.0,
+        }
+    } else {
+        std::borrow::Cow::Borrowed(model_path)
+    };
+    let model_path: &std::path::Path = resolved_path.as_ref();
+
     let main_size = match std::fs::metadata(model_path) {
         Ok(meta) => meta.len(),
         Err(_) => return 0.0,
@@ -86,7 +97,23 @@ fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
         })
         .unwrap_or(0);
 
-    let bytes = (main_size + external_size) as f64;
+    // If main_size is tiny (< 50 MB) the path likely points to an NPU entry-point
+    // like fusion.onnx rather than the actual weight file. In that case, substitute
+    // the largest .onnx file found in the same directory.
+    const SMALL_FILE_THRESHOLD: u64 = 50 * 1024 * 1024;
+    let effective_size = if main_size < SMALL_FILE_THRESHOLD && external_size == 0 {
+        if let Some(parent) = model_path.parent() {
+            largest_onnx_in_dir(parent)
+                .and_then(|p| std::fs::metadata(&p).ok().map(|m| m.len()))
+                .unwrap_or(main_size)
+        } else {
+            main_size
+        }
+    } else {
+        main_size + external_size
+    };
+
+    let bytes = effective_size as f64;
 
     // Detect quantization from the model path to choose the right divisor.
     // Bytes per parameter: Q4 ≈ 0.55 (4-bit + overhead), Q8 ≈ 1.1,
@@ -94,6 +121,22 @@ fn estimate_params_from_file_size(model_path: &PathBuf) -> f32 {
     let bytes_per_param = detect_quant_bytes_per_param(model_path);
     let estimated_params = bytes / bytes_per_param;
     (estimated_params / 1_000_000_000.0) as f32
+}
+
+/// Return the path of the largest `.onnx` file directly inside `dir`.
+fn largest_onnx_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|x| x.eq_ignore_ascii_case("onnx"))
+                .unwrap_or(false)
+        })
+        .filter_map(|e| e.metadata().ok().map(|m| (e.path(), m.len())))
+        .max_by_key(|(_, sz)| *sz)
+        .map(|(p, _)| p)
 }
 
 /// Infer bytes-per-parameter from filename conventions.
@@ -107,6 +150,7 @@ fn detect_quant_bytes_per_param(model_path: &Path) -> f64 {
     } else if path_lower.contains("q8")
         || path_lower.contains("int8")
         || path_lower.contains("8bit")
+        || path_lower.contains("quantized")
     {
         1.1
     } else if path_lower.contains("fp32") || path_lower.contains("float32") {
@@ -183,13 +227,59 @@ static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
             "check_privilege_escalation_vectors",
         ],
     },
-    // persistence-analysis
+    // persistence-analysis (MITRE T1053)
     DryRunTemplate {
-        keywords: &["persistence", "autorun", "startup", "cron", "scheduled"],
+        keywords: &[
+            "persistence",
+            "autorun",
+            "startup",
+            "cron",
+            "scheduled",
+            "task",
+            "t1053",
+        ],
         tools: &[
             "inspect_persistence_locations",
+            "enumerate_scheduled_tasks",
             "audit_account_changes",
             "read_syslog",
+        ],
+    },
+    // process-tree-analysis (MITRE T1057)
+    DryRunTemplate {
+        keywords: &[
+            "process",
+            "tree",
+            "parent",
+            "child",
+            "spawn",
+            "t1057",
+            "injection",
+        ],
+        tools: &[
+            "analyze_process_tree",
+            "correlate_process_network",
+            "audit_account_changes",
+        ],
+    },
+    // malware-triage
+    DryRunTemplate {
+        keywords: &[
+            "malware",
+            "infection",
+            "ransomware",
+            "trojan",
+            "backdoor",
+            "c2",
+            "beacon",
+            "implant",
+        ],
+        tools: &[
+            "analyze_process_tree",
+            "enumerate_scheduled_tasks",
+            "inspect_persistence_locations",
+            "correlate_process_network",
+            "hash_binary",
         ],
     },
     // network-exposure-audit
@@ -233,6 +323,8 @@ static DRY_RUN_TEMPLATES: &[DryRunTemplate] = &[
 static BROAD_TRIAGE_TOOLS: &[&str] = &[
     "audit_account_changes",
     "inspect_persistence_locations",
+    "enumerate_scheduled_tasks",
+    "analyze_process_tree",
     "read_syslog",
     "scan_network",
     "check_privilege_escalation_vectors",
@@ -364,11 +456,30 @@ pub struct ModelConfig {
     /// Provider-specific key-value configuration.
     #[serde(default)]
     pub backend_config: std::collections::HashMap<String, String>,
+    /// When set, each decoded token is sent here as it is sampled.
+    /// Not serialized — set programmatically for streaming display.
+    #[serde(skip)]
+    pub token_stream_tx: Option<Arc<tokio::sync::mpsc::UnboundedSender<String>>>,
 }
 
 #[async_trait]
 pub trait InferenceEngine: Send + Sync {
     async fn generate(&self, prompt: &str) -> Result<String>;
+
+    /// Stream decoded tokens one-by-one as they are sampled.
+    ///
+    /// Returns the accumulated full response alongside a receiver that yields
+    /// each token fragment in decode order. The default implementation buffers
+    /// the full response and sends it as a single item.
+    async fn generate_streaming(
+        &self,
+        prompt: &str,
+    ) -> Result<(String, tokio::sync::mpsc::UnboundedReceiver<String>)> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let result = self.generate(prompt).await?;
+        let _ = tx.send(result.clone());
+        Ok((result, rx))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -550,6 +661,38 @@ impl InferenceEngine for OnnxVitisEngine {
             .map_err(|e| anyhow::anyhow!("session cache lock poisoned: {e}"))?;
         onnx_vitis::run_prompt_cached(&mut guard, &self.config, prompt)
     }
+
+    async fn generate_streaming(
+        &self,
+        prompt: &str,
+    ) -> Result<(String, tokio::sync::mpsc::UnboundedReceiver<String>)> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        if self.config.dry_run {
+            let result = self.dry_run_response(prompt);
+            let _ = tx.send(result.clone());
+            return Ok((result, rx));
+        }
+
+        let mut streaming_config = self.config.clone();
+        streaming_config.token_stream_tx = Some(Arc::new(tx));
+
+        let session_cache = Arc::clone(&self.session_cache);
+        let prompt = prompt.to_string();
+
+        // Run the synchronous ONNX decode loop off the async executor so tokens
+        // can flow through the channel while the caller drains the receiver.
+        let result = tokio::task::spawn_blocking(move || -> Result<String> {
+            let mut guard = session_cache
+                .lock()
+                .map_err(|e| anyhow::anyhow!("session cache lock poisoned: {e}"))?;
+            onnx_vitis::run_prompt_cached(&mut guard, &streaming_config, &prompt)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("streaming inference task panicked: {e}"))??;
+
+        Ok((result, rx))
+    }
 }
 
 #[cfg(test)]
@@ -567,6 +710,7 @@ mod tests {
             dry_run: true,
             backend_override: None,
             backend_config: Default::default(),
+            token_stream_tx: None,
         })
     }
 

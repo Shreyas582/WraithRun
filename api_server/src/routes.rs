@@ -144,7 +144,6 @@ struct HealthResponse {
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
-    let started: u64 = state.started_at.parse().unwrap_or(0);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -152,7 +151,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
-        uptime_secs: now.saturating_sub(started),
+        uptime_secs: now.saturating_sub(state.started_at_secs),
     })
 }
 
@@ -353,6 +352,7 @@ async fn run_investigation(task: &str, max_steps: usize) -> anyhow::Result<core_
         dry_run: true,
         backend_override: None,
         backend_config: Default::default(),
+        token_stream_tx: None,
     };
     let engine = OnnxVitisEngine::new(model_config);
     let tools = ToolRegistry::with_default_tools();

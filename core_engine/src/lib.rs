@@ -23,7 +23,7 @@ pub fn builtin_investigation_templates() -> &'static [InvestigationTemplate] {
     &BUILTIN_TEMPLATES
 }
 
-static BUILTIN_TEMPLATES: [InvestigationTemplate; 7] = [
+static BUILTIN_TEMPLATES: [InvestigationTemplate; 9] = [
     InvestigationTemplate {
         name: "broad-host-triage",
         description: "General-purpose host investigation covering persistence, accounts, network, and privilege vectors",
@@ -31,6 +31,8 @@ static BUILTIN_TEMPLATES: [InvestigationTemplate; 7] = [
         tools: &[
             "audit_account_changes",
             "inspect_persistence_locations",
+            "enumerate_scheduled_tasks",
+            "analyze_process_tree",
             "read_syslog",
             "scan_network",
             "check_privilege_escalation_vectors",
@@ -49,12 +51,23 @@ static BUILTIN_TEMPLATES: [InvestigationTemplate; 7] = [
     },
     InvestigationTemplate {
         name: "persistence-analysis",
-        description: "Analyze persistence mechanisms including autoruns and scheduled tasks",
-        match_keywords: &["persistence", "autorun", "startup", "cron", "scheduled"],
+        description: "Analyze persistence mechanisms including autoruns and scheduled tasks (MITRE T1053)",
+        match_keywords: &["persistence", "autorun", "startup", "cron", "scheduled", "task", "t1053"],
         tools: &[
             "inspect_persistence_locations",
+            "enumerate_scheduled_tasks",
             "audit_account_changes",
             "read_syslog",
+        ],
+    },
+    InvestigationTemplate {
+        name: "process-tree-analysis",
+        description: "Analyse running process parent-child relationships to surface suspicious spawns (MITRE T1057)",
+        match_keywords: &["process", "tree", "parent", "child", "spawn", "t1057", "injection"],
+        tools: &[
+            "analyze_process_tree",
+            "correlate_process_network",
+            "audit_account_changes",
         ],
     },
     InvestigationTemplate {
@@ -94,6 +107,18 @@ static BUILTIN_TEMPLATES: [InvestigationTemplate; 7] = [
             "read_syslog",
             "audit_account_changes",
             "inspect_persistence_locations",
+        ],
+    },
+    InvestigationTemplate {
+        name: "malware-triage",
+        description: "Triage a suspected malware infection: processes, persistence, network beacons, file hashes",
+        match_keywords: &["malware", "infection", "ransomware", "trojan", "backdoor", "c2", "beacon", "implant"],
+        tools: &[
+            "analyze_process_tree",
+            "enumerate_scheduled_tasks",
+            "inspect_persistence_locations",
+            "correlate_process_network",
+            "hash_binary",
         ],
     },
 ];
