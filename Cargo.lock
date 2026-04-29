@@ -322,8 +322,10 @@ dependencies = [
  "inference_bridge",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

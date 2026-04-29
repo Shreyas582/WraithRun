@@ -527,6 +527,8 @@ enum OutputFormat {
     Summary,
     Markdown,
     Narrative,
+    Ocsf,
+    Stix2,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -3003,7 +3005,9 @@ fn parse_output_format(raw: &str, source: &str) -> Result<OutputFormat> {
         "json" => Ok(OutputFormat::Json),
         "summary" => Ok(OutputFormat::Summary),
         "markdown" => Ok(OutputFormat::Markdown),
-        _ => bail!("{source} must be one of: json, summary, markdown (got '{raw}')"),
+        "ocsf" => Ok(OutputFormat::Ocsf),
+        "stix" | "stix2" => Ok(OutputFormat::Stix2),
+        _ => bail!("{source} must be one of: json, summary, markdown, ocsf, stix2 (got '{raw}')"),
     }
 }
 
@@ -4937,6 +4941,14 @@ fn render_report(
         OutputFormat::Summary => Ok(render_summary(report)),
         OutputFormat::Markdown => Ok(render_markdown(report)),
         OutputFormat::Narrative => Ok(render_narrative(report)),
+        OutputFormat::Ocsf => {
+            let value = core_engine::output_formats::to_ocsf(report, env!("CARGO_PKG_VERSION"));
+            serde_json::to_string_pretty(&value).map_err(|e| anyhow!(e))
+        }
+        OutputFormat::Stix2 => {
+            let value = core_engine::output_formats::to_stix2(report, env!("CARGO_PKG_VERSION"));
+            serde_json::to_string_pretty(&value).map_err(|e| anyhow!(e))
+        }
     }
 }
 

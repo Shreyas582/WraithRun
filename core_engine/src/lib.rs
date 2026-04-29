@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod output_formats;
 
 use std::collections::{HashMap, HashSet};
 
