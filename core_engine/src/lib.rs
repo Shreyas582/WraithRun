@@ -258,8 +258,32 @@ pub struct EvidencePointer {
 }
 
 fn serialize_confidence<S: Serializer>(value: &f32, serializer: S) -> Result<S::Ok, S::Error> {
-    let rounded = (*value * 100.0).round() / 100.0;
-    serializer.serialize_f32(rounded)
+    // Round at f64 precision to avoid 0.61_f32 → 0.6100000143051147 in JSON output (#195).
+    let rounded = ((*value as f64) * 100.0).round() / 100.0;
+    serializer.serialize_f64(rounded)
+}
+
+/// Single contribution to a finding's overall confidence (#195).
+///
+/// Each factor names where the score came from (base prior, count signal,
+/// corroboration, etc.) so analysts can audit the derivation instead of
+/// trusting an opaque float.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConfidenceFactor {
+    pub factor: String,
+    #[serde(serialize_with = "serialize_confidence")]
+    pub contribution: f32,
+    pub detail: String,
+}
+
+impl ConfidenceFactor {
+    pub fn new(factor: impl Into<String>, contribution: f32, detail: impl Into<String>) -> Self {
+        Self {
+            factor: factor.into(),
+            contribution,
+            detail: detail.into(),
+        }
+    }
 }
 
 /// Discrete confidence label replacing arbitrary float precision (#85).
@@ -319,6 +343,8 @@ pub struct Finding {
     pub confidence: f32,
     #[serde(default = "default_confidence_label")]
     pub confidence_label: FindingConfidence,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub confidence_factors: Vec<ConfidenceFactor>,
     #[serde(default)]
     pub relevance: FindingRelevance,
     pub evidence_pointer: EvidencePointer,
@@ -342,6 +368,7 @@ impl Finding {
             title,
             severity,
             confidence_label: confidence_to_label(confidence),
+            confidence_factors: Vec::new(),
             relevance: FindingRelevance::Primary,
             confidence,
             evidence_pointer,
@@ -352,6 +379,12 @@ impl Finding {
     /// Backfill confidence_label from the confidence float.
     pub fn with_derived_label(mut self) -> Self {
         self.confidence_label = confidence_to_label(self.confidence);
+        self
+    }
+
+    /// Attach derivation factors that explain how `confidence` was computed (#195).
+    pub fn with_factors(mut self, factors: Vec<ConfidenceFactor>) -> Self {
+        self.confidence_factors = factors;
         self
     }
 }
@@ -430,19 +463,25 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
 
         if let Some(error) = observation.get("error").and_then(Value::as_str) {
             let tool_label = tool_name.as_deref().unwrap_or("unknown_tool");
-            findings.push(Finding::new(
-                format!("Tool execution failed for {tool_label}"),
-                FindingSeverity::High,
-                0.95,
-                EvidencePointer {
-                    turn: Some(idx + 1),
-                    tool: tool_name.clone(),
-                    field: "observation.error".to_string(),
-                },
-                format!(
-                    "Review tool arguments and host access policy, then rerun {tool_label}. Error sample: {error}"
-                ),
-            ));
+            findings.push(
+                Finding::new(
+                    format!("Tool execution failed for {tool_label}"),
+                    FindingSeverity::High,
+                    0.95,
+                    EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.error".to_string(),
+                    },
+                    format!(
+                        "Review tool arguments and host access policy, then rerun {tool_label}. Error sample: {error}"
+                    ),
+                )
+                .with_factors(fixed_confidence_factor(
+                    0.95,
+                    "tool execution error is unambiguous",
+                )),
+            );
             continue;
         }
 
@@ -459,19 +498,29 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                     FindingSeverity::Low
                 };
 
-                findings.push(Finding::new(
-                    format!(
-                        "Privilege escalation indicators detected ({indicator_count})"
-                    ),
-                    severity,
-                    confidence_from_count(0.55, indicator_count, 0.05, 0.92),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.indicator_count".to_string(),
-                    },
-                    "Review potential_vectors and verify whether elevated rights are expected; revoke or constrain unexpected grants.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.55,
+                    indicator_count,
+                    0.05,
+                    0.92,
+                    "indicator_count",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "Privilege escalation indicators detected ({indicator_count})"
+                        ),
+                        severity,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.indicator_count".to_string(),
+                        },
+                        "Review potential_vectors and verify whether elevated rights are expected; revoke or constrain unexpected grants.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -490,17 +539,27 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                     FindingSeverity::Info
                 };
 
-                findings.push(Finding::new(
-                    format!("Active listening sockets observed ({listener_count})"),
-                    severity,
-                    confidence_from_count(0.50, listener_count, 0.001, 0.80),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.listener_count".to_string(),
-                    },
-                    "Correlate listener PIDs and ports with expected services; investigate unknown listeners and expose only required interfaces.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.50,
+                    listener_count,
+                    0.001,
+                    0.80,
+                    "listener_count",
+                );
+                findings.push(
+                    Finding::new(
+                        format!("Active listening sockets observed ({listener_count})"),
+                        severity,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.listener_count".to_string(),
+                        },
+                        "Correlate listener PIDs and ports with expected services; investigate unknown listeners and expose only required interfaces.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -519,21 +578,27 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
 
-            findings.push(Finding::new(
-                format!(
-                    "Coverage baseline captured ({baseline_entries_count} persistence entries, {baseline_privileged_account_count} privileged accounts, {baseline_exposed_binding_count} exposed bindings)"
-                ),
-                FindingSeverity::Info,
-                0.9,
-                EvidencePointer {
-                    turn: Some(idx + 1),
-                    tool: tool_name.clone(),
-                    field: "observation.baseline_version".to_string(),
-                },
-                format!(
-                    "Store baseline arrays from this {baseline_version} snapshot and supply them to coverage tools in subsequent runs to detect drift."
-                ),
-            ));
+            findings.push(
+                Finding::new(
+                    format!(
+                        "Coverage baseline captured ({baseline_entries_count} persistence entries, {baseline_privileged_account_count} privileged accounts, {baseline_exposed_binding_count} exposed bindings)"
+                    ),
+                    FindingSeverity::Info,
+                    0.9,
+                    EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.baseline_version".to_string(),
+                    },
+                    format!(
+                        "Store baseline arrays from this {baseline_version} snapshot and supply them to coverage tools in subsequent runs to detect drift."
+                    ),
+                )
+                .with_factors(fixed_confidence_factor(
+                    0.9,
+                    "baseline capture is a deterministic snapshot",
+                )),
+            );
         }
 
         let actionable_persistence_count = observation
@@ -592,17 +657,27 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                 )
             };
 
-            findings.push(Finding::new(
-                title,
-                severity,
-                confidence_from_count(0.7, persistence_count, 0.05, 0.95),
-                EvidencePointer {
-                    turn: Some(idx + 1),
-                    tool: tool_name.clone(),
-                    field: evidence_field.to_string(),
-                },
-                "Review persistence entries for unauthorized startup references, remove unapproved autoruns, and preserve forensic artifacts before cleanup.".to_string(),
-            ));
+            let (conf, factors) = confidence_from_count_with_factors(
+                0.7,
+                persistence_count,
+                0.05,
+                0.95,
+                evidence_field,
+            );
+            findings.push(
+                Finding::new(
+                    title,
+                    severity,
+                    conf,
+                    EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: evidence_field.to_string(),
+                    },
+                    "Review persistence entries for unauthorized startup references, remove unapproved autoruns, and preserve forensic artifacts before cleanup.".to_string(),
+                )
+                .with_factors(factors),
+            );
         }
 
         if let Some(baseline_new_count) = observation
@@ -616,19 +691,29 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                     FindingSeverity::Medium
                 };
 
-                findings.push(Finding::new(
-                    format!(
-                        "Persistence baseline drift detected ({baseline_new_count} new entries)"
-                    ),
-                    severity,
-                    confidence_from_count(0.69, baseline_new_count, 0.04, 0.94),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.baseline_new_count".to_string(),
-                    },
-                    "Compare baseline_new_entries against approved software changes and investigate unexpected startup additions for persistence abuse.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.69,
+                    baseline_new_count,
+                    0.04,
+                    0.94,
+                    "baseline_new_count",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "Persistence baseline drift detected ({baseline_new_count} new entries)"
+                        ),
+                        severity,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.baseline_new_count".to_string(),
+                        },
+                        "Compare baseline_new_entries against approved software changes and investigate unexpected startup additions for persistence abuse.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -655,22 +740,27 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                 } else {
                     format!("Non-default privileged accounts observed ({non_default_privileged_account_count}): {detail}")
                 };
-                findings.push(Finding::new(
-                    title,
-                    severity,
-                    confidence_from_count(
-                        0.55,
-                        non_default_privileged_account_count,
-                        0.06,
-                        0.92,
-                    ),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.non_default_privileged_account_count".to_string(),
-                    },
-                    "Validate each non-default privileged account against approved access records; revoke unauthorized role grants and rotate exposed credentials.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.55,
+                    non_default_privileged_account_count,
+                    0.06,
+                    0.92,
+                    "non_default_privileged_account_count",
+                );
+                findings.push(
+                    Finding::new(
+                        title,
+                        severity,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.non_default_privileged_account_count".to_string(),
+                        },
+                        "Validate each non-default privileged account against approved access records; revoke unauthorized role grants and rotate exposed credentials.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -679,28 +769,33 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             .and_then(Value::as_u64)
         {
             if newly_privileged_account_count > 0 {
-                findings.push(Finding::new(
-                    format!(
-                        "Privileged account baseline drift detected ({newly_privileged_account_count} new account(s))"
-                    ),
-                    if newly_privileged_account_count >= 3 {
-                        FindingSeverity::Critical
-                    } else {
-                        FindingSeverity::High
-                    },
-                    confidence_from_count(
-                        0.78,
-                        newly_privileged_account_count,
-                        0.04,
-                        0.97,
-                    ),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.newly_privileged_account_count".to_string(),
-                    },
-                    "Validate each newly privileged account against approved access changes, disable unauthorized grants, and rotate impacted credentials.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.78,
+                    newly_privileged_account_count,
+                    0.04,
+                    0.97,
+                    "newly_privileged_account_count",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "Privileged account baseline drift detected ({newly_privileged_account_count} new account(s))"
+                        ),
+                        if newly_privileged_account_count >= 3 {
+                            FindingSeverity::Critical
+                        } else {
+                            FindingSeverity::High
+                        },
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.newly_privileged_account_count".to_string(),
+                        },
+                        "Validate each newly privileged account against approved access changes, disable unauthorized grants, and rotate impacted credentials.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -709,24 +804,29 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             .and_then(Value::as_u64)
         {
             if unapproved_privileged_account_count > 0 {
-                findings.push(Finding::new(
-                    format!(
-                        "Unapproved privileged accounts detected ({unapproved_privileged_account_count})"
-                    ),
-                    FindingSeverity::Critical,
-                    confidence_from_count(
-                        0.8,
-                        unapproved_privileged_account_count,
-                        0.04,
-                        0.98,
-                    ),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.unapproved_privileged_account_count".to_string(),
-                    },
-                    "Escalate immediately: remove unapproved privileged memberships, confirm identity ownership, and collect IAM audit evidence.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.8,
+                    unapproved_privileged_account_count,
+                    0.04,
+                    0.98,
+                    "unapproved_privileged_account_count",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "Unapproved privileged accounts detected ({unapproved_privileged_account_count})"
+                        ),
+                        FindingSeverity::Critical,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.unapproved_privileged_account_count".to_string(),
+                        },
+                        "Escalate immediately: remove unapproved privileged memberships, confirm identity ownership, and collect IAM audit evidence.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -741,19 +841,29 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                     FindingSeverity::Medium
                 };
 
-                findings.push(Finding::new(
-                    format!(
-                        "Externally exposed listening endpoints observed ({externally_exposed_count})"
-                    ),
-                    severity,
-                    confidence_from_count(0.66, externally_exposed_count, 0.03, 0.93),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.externally_exposed_count".to_string(),
-                    },
-                    "Confirm process ownership and necessity of exposed listeners; close or firewall unnecessary bindings and monitor for reappearance.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.66,
+                    externally_exposed_count,
+                    0.03,
+                    0.93,
+                    "externally_exposed_count",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "Externally exposed listening endpoints observed ({externally_exposed_count})"
+                        ),
+                        severity,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.externally_exposed_count".to_string(),
+                        },
+                        "Confirm process ownership and necessity of exposed listeners; close or firewall unnecessary bindings and monitor for reappearance.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -762,23 +872,33 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             .and_then(Value::as_u64)
         {
             if high_risk_exposed_count > 0 {
-                findings.push(Finding::new(
-                    format!(
-                        "High-risk process listeners exposed externally ({high_risk_exposed_count})"
-                    ),
-                    if high_risk_exposed_count >= 2 {
-                        FindingSeverity::Critical
-                    } else {
-                        FindingSeverity::High
-                    },
-                    confidence_from_count(0.76, high_risk_exposed_count, 0.04, 0.97),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.high_risk_exposed_count".to_string(),
-                    },
-                    "Prioritize containment for high-risk exposed processes, validate command-line lineage, and restrict inbound access immediately.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.76,
+                    high_risk_exposed_count,
+                    0.04,
+                    0.97,
+                    "high_risk_exposed_count",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "High-risk process listeners exposed externally ({high_risk_exposed_count})"
+                        ),
+                        if high_risk_exposed_count >= 2 {
+                            FindingSeverity::Critical
+                        } else {
+                            FindingSeverity::High
+                        },
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.high_risk_exposed_count".to_string(),
+                        },
+                        "Prioritize containment for high-risk exposed processes, validate command-line lineage, and restrict inbound access immediately.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -787,24 +907,29 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             .and_then(Value::as_u64)
         {
             if unknown_exposed_process_count > 0 {
-                findings.push(Finding::new(
-                    format!(
-                        "Unexpected exposed processes relative to expected allowlist ({unknown_exposed_process_count})"
-                    ),
-                    FindingSeverity::High,
-                    confidence_from_count(
-                        0.72,
-                        unknown_exposed_process_count,
-                        0.04,
-                        0.95,
-                    ),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.unknown_exposed_process_count".to_string(),
-                    },
-                    "Reconcile unknown exposed processes against approved service inventory and close unapproved listeners through host firewall or service disablement.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.72,
+                    unknown_exposed_process_count,
+                    0.04,
+                    0.95,
+                    "unknown_exposed_process_count",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "Unexpected exposed processes relative to expected allowlist ({unknown_exposed_process_count})"
+                        ),
+                        FindingSeverity::High,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.unknown_exposed_process_count".to_string(),
+                        },
+                        "Reconcile unknown exposed processes against approved service inventory and close unapproved listeners through host firewall or service disablement.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -819,19 +944,29 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                     FindingSeverity::High
                 };
 
-                findings.push(Finding::new(
-                    format!(
-                        "Network exposure risk score exceeded threshold ({network_risk_score})"
-                    ),
-                    severity,
-                    confidence_from_count(0.7, network_risk_score, 0.002, 0.96),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.network_risk_score".to_string(),
-                    },
-                    "Escalate to incident triage: prioritize exposed services with highest risk contribution and verify baseline drift across process-network bindings.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.7,
+                    network_risk_score,
+                    0.002,
+                    0.96,
+                    "network_risk_score",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "Network exposure risk score exceeded threshold ({network_risk_score})"
+                        ),
+                        severity,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.network_risk_score".to_string(),
+                        },
+                        "Escalate to incident triage: prioritize exposed services with highest risk contribution and verify baseline drift across process-network bindings.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
 
@@ -839,17 +974,20 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
             observation.get("path").and_then(Value::as_str),
             observation.get("sha256").and_then(Value::as_str),
         ) {
-            findings.push(Finding::new(
-                format!("File hash captured for {path}"),
-                FindingSeverity::Info,
-                0.90,
-                EvidencePointer {
-                    turn: Some(idx + 1),
-                    tool: tool_name.clone(),
-                    field: "observation.sha256".to_string(),
-                },
-                "Compare the hash against trusted baseline or threat-intel sources before taking containment action.".to_string(),
-            ));
+            findings.push(
+                Finding::new(
+                    format!("File hash captured for {path}"),
+                    FindingSeverity::Info,
+                    0.90,
+                    EvidencePointer {
+                        turn: Some(idx + 1),
+                        tool: tool_name.clone(),
+                        field: "observation.sha256".to_string(),
+                    },
+                    "Compare the hash against trusted baseline or threat-intel sources before taking containment action.".to_string(),
+                )
+                .with_factors(fixed_confidence_factor(0.90, "sha256 capture is deterministic")),
+            );
         }
 
         // SSH key enumeration findings.
@@ -899,32 +1037,48 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                         String::new()
                     };
 
-                findings.push(Finding::new(
-                    format!(
-                        "SSH keys found: {total_authorized} authorized_keys file(s), {total_private} private key(s) across {dirs_scanned} directory(ies){maybe_detail}",
-                        maybe_detail = if detail.is_empty() { String::new() } else { format!(" — {detail}") }
-                    ),
-                    severity,
-                    confidence_from_count(0.72, total_authorized + total_private, 0.04, 0.94),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.total_authorized_keys_files".to_string(),
-                    },
-                    "Audit each authorized_keys file for unknown public keys; verify private key ownership and consider rotation for unattended keys.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.72,
+                    total_authorized + total_private,
+                    0.04,
+                    0.94,
+                    "total_authorized_keys_files",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "SSH keys found: {total_authorized} authorized_keys file(s), {total_private} private key(s) across {dirs_scanned} directory(ies){maybe_detail}",
+                            maybe_detail = if detail.is_empty() { String::new() } else { format!(" — {detail}") }
+                        ),
+                        severity,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.total_authorized_keys_files".to_string(),
+                        },
+                        "Audit each authorized_keys file for unknown public keys; verify private key ownership and consider rotation for unattended keys.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             } else {
-                findings.push(Finding::new(
-                    format!("No SSH keys found across {dirs_scanned} directory(ies) scanned"),
-                    FindingSeverity::Info,
-                    0.85,
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.ssh_directories_scanned".to_string(),
-                    },
-                    "SSH key access is not configured on this host.".to_string(),
-                ));
+                findings.push(
+                    Finding::new(
+                        format!("No SSH keys found across {dirs_scanned} directory(ies) scanned"),
+                        FindingSeverity::Info,
+                        0.85,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.ssh_directories_scanned".to_string(),
+                        },
+                        "SSH key access is not configured on this host.".to_string(),
+                    )
+                    .with_factors(fixed_confidence_factor(
+                        0.85,
+                        "absence of SSH keys is a deterministic observation",
+                    )),
+                );
             }
         }
 
@@ -942,40 +1096,56 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
                     FindingSeverity::Medium
                 };
 
-                findings.push(Finding::new(
-                    format!(
-                        "Suspicious log keywords observed in {suspicious_hits} line(s)"
-                    ),
-                    severity,
-                    confidence_from_count(0.64, suspicious_hits as u64, 0.05, 0.93),
-                    EvidencePointer {
-                        turn: Some(idx + 1),
-                        tool: tool_name.clone(),
-                        field: "observation.lines".to_string(),
-                    },
-                    "Inspect matching log lines for account abuse or execution anomalies, then pivot to host and identity telemetry.".to_string(),
-                ));
+                let (conf, factors) = confidence_from_count_with_factors(
+                    0.64,
+                    suspicious_hits as u64,
+                    0.05,
+                    0.93,
+                    "suspicious_log_lines",
+                );
+                findings.push(
+                    Finding::new(
+                        format!(
+                            "Suspicious log keywords observed in {suspicious_hits} line(s)"
+                        ),
+                        severity,
+                        conf,
+                        EvidencePointer {
+                            turn: Some(idx + 1),
+                            tool: tool_name.clone(),
+                            field: "observation.lines".to_string(),
+                        },
+                        "Inspect matching log lines for account abuse or execution anomalies, then pivot to host and identity telemetry.".to_string(),
+                    )
+                    .with_factors(factors),
+                );
             }
         }
     }
 
     if findings.is_empty() {
-        findings.push(Finding::new(
-            "No high-confidence host findings derived from collected evidence".to_string(),
-            FindingSeverity::Info,
-            0.55,
-            EvidencePointer {
-                turn: None,
-                tool: None,
-                field: "final_answer".to_string(),
-            },
-            if final_answer.trim().is_empty() {
-                "Review raw observations and rerun targeted task templates for deeper coverage."
-                    .to_string()
-            } else {
-                "Review the final answer and raw observations; rerun targeted task templates if analyst confidence is low.".to_string()
-            },
-        ));
+        findings.push(
+            Finding::new(
+                "No high-confidence host findings derived from collected evidence".to_string(),
+                FindingSeverity::Info,
+                0.55,
+                EvidencePointer {
+                    turn: None,
+                    tool: None,
+                    field: "final_answer".to_string(),
+                },
+                if final_answer.trim().is_empty() {
+                    "Review raw observations and rerun targeted task templates for deeper coverage."
+                        .to_string()
+                } else {
+                    "Review the final answer and raw observations; rerun targeted task templates if analyst confidence is low.".to_string()
+                },
+            )
+            .with_factors(fixed_confidence_factor(
+                0.55,
+                "fallback finding when no concrete observations matched derivation rules",
+            )),
+        );
     }
 
     // Evidence-derived confidence adjustments (#121):
@@ -985,7 +1155,8 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
         .iter()
         .filter_map(|f| f.evidence_pointer.tool.as_deref())
         .collect();
-    let corroboration_bonus: f32 = match distinct_tools.len() {
+    let distinct_tools_count = distinct_tools.len();
+    let corroboration_bonus: f32 = match distinct_tools_count {
         0 | 1 => 0.0,
         2 => 0.03,
         _ => 0.05,
@@ -995,12 +1166,20 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
         // Only boost concrete tool-sourced findings, not error/fallback entries.
         if finding.evidence_pointer.tool.is_some()
             && finding.evidence_pointer.field != "observation.error"
+            && corroboration_bonus > 0.0
         {
             finding.confidence =
                 ((finding.confidence + corroboration_bonus) * 100.0).round() / 100.0;
+            let mut applied_bonus = corroboration_bonus;
             if finding.confidence > 0.99 {
+                applied_bonus -= finding.confidence - 0.99;
                 finding.confidence = 0.99;
             }
+            finding.confidence_factors.push(ConfidenceFactor::new(
+                "corroboration",
+                applied_bonus,
+                format!("{distinct_tools_count} distinct tools contributed to this run"),
+            ));
         }
     }
 
@@ -1368,9 +1547,51 @@ impl ModelCapabilityReport {
     }
 }
 
-fn confidence_from_count(base: f32, count: u64, slope: f32, ceiling: f32) -> f32 {
-    let raw = (base + (count as f32 * slope)).min(ceiling);
-    (raw * 100.0).round() / 100.0
+/// Compute a confidence score from a count signal and return the derivation factors (#195).
+///
+/// Splits the score into three transparent factors so downstream consumers
+/// can inspect why a finding scored where it did:
+///   * `base_rate` — the prior contributed by the rule itself
+///   * `count_signal` — additional weight from the observed count
+///   * `ceiling_clip` — negative correction when the raw sum was clipped to the ceiling
+fn confidence_from_count_with_factors(
+    base: f32,
+    count: u64,
+    slope: f32,
+    ceiling: f32,
+    field: &str,
+) -> (f32, Vec<ConfidenceFactor>) {
+    let count_contribution = count as f32 * slope;
+    let raw = base + count_contribution;
+    let clipped = raw.min(ceiling);
+    let final_score = (clipped * 100.0).round() / 100.0;
+
+    let mut factors = vec![
+        ConfidenceFactor::new("base_rate", base, format!("rule prior for {field}")),
+        ConfidenceFactor::new(
+            "count_signal",
+            count_contribution,
+            format!("count={count}, slope={slope}"),
+        ),
+    ];
+    if raw > ceiling {
+        factors.push(ConfidenceFactor::new(
+            "ceiling_clip",
+            ceiling - raw,
+            format!("clipped to ceiling {ceiling}"),
+        ));
+    }
+    (final_score, factors)
+}
+
+/// Build the single-factor list for a fixed-confidence finding where the
+/// score is hardcoded (e.g. tool errors, baseline captures, hash captures).
+fn fixed_confidence_factor(score: f32, reason: &str) -> Vec<ConfidenceFactor> {
+    vec![ConfidenceFactor::new(
+        "rule_prior",
+        score,
+        reason.to_string(),
+    )]
 }
 
 /// Extract top N items from a JSON string array field, returning a summary like

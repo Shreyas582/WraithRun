@@ -481,19 +481,26 @@ pub fn check_task_scope(task: &str) -> Option<Finding> {
         .collect::<Vec<_>>()
         .join(", ");
 
-    Some(Finding::new(
-        "Task is outside the scope of available host-local investigation tools".to_string(),
-        FindingSeverity::Info,
-        1.0,
-        EvidencePointer {
-            turn: None,
-            tool: None,
-            field: "scope_check".to_string(),
-        },
-        format!(
-            "This task requires capabilities not present in the current toolset. Consider tools for: {domain_hint}."
-        ),
-    ))
+    Some(
+        Finding::new(
+            "Task is outside the scope of available host-local investigation tools".to_string(),
+            FindingSeverity::Info,
+            1.0,
+            EvidencePointer {
+                turn: None,
+                tool: None,
+                field: "scope_check".to_string(),
+            },
+            format!(
+                "This task requires capabilities not present in the current toolset. Consider tools for: {domain_hint}."
+            ),
+        )
+        .with_factors(vec![crate::ConfidenceFactor::new(
+            "scope_check",
+            1.0,
+            "task keywords matched out-of-scope domains",
+        )]),
+    )
 }
 
 /// Resolve the best-matching investigation template for a task.
