@@ -18,6 +18,21 @@ The format is inspired by Keep a Changelog and this project follows Semantic Ver
 
 - (none yet)
 
+## 1.10.0 - 2026-04-29
+
+### Added
+
+- `Finding.confidence_factors` field exposing the derivation breakdown for each confidence score (#195). Each factor names where the score came from — `base_rate` (rule prior), `count_signal` (count × slope), `ceiling_clip`, `corroboration` (multi-tool boost), or `rule_prior` (fixed). Analysts can now audit the score instead of trusting an opaque float.
+- `RunReport.timeline` field carrying ordered `TimelineEvent` records reconstructed from tool observations (#196). Recognised timestamp keys (`created_at`, `creation_time`, `mtime`, `next_run_time`, `last_login`, `password_last_set`, `event_time`, …) are normalised to ISO-8601 (ISO strings and integer epoch seconds/milliseconds both accepted), each event back-references the originating finding, and events are sorted ascending. Summary output renders the timeline before the findings list.
+- `--format ocsf` produces OCSF v1.1.0 Detection Finding (class_uid 2004) records suitable for Splunk/Elastic/Sentinel ingestion (#198).
+- `--format stix2` (alias `stix`) produces STIX 2.1 bundles with one identity, one report, and one stable-id indicator per finding, suitable for OpenCTI/MISP (#198).
+- Public `core_engine::output_formats::{to_ocsf, to_stix2}` API for programmatic transformation.
+
+### Changed
+
+- Confidence floats serialize via f64 round-to-two-decimals to eliminate the precision tail (`0.6100000143051147` → `0.61`).
+- Default summary rendering now emits a Timeline section before Findings when timeline events are present.
+
 ## 1.9.1 - 2026-04-26
 
 ### Fixed
