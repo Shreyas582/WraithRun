@@ -5633,6 +5633,16 @@ fn render_summary(report: &RunReport) -> String {
     let _ = writeln!(output, "Findings: {}", report.findings.len());
     let _ = writeln!(output, "Final Answer: {}", report.final_answer);
 
+    if !report.timeline.is_empty() {
+        let _ = writeln!(output, "\nTimeline:");
+        for event in report.timeline.iter().take(20) {
+            let _ = writeln!(output, "  {} {}", event.ts, event.detail);
+        }
+        if report.timeline.len() > 20 {
+            let _ = writeln!(output, "  ... and {} more", report.timeline.len() - 20);
+        }
+    }
+
     if !report.findings.is_empty() {
         let _ = writeln!(output, "\nFindings:");
         for (idx, finding) in report.findings.iter().enumerate() {
@@ -6545,6 +6555,7 @@ mod tests {
                 "Correlate listener PIDs and ports with expected services.".to_string(),
             )],
             supplementary_findings: Vec::new(),
+            timeline: Vec::new(),
         }
     }
 

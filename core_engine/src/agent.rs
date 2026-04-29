@@ -8,9 +8,10 @@ use inference_bridge::InferenceEngine;
 
 use crate::{
     basic_tier_summary_for_task, builtin_investigation_templates, deduplicate_findings,
-    derive_findings, extract_tag, max_severity, quality_checked_final_answer, sort_findings,
-    AgentTurn, CoverageBaseline, EvidencePointer, Finding, FindingSeverity, InvestigationTemplate,
-    ModelCapabilityReport, ModelCapabilityTier, RunReport, RunTimingMetrics, ToolCall,
+    derive_findings, derive_timeline, extract_tag, max_severity, quality_checked_final_answer,
+    sort_findings, AgentTurn, CoverageBaseline, EvidencePointer, Finding, FindingSeverity,
+    InvestigationTemplate, ModelCapabilityReport, ModelCapabilityTier, RunReport, RunTimingMetrics,
+    ToolCall,
 };
 
 pub struct Agent<B: InferenceEngine> {
@@ -154,6 +155,7 @@ impl<B: InferenceEngine> Agent<B> {
                 final_answer: "Task is outside the scope of available host-local investigation tools. No tools were executed.".to_string(),
                 findings: vec![scope_finding],
                 supplementary_findings: Vec::new(),
+                timeline: Vec::new(),
             });
         }
 
@@ -192,6 +194,7 @@ impl<B: InferenceEngine> Agent<B> {
         }
 
         let report_max_severity = max_severity(&findings);
+        let timeline = derive_timeline(&turns, &findings);
 
         Ok(RunReport {
             task: task.to_string(),
@@ -209,6 +212,7 @@ impl<B: InferenceEngine> Agent<B> {
             final_answer,
             findings,
             supplementary_findings: Vec::new(),
+            timeline,
         })
     }
 

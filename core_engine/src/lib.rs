@@ -426,6 +426,23 @@ pub struct LiveRunMetrics {
     pub top_failure_reasons: Vec<LiveFailureReasonCount>,
 }
 
+/// A single ordered event extracted from tool observations (#196).
+///
+/// Reports were previously unordered tool dumps; for incident response the
+/// question is "what happened in what order?". `TimelineEvent` carries an
+/// ISO-8601 timestamp plus a back-reference to the originating finding so
+/// analysts can read the run as a sequence of host events.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimelineEvent {
+    pub ts: String,
+    pub event: String,
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_finding_idx: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_tool: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunReport {
     pub task: String,
@@ -449,6 +466,8 @@ pub struct RunReport {
     pub findings: Vec<Finding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supplementary_findings: Vec<Finding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timeline: Vec<TimelineEvent>,
 }
 
 pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> {
@@ -1190,6 +1209,209 @@ pub fn derive_findings(turns: &[AgentTurn], final_answer: &str) -> Vec<Finding> 
         .collect()
 }
 
+/// Walk tool observations and emit ordered `TimelineEvent`s for any field that
+/// carries a recognisable timestamp (#196).
+///
+/// This is a best-effort extractor: if a tool reports `created_at`,
+/// `next_run_time`, file `mtime`, log line timestamps, etc., the value is
+/// normalised to ISO-8601 and added to the timeline. Numeric epochs (seconds
+/// or milliseconds) and ISO-8601 strings are both accepted.
+pub fn derive_timeline(turns: &[AgentTurn], findings: &[Finding]) -> Vec<TimelineEvent> {
+    let mut events: Vec<TimelineEvent> = Vec::new();
+
+    let finding_idx_for = |turn_idx: usize, tool: Option<&str>| -> Option<usize> {
+        findings.iter().position(|f| {
+            f.evidence_pointer.turn == Some(turn_idx + 1)
+                && f.evidence_pointer.tool.as_deref() == tool
+        })
+    };
+
+    for (idx, turn) in turns.iter().enumerate() {
+        let Some(observation) = turn.observation.as_ref() else {
+            continue;
+        };
+        let tool_name = turn.tool_call.as_ref().map(|c| c.tool.clone());
+        let source_finding_idx = finding_idx_for(idx, tool_name.as_deref());
+
+        // Walk the observation tree looking for timestamp-bearing fields. For
+        // arrays of objects (e.g. scheduled tasks, autoruns), descend into
+        // each element so per-entry timestamps are captured individually.
+        collect_timeline_events_from_value(
+            observation,
+            &mut events,
+            tool_name.as_deref(),
+            source_finding_idx,
+            None,
+        );
+    }
+
+    // Sort ascending by timestamp; ties keep original insertion order via
+    // stable sort.
+    events.sort_by(|a, b| a.ts.cmp(&b.ts));
+    events
+}
+
+/// Recognised timestamp keys mapped to event-type labels (#196).
+const TIMELINE_KEY_LABELS: &[(&str, &str)] = &[
+    ("created_at", "resource_created"),
+    ("creation_time", "resource_created"),
+    ("creationtime", "resource_created"),
+    ("modified_at", "resource_modified"),
+    ("last_modified", "resource_modified"),
+    ("mtime", "resource_modified"),
+    ("next_run", "scheduled_task_next_run"),
+    ("next_run_time", "scheduled_task_next_run"),
+    ("nextruntime", "scheduled_task_next_run"),
+    ("last_run", "scheduled_task_last_run"),
+    ("last_run_time", "scheduled_task_last_run"),
+    ("last_login", "account_login"),
+    ("last_logon", "account_login"),
+    ("password_last_set", "password_changed"),
+    ("event_time", "event_observed"),
+    ("timestamp", "event_observed"),
+];
+
+fn collect_timeline_events_from_value(
+    value: &Value,
+    events: &mut Vec<TimelineEvent>,
+    source_tool: Option<&str>,
+    source_finding_idx: Option<usize>,
+    parent_label: Option<&str>,
+) {
+    match value {
+        Value::Object(map) => {
+            // Build a context label from "name" / "path" / "source" if present
+            // so the detail string is meaningful when nested.
+            let context: Option<String> = ["name", "path", "source", "task_name", "account"]
+                .iter()
+                .find_map(|k| map.get(*k).and_then(Value::as_str).map(|s| s.to_string()));
+            let label_for_children = context.as_deref().or(parent_label);
+
+            for (key, child) in map.iter() {
+                let lower = key.to_ascii_lowercase();
+                if let Some((_, event_type)) = TIMELINE_KEY_LABELS
+                    .iter()
+                    .find(|(k, _)| *k == lower.as_str())
+                {
+                    if let Some(ts) = normalise_timestamp(child) {
+                        let detail = match label_for_children {
+                            Some(label) => format!("{event_type}: {label}"),
+                            None => event_type.to_string(),
+                        };
+                        events.push(TimelineEvent {
+                            ts,
+                            event: event_type.to_string(),
+                            detail,
+                            source_finding_idx,
+                            source_tool: source_tool.map(|s| s.to_string()),
+                        });
+                    }
+                } else {
+                    // Recurse into nested objects/arrays.
+                    collect_timeline_events_from_value(
+                        child,
+                        events,
+                        source_tool,
+                        source_finding_idx,
+                        label_for_children,
+                    );
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_timeline_events_from_value(
+                    item,
+                    events,
+                    source_tool,
+                    source_finding_idx,
+                    parent_label,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Coerce a JSON value to an ISO-8601 string when it looks like a timestamp.
+fn normalise_timestamp(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            // Pass-through if it already looks like ISO-8601.
+            if trimmed.contains('T') && (trimmed.ends_with('Z') || trimmed.contains('+')) {
+                return Some(trimmed.to_string());
+            }
+            // Try parsing as integer epoch.
+            if let Ok(epoch) = trimmed.parse::<i64>() {
+                return Some(epoch_seconds_to_iso8601(coerce_epoch(epoch)));
+            }
+            None
+        }
+        Value::Number(n) => {
+            if let Some(epoch) = n.as_i64() {
+                Some(epoch_seconds_to_iso8601(coerce_epoch(epoch)))
+            } else {
+                n.as_f64()
+                    .map(|f| epoch_seconds_to_iso8601(coerce_epoch(f as i64)))
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Treat any value larger than year-2300 seconds as a millisecond epoch.
+fn coerce_epoch(epoch: i64) -> i64 {
+    const YEAR_2300_SECS: i64 = 10_413_792_000;
+    if epoch.abs() > YEAR_2300_SECS {
+        epoch / 1000
+    } else {
+        epoch
+    }
+}
+
+fn is_leap_year(y: i64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+/// Format a non-negative Unix epoch (seconds) as `YYYY-MM-DDTHH:MM:SSZ`.
+pub fn epoch_seconds_to_iso8601(epoch: i64) -> String {
+    if epoch < 0 {
+        return "1970-01-01T00:00:00Z".to_string();
+    }
+    let secs = epoch as u64;
+    let s = secs % 60;
+    let m = (secs / 60) % 60;
+    let h = (secs / 3600) % 24;
+    let mut days = secs / 86400;
+
+    let mut year: i64 = 1970;
+    loop {
+        let len = if is_leap_year(year) { 366 } else { 365 };
+        if (days as i64) < len {
+            break;
+        }
+        days -= len as u64;
+        year += 1;
+    }
+
+    const MONTH_DAYS: [u64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month: u64 = 1;
+    for (i, &md) in MONTH_DAYS.iter().enumerate() {
+        let days_this_month = if i == 1 && is_leap_year(year) { 29 } else { md };
+        if days < days_this_month {
+            break;
+        }
+        days -= days_this_month;
+        month += 1;
+    }
+    let day = days + 1;
+    format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
 /// Tool authority ranking — higher means this tool's findings should be preferred
 /// when two tools produce findings for the same observation field.
 fn tool_authority(tool: Option<&str>) -> u8 {
@@ -1695,9 +1917,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        deduplicate_findings, derive_findings, extract_tag, is_low_quality, max_severity,
-        parse_tool_call, quality_checked_final_answer, sort_findings, AgentTurn, EvidencePointer,
-        Finding, FindingSeverity, ToolCall,
+        deduplicate_findings, derive_findings, derive_timeline, epoch_seconds_to_iso8601,
+        extract_tag, is_low_quality, max_severity, parse_tool_call, quality_checked_final_answer,
+        sort_findings, AgentTurn, EvidencePointer, Finding, FindingSeverity, ToolCall,
     };
 
     #[test]
@@ -2041,6 +2263,79 @@ mod tests {
         assert!(FindingSeverity::High > FindingSeverity::Medium);
         assert!(FindingSeverity::Medium > FindingSeverity::Low);
         assert!(FindingSeverity::Low > FindingSeverity::Info);
+    }
+
+    // ── Timeline reconstruction tests (#196) ──
+
+    #[test]
+    fn epoch_seconds_to_iso8601_unix_epoch() {
+        assert_eq!(epoch_seconds_to_iso8601(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn epoch_seconds_to_iso8601_known_timestamp() {
+        // 2025-04-24T00:00:00Z = 1745452800
+        assert_eq!(
+            epoch_seconds_to_iso8601(1_745_452_800),
+            "2025-04-24T00:00:00Z"
+        );
+    }
+
+    #[test]
+    fn derive_timeline_extracts_creation_and_next_run() {
+        let turns = vec![AgentTurn {
+            thought: "x".to_string(),
+            tool_call: Some(ToolCall {
+                tool: "enumerate_scheduled_tasks".to_string(),
+                args: json!({}),
+            }),
+            observation: Some(json!({
+                "tasks": [
+                    {
+                        "name": "OneDrive Standalone Update Task",
+                        "creation_time": "2024-09-01T08:00:00Z",
+                        "next_run_time": "2026-04-30T08:00:00Z"
+                    },
+                    {
+                        "name": "ChromeUpdate",
+                        "next_run_time": 1_745_452_800_i64
+                    }
+                ]
+            })),
+            elapsed_ms: None,
+        }];
+        let findings = derive_findings(&turns, "");
+        let timeline = derive_timeline(&turns, &findings);
+        assert!(
+            timeline.len() >= 3,
+            "expected ≥3 timeline events, got {}",
+            timeline.len()
+        );
+        // Sorted ascending
+        for window in timeline.windows(2) {
+            assert!(window[0].ts <= window[1].ts, "timeline must be sorted");
+        }
+        // Detail string carries the task name from the surrounding object.
+        assert!(timeline.iter().any(|e| e.detail.contains("OneDrive")));
+    }
+
+    #[test]
+    fn derive_timeline_skips_observations_with_no_timestamps() {
+        let turns = vec![AgentTurn {
+            thought: "x".to_string(),
+            tool_call: Some(ToolCall {
+                tool: "scan_network".to_string(),
+                args: json!({}),
+            }),
+            observation: Some(json!({"listener_count": 5, "ports": [80, 443]})),
+            elapsed_ms: None,
+        }];
+        let findings = derive_findings(&turns, "");
+        let timeline = derive_timeline(&turns, &findings);
+        assert!(
+            timeline.is_empty(),
+            "no timestamps in observation → empty timeline"
+        );
     }
 
     // ── Capability tiering tests (#77) ──
