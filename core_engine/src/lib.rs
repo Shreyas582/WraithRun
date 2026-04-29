@@ -1375,7 +1375,8 @@ fn coerce_epoch(epoch: i64) -> i64 {
 }
 
 fn is_leap_year(y: i64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    let yu = y.unsigned_abs();
+    (yu.is_multiple_of(4) && !yu.is_multiple_of(100)) || yu.is_multiple_of(400)
 }
 
 /// Format a non-negative Unix epoch (seconds) as `YYYY-MM-DDTHH:MM:SSZ`.
