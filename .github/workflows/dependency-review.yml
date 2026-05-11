@@ -43,4 +43,4 @@ jobs:
 
       - name: Dependency review
         if: steps.depgraph.outputs.enabled == 'true'
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
